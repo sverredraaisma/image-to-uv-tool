@@ -36,11 +36,14 @@ export function Canvas() {
   useEffect(() => {
     setRfNodes((prev) =>
       storeNodes.map((n) => {
+        // Use the store position (during a drag the store isn't updated until
+        // drag-stop, so there's no snap-back — and undo/load must apply their
+        // restored positions). Selection is local-only, so preserve it.
         const existing = prev.find((p) => p.id === n.id);
         return {
           id: n.id,
           type: 'imageTool',
-          position: existing?.position ?? n.position,
+          position: n.position,
           selected: existing?.selected ?? false,
           data: {},
         };
