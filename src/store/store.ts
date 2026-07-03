@@ -20,6 +20,7 @@ import {
 } from '../engine/graph';
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
+import { createSafeStorage } from './safeStorage';
 import '../nodes'; // side-effect: register built-in node definitions
 
 // ---------------------------------------------------------------------------
@@ -540,7 +541,17 @@ export const useStore = create<StoreState>()(
     }),
     {
       name: 'node-image-tool',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() =>
+        createSafeStorage(localStorage, () => {
+          try {
+            useStore
+              .getState()
+              .addToast('error', 'Local storage is full — large images may not persist across reloads.');
+          } catch {
+            /* store not ready */
+          }
+        }),
+      ),
       // Persist the graph + settings, but never the (regenerable) runtime.
       partialize: (s) => ({
         nodes: s.nodes,
