@@ -2,24 +2,8 @@ import { useMemo, useRef, useState } from 'react';
 import { useStore } from '../store/store';
 import { allNodeDefs } from '../engine/registry';
 import { downloadText } from '../lib/download';
+import { buildNodeMenu } from './nodeMenu';
 import type { SavedGraph } from '../types';
-
-// Menus present categories and AI capability groups in a deliberate order
-// rather than registration order.
-const CATEGORY_ORDER = ['Input', 'Compose', 'Adjust', 'Transform', 'Mask', 'Export', 'AI (Replicate)', 'AI (OpenRouter)'];
-const GROUP_ORDER = ['Generate', 'Segment', 'Depth', 'Background removal', 'Restore & upscale', 'Describe', 'Custom'];
-const rank = (order: string[], v: string) => {
-  const i = order.indexOf(v);
-  return i < 0 ? order.length : i;
-};
-
-interface MenuItem {
-  type: string;
-  label: string;
-  description?: string;
-  category: string;
-  group: string;
-}
 
 function AddNodeMenu() {
   const addNode = useStore((s) => s.addNode);
@@ -27,30 +11,8 @@ function AddNodeMenu() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
-  const items = useMemo<MenuItem[]>(
-    () =>
-      allNodeDefs()
-        .filter((d) => !d.type.startsWith('test.'))
-        .map((d) => ({
-          type: d.type,
-          label: d.label,
-          description: d.description,
-          category: d.category,
-          group: d.group ?? '',
-        })),
-    [],
-  );
-
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? items.filter((i) =>
-        `${i.label} ${i.description ?? ''} ${i.category} ${i.group}`.toLowerCase().includes(q),
-      )
-    : items;
-
-  const categories = [...new Set(filtered.map((i) => i.category))].sort(
-    (a, b) => rank(CATEGORY_ORDER, a) - rank(CATEGORY_ORDER, b) || a.localeCompare(b),
-  );
+  const nodes = useMemo(() => allNodeDefs(), []);
+  const menu = buildNodeMenu(nodes, query);
 
   const close = () => {
     setOpen(false);
@@ -77,37 +39,28 @@ function AddNodeMenu() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            {categories.length === 0 && <div className="menu-empty">No matching nodes</div>}
-            {categories.map((category) => {
-              const catItems = filtered.filter((i) => i.category === category);
-              const groups = [...new Set(catItems.map((i) => i.group))].sort(
-                (a, b) => rank(GROUP_ORDER, a) - rank(GROUP_ORDER, b) || a.localeCompare(b),
-              );
-              return (
-                <div className="menu-group" key={category}>
-                  <div className="menu-group-title">{category}</div>
-                  {groups.map((group) => (
-                    <div key={group || '_'}>
-                      {group && <div className="menu-subgroup-title">{group}</div>}
-                      {catItems
-                        .filter((i) => i.group === group)
-                        .sort((a, b) => a.label.localeCompare(b.label))
-                        .map((item) => (
-                          <button
-                            key={item.type}
-                            type="button"
-                            className="menu-item"
-                            title={item.description}
-                            onClick={() => pick(item.type)}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
+            {menu.length === 0 && <div className="menu-empty">No matching nodes</div>}
+            {menu.map((cat) => (
+              <div className="menu-group" key={cat.category}>
+                <div className="menu-group-title">{cat.category}</div>
+                {cat.groups.map((g) => (
+                  <div key={g.group || '_'}>
+                    {g.group && <div className="menu-subgroup-title">{g.group}</div>}
+                    {g.items.map((item) => (
+                      <button
+                        key={item.type}
+                        type="button"
+                        className="menu-item"
+                        title={item.description}
+                        onClick={() => pick(item.type)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         </>
       )}
