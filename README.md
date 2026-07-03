@@ -103,7 +103,7 @@ settling with a stale result.
 | **Depth** | AI (Replicate) | manual | Depth Anything v2 — `model_size`; grey + colour depth outputs. |
 | **Segment** | AI (Replicate) | manual | SAM 2, SAM 3 (concept), Grounded SAM (mask / inverted / annotated / neg-annotated outputs). |
 | **Background removal** | AI (Replicate) | manual | BiRefNet, rembg / IS-Net. |
-| **Restore & upscale** | AI (Replicate) | manual | Real-ESRGAN, GFPGAN (face restore), Colorize (DDColor), Clarity Upscaler. |
+| **Restore & upscale** | AI (Replicate) | manual | Real-ESRGAN, GFPGAN, CodeFormer (face restore), Colorize (DDColor), Clarity Upscaler. |
 | **Describe** (image→text) | AI (Replicate) | manual | Image Caption (BLIP), Moondream (VLM), CLIP Interrogator, OCR (text extract). |
 | **Custom** | AI (Replicate) | manual | Replicate (custom) — any model: set the slug, wire images/prompt, add anything else via JSON. |
 | **LLMs** | AI (OpenRouter) | manual | Llama 3.1 8B, Gemini Flash, GPT-4o mini, custom — a prompt plus optional wired text input → text. |

@@ -459,6 +459,20 @@ export const aiNodes: NodeDefinition[] = [
       { field: { kind: 'number', key: 'scale_factor', label: 'Scale factor', min: 1, max: 4, step: 1 }, default: 2 },
     ],
   }),
+  makeReplicateNode({
+    type: 'codeformer',
+    label: 'CodeFormer face restore',
+    group: 'Restore & upscale',
+    description: 'Face restoration with adjustable fidelity (sczhou/codeformer).',
+    model: 'sczhou/codeformer',
+    ports: [IMAGE()],
+    scalars: [
+      {
+        field: { kind: 'number', key: 'codeformer_fidelity', label: 'Fidelity', min: 0, max: 1, step: 0.05 },
+        default: 0.7,
+      },
+    ],
+  }),
 
   // ---- Image → text (captioning / VLM) ----
   makeReplicateNode({
