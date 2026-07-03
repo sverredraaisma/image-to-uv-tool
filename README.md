@@ -77,6 +77,7 @@ settling with a stale result.
 | Solid Colour | Input | auto | Generate a solid colour image of a given size. |
 | Combine | Compose | auto | Blend a base image **A** with a secondary image **B** (A over B, B over A, max, multiply, subtract, screen…). |
 | Apply Mask | Mask | auto | Use a mask's luminance as the image's alpha. |
+| Flatten | Compose | auto | Composite over a solid background colour (removes transparency). |
 | Invert | Adjust | auto | Invert selected R/G/B/A channels. |
 | Greyscale | Adjust | auto | Desaturate to luminance. |
 | Brightness / Contrast | Adjust | auto | Adjust brightness and contrast. |

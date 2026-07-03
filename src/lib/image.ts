@@ -669,6 +669,19 @@ export function colorKeyMask(
   return out;
 }
 
+/** Composite over a solid background colour, making every pixel opaque. */
+export function flatten(img: RasterImage, bg: [number, number, number]): RasterImage {
+  const out = cloneImage(img);
+  for (let i = 0; i < out.data.length; i += 4) {
+    const a = img.data[i + 3] / 255;
+    out.data[i] = img.data[i] * a + bg[0] * (1 - a);
+    out.data[i + 1] = img.data[i + 1] * a + bg[1] * (1 - a);
+    out.data[i + 2] = img.data[i + 2] * a + bg[2] * (1 - a);
+    out.data[i + 3] = 255;
+  }
+  return out;
+}
+
 /** Mosaic / pixelate: downscale by `blockSize` then nearest-upscale back. */
 export function pixelate(img: RasterImage, blockSize: number): RasterImage {
   const b = Math.max(1, Math.floor(blockSize));

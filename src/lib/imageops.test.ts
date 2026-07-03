@@ -8,6 +8,7 @@ import {
   crop,
   downscaleToMax,
   extractChannel,
+  flatten,
   gradientMap,
   grayscale,
   hueSaturation,
@@ -131,6 +132,14 @@ describe('downscaleToMax', () => {
   it('leaves small images and maxDim<=0 unchanged', () => {
     expect(downscaleToMax(createImage(40, 30), 100).width).toBe(40);
     expect(downscaleToMax(createImage(200, 200), 0).width).toBe(200);
+  });
+});
+
+describe('flatten', () => {
+  it('transparent pixels take the background; opaque pixels are unchanged, all opaque', () => {
+    const bg: [number, number, number] = [200, 200, 200];
+    expect(px(flatten(createImage(1, 1, [100, 50, 25, 0]), bg), 0, 0)).toEqual([200, 200, 200, 255]);
+    expect(px(flatten(createImage(1, 1, [100, 50, 25, 255]), bg), 0, 0)).toEqual([100, 50, 25, 255]);
   });
 });
 

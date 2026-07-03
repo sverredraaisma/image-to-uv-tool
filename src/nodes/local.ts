@@ -13,6 +13,7 @@ import {
   crop,
   downscaleToMax,
   extractChannel,
+  flatten,
   gradientMap,
   grayscale,
   hexToRgba,
@@ -190,6 +191,17 @@ export const applyMaskNode: NodeDefinition = {
     return { out: applyMask(img, mask) };
   },
 };
+
+export const flattenNode = singleImageOp({
+  type: 'flatten',
+  label: 'Flatten',
+  category: 'Compose',
+  description: 'Composite over a solid background colour (removes transparency).',
+  configFields: [{ kind: 'color', key: 'background', label: 'Background' }],
+  defaultConfig: () => ({ background: '#ffffff' }),
+  op: (img, config) =>
+    flatten(img, hexToRgba(str(config.background, '#ffffff')).slice(0, 3) as [number, number, number]),
+});
 
 // ---- Adjust ----
 
@@ -591,6 +603,7 @@ export const localNodes: NodeDefinition[] = [
   solidColorNode,
   combineNode,
   applyMaskNode,
+  flattenNode,
   invertNode,
   grayscaleNode,
   brightnessContrastNode,
