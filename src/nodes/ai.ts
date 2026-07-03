@@ -289,6 +289,16 @@ export const aiNodes: NodeDefinition[] = [
     ports: [IMAGE({ key: 'input_image' }), PROMPT({ label: 'Instruction' })],
   }),
 
+  // ---- Stylize ----
+  makeReplicateNode({
+    type: 'animeGan',
+    label: 'AnimeGAN v2',
+    group: 'Stylize',
+    description: 'Cartoon / anime stylisation of a photo (412392713/animegan-v2).',
+    model: '412392713/animegan-v2',
+    ports: [IMAGE()],
+  }),
+
   // ---- Depth ----
   makeReplicateNode({
     type: 'depthAnythingV2',

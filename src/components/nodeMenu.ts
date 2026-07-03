@@ -34,6 +34,7 @@ export const CATEGORY_ORDER = [
 export const GROUP_ORDER = [
   'Generate',
   'Edit',
+  'Stylize',
   'Segment',
   'Depth',
   'Background removal',
