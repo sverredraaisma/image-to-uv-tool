@@ -261,6 +261,14 @@ export const aiNodes: NodeDefinition[] = [
     model: 'black-forest-labs/flux-canny-dev',
     ports: [IMAGE({ key: 'control_image', label: 'Control image' }), PROMPT()],
   }),
+  makeReplicateNode({
+    type: 'fluxKontext',
+    label: 'Flux Kontext',
+    group: 'Edit',
+    description: 'High-quality instruction-based image editing (black-forest-labs/flux-kontext-pro).',
+    model: 'black-forest-labs/flux-kontext-pro',
+    ports: [IMAGE({ key: 'input_image' }), PROMPT({ label: 'Instruction' })],
+  }),
 
   // ---- Depth ----
   makeReplicateNode({
