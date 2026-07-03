@@ -1,0 +1,204 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { useStore } from './store';
+import { registerNode } from '../engine/registry';
+import { asText } from '../nodes/helpers';
+import type { NodeDefinition } from '../types';
+
+// --- Synthetic test nodes (unique "test.*" types so they don't clash) -------
+const runCounts: Record<string, number> = {};
+const bump = (k: string) => (runCounts[k] = (runCounts[k] ?? 0) + 1);
+
+const constNode: NodeDefinition = {
+  type: 'test.const',
+  label: 'Const',
+  category: 'test',
+  autoRun: true,
+  inputs: [],
+  outputs: [{ id: 'out', label: 'out', type: 'text' }],
+  defaultConfig: () => ({ v: '0' }),
+  compute: ({ config }) => {
+    bump('const');
+    return { out: { kind: 'text', text: String(config.v) } };
+  },
+};
+const passNode: NodeDefinition = {
+  type: 'test.pass',
+  label: 'Pass',
+  category: 'test',
+  autoRun: true,
+  inputs: [{ id: 'in', label: 'in', type: 'text' }],
+  outputs: [{ id: 'out', label: 'out', type: 'text' }],
+  defaultConfig: () => ({}),
+  compute: ({ inputs }) => {
+    bump('pass');
+    return { out: { kind: 'text', text: asText(inputs.in) ?? '' } };
+  },
+};
+const manualNode: NodeDefinition = {
+  type: 'test.manual',
+  label: 'Manual',
+  category: 'test',
+  autoRun: false,
+  inputs: [{ id: 'in', label: 'in', type: 'text' }],
+  outputs: [{ id: 'out', label: 'out', type: 'text' }],
+  defaultConfig: () => ({}),
+  compute: ({ inputs }) => {
+    bump('manual');
+    return { out: { kind: 'text', text: `M:${asText(inputs.in) ?? ''}` } };
+  },
+};
+const imageInNode: NodeDefinition = {
+  type: 'test.imgIn',
+  label: 'ImgIn',
+  category: 'test',
+  autoRun: true,
+  inputs: [{ id: 'in', label: 'in', type: 'image' }],
+  outputs: [{ id: 'out', label: 'out', type: 'image' }],
+  defaultConfig: () => ({}),
+  compute: () => ({ out: undefined }),
+};
+[constNode, passNode, manualNode, imageInNode].forEach(registerNode);
+
+const store = () => useStore.getState();
+
+beforeEach(() => {
+  localStorage.clear();
+  useStore.setState({
+    nodes: [],
+    edges: [],
+    runtime: {},
+    epochs: {},
+    apiKey: '',
+    proxyUrl: '',
+    pendingConnection: null,
+    selectedNodeId: null,
+    editorNodeId: null,
+    preview: null,
+    toasts: [],
+  });
+  for (const k of Object.keys(runCounts)) delete runCounts[k];
+});
+
+async function buildChain() {
+  const a = store().addNode('test.const');
+  store().updateNodeConfig(a, { v: '5' });
+  const b = store().addNode('test.pass');
+  const c = store().addNode('test.manual');
+  store().addConnection({ source: a, sourceHandle: 'out', target: b, targetHandle: 'in' });
+  store().addConnection({ source: b, sourceHandle: 'out', target: c, targetHandle: 'in' });
+  await store().processAutoRun();
+  return { a, b, c };
+}
+
+describe('auto-run scheduling', () => {
+  it('runs auto nodes and propagates values, leaving manual nodes stale', async () => {
+    const { a, b, c } = await buildChain();
+    const rt = store().runtime;
+    expect(rt[a].status).toBe('upToDate');
+    expect(rt[b].status).toBe('upToDate');
+    expect((rt[b].outputs.out as { text: string }).text).toBe('5');
+    // manual node never auto-runs
+    expect(rt[c].status).toBe('outOfDate');
+    expect(runCounts.manual ?? 0).toBe(0);
+  });
+
+  it('re-runs downstream auto nodes when an upstream config changes', async () => {
+    const { a, b, c } = await buildChain();
+    store().updateNodeConfig(a, { v: '9' });
+    await store().processAutoRun();
+    expect((store().runtime[b].outputs.out as { text: string }).text).toBe('9');
+    // the manual descendant becomes out of date again
+    expect(store().runtime[c].status).toBe('outOfDate');
+  });
+});
+
+describe('manual run', () => {
+  it('runNode runs a manual node after resolving its ancestors', async () => {
+    const { c } = await buildChain();
+    await store().runNode(c);
+    expect(store().runtime[c].status).toBe('upToDate');
+    expect((store().runtime[c].outputs.out as { text: string }).text).toBe('M:5');
+    expect(runCounts.manual).toBe(1);
+  });
+});
+
+describe('bring up to date', () => {
+  it('cascades downward and forces manual nodes to run', async () => {
+    const { a, c } = await buildChain();
+    expect(store().runtime[c].status).toBe('outOfDate');
+    await store().bringUpToDate(a);
+    expect(store().runtime[c].status).toBe('upToDate');
+    expect((store().runtime[c].outputs.out as { text: string }).text).toBe('M:5');
+  });
+});
+
+describe('connection validation', () => {
+  it('rejects incompatible types with a toast', async () => {
+    const a = store().addNode('test.const'); // text output
+    const img = store().addNode('test.imgIn'); // image input
+    await store().processAutoRun();
+    const ok = store().addConnection({ source: a, sourceHandle: 'out', target: img, targetHandle: 'in' });
+    expect(ok).toBe(false);
+    expect(store().edges).toHaveLength(0);
+    expect(store().toasts.some((t) => /incompatible/i.test(t.message))).toBe(true);
+  });
+
+  it('rejects a connection that would create a cycle', async () => {
+    const p1 = store().addNode('test.pass');
+    const p2 = store().addNode('test.pass');
+    await store().processAutoRun();
+    expect(store().addConnection({ source: p1, sourceHandle: 'out', target: p2, targetHandle: 'in' })).toBe(true);
+    const ok = store().addConnection({ source: p2, sourceHandle: 'out', target: p1, targetHandle: 'in' });
+    expect(ok).toBe(false);
+    expect(store().toasts.some((t) => /cycle/i.test(t.message))).toBe(true);
+  });
+
+  it('a single (non-multiple) input replaces its existing connection', async () => {
+    const a = store().addNode('test.const');
+    const a2 = store().addNode('test.const');
+    const b = store().addNode('test.pass');
+    await store().processAutoRun();
+    store().addConnection({ source: a, sourceHandle: 'out', target: b, targetHandle: 'in' });
+    store().addConnection({ source: a2, sourceHandle: 'out', target: b, targetHandle: 'in' });
+    const into = store().edges.filter((e) => e.target === b && e.targetHandle === 'in');
+    expect(into).toHaveLength(1);
+    expect(into[0].source).toBe(a2);
+  });
+});
+
+describe('persistence', () => {
+  it('persists graph + settings but never runtime outputs', async () => {
+    await buildChain();
+    store().setApiKey('secret-key');
+    const raw = localStorage.getItem('node-image-tool');
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw as string);
+    expect(parsed.state.nodes).toHaveLength(3);
+    expect(parsed.state.apiKey).toBe('secret-key');
+    expect(parsed.state.runtime).toBeUndefined();
+    expect(raw).not.toContain('outOfDate');
+  });
+
+  it('exportGraph / loadGraph round-trips the graph', async () => {
+    const { a } = await buildChain();
+    const saved = store().exportGraph();
+    expect(saved.nodes).toHaveLength(3);
+    useStore.setState({ nodes: [], edges: [], runtime: {} });
+    store().loadGraph(saved);
+    await store().processAutoRun();
+    expect(store().nodes.some((n) => n.id === a)).toBe(true);
+    expect(store().edges).toHaveLength(2);
+  });
+});
+
+describe('node + edge removal', () => {
+  it('removing a node drops its edges and downstream goes stale', async () => {
+    const { a, b } = await buildChain();
+    store().removeNode(a);
+    await store().processAutoRun();
+    expect(store().nodes.some((n) => n.id === a)).toBe(false);
+    expect(store().edges.some((e) => e.source === a)).toBe(false);
+    // b lost its input -> recomputed to empty
+    expect((store().runtime[b].outputs.out as { text: string }).text).toBe('');
+  });
+});
