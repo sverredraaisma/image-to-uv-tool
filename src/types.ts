@@ -105,6 +105,8 @@ export interface NodeDefinition {
   type: string;
   label: string;
   category: string;
+  /** Optional sub-group within a category (e.g. AI capability: "Generate"). */
+  group?: string;
   description?: string;
   /**
    * Auto-run nodes recompute automatically as soon as all their inputs are up

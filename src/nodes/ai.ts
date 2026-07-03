@@ -44,6 +44,8 @@ interface AiSpec {
   type: string;
   label: string;
   description: string;
+  /** Capability group for menu sorting (Generate, Segment, Describe…). */
+  group: string;
   /** Default `owner/name` or `owner/name:version` slug (editable). */
   model: string;
   ports: AiPort[];
@@ -130,6 +132,7 @@ function makeReplicateNode(spec: AiSpec): NodeDefinition {
     type: spec.type,
     label: spec.label,
     category: 'AI (Replicate)',
+    group: spec.group,
     description: spec.description,
     autoRun: false,
     inputs,
@@ -212,10 +215,53 @@ const IMAGE: (over?: Partial<AiPort>) => AiPort = (over = {}) => ({
   ...over,
 });
 
+const PROMPT = (over: Partial<AiPort> = {}): AiPort => ({
+  id: 'prompt',
+  label: 'Prompt',
+  type: 'text',
+  key: 'prompt',
+  required: true,
+  ...over,
+});
+
 export const aiNodes: NodeDefinition[] = [
+  // ---- Generate (text → image) ----
+  makeReplicateNode({
+    type: 'fluxSchnell',
+    label: 'Flux Schnell',
+    group: 'Generate',
+    description: 'Fast text-to-image generation (black-forest-labs/flux-schnell).',
+    model: 'black-forest-labs/flux-schnell',
+    ports: [PROMPT()],
+    scalars: [
+      {
+        field: {
+          kind: 'select',
+          key: 'aspect_ratio',
+          label: 'Aspect ratio',
+          options: ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9'].map((v) => ({ value: v, label: v })),
+        },
+        default: '1:1',
+      },
+    ],
+  }),
+  makeReplicateNode({
+    type: 'sdxl',
+    label: 'SDXL',
+    group: 'Generate',
+    description: 'Stable Diffusion XL text-to-image (stability-ai/sdxl).',
+    model: 'stability-ai/sdxl',
+    ports: [
+      PROMPT(),
+      { id: 'negative_prompt', label: 'Negative prompt', type: 'text', key: 'negative_prompt', required: false },
+    ],
+  }),
+
+  // ---- Depth ----
   makeReplicateNode({
     type: 'depthAnythingV2',
     label: 'Depth Anything v2',
+    group: 'Depth',
     description: 'Monocular depth estimation (chenxwh/depth-anything-v2). Grey + colour depth outputs.',
     model: 'chenxwh/depth-anything-v2',
     ports: [IMAGE()],
@@ -239,9 +285,11 @@ export const aiNodes: NodeDefinition[] = [
       { id: 'color', label: 'Colour depth', type: 'image', key: 'color_depth' },
     ],
   }),
+  // ---- Segment ----
   makeReplicateNode({
     type: 'sam2Image',
     label: 'SAM 2 (image)',
+    group: 'Segment',
     description:
       'Segment Anything 2, automatic masks. Verified slug: meta/sam-2. Point/box prompts go in Extra inputs (JSON).',
     model: 'meta/sam-2',
@@ -250,6 +298,7 @@ export const aiNodes: NodeDefinition[] = [
   makeReplicateNode({
     type: 'sam3Concept',
     label: 'SAM 3 (concept)',
+    group: 'Segment',
     description:
       'Segment Anything 3 — segments everything matching a text concept. Default slug is the video model (lucataco/sam3-video); set an image SAM 3 slug/keys if you have one.',
     model: 'lucataco/sam3-video',
@@ -259,23 +308,9 @@ export const aiNodes: NodeDefinition[] = [
     ],
   }),
   makeReplicateNode({
-    type: 'birefnetV3',
-    label: 'BiRefNet',
-    description: 'High-accuracy background removal. Verified slug: men1scus/birefnet.',
-    model: 'men1scus/birefnet',
-    ports: [IMAGE()],
-  }),
-  makeReplicateNode({
-    type: 'isnetAnime',
-    label: 'Background removal (rembg)',
-    description:
-      'Background removal (rembg / IS-Net). Verified slug: cjwbw/rembg. For the isnet-anime variant set model_name via Extra inputs (JSON) if the chosen model supports it.',
-    model: 'cjwbw/rembg',
-    ports: [IMAGE()],
-  }),
-  makeReplicateNode({
     type: 'groundedSam',
     label: 'Grounded SAM',
+    group: 'Segment',
     description:
       'Text-prompted segmentation (Grounding DINO + SAM). Masks what the prompt describes; subtract a negative prompt. Slug: schananas/grounded_sam.',
     model: 'schananas/grounded_sam',
@@ -310,10 +345,65 @@ export const aiNodes: NodeDefinition[] = [
       { id: 'negAnnotated', label: 'Neg. annotated', type: 'image', index: 1 },
     ],
   }),
+
+  // ---- Background removal ----
+  makeReplicateNode({
+    type: 'birefnetV3',
+    label: 'BiRefNet',
+    group: 'Background removal',
+    description: 'High-accuracy background removal. Verified slug: men1scus/birefnet.',
+    model: 'men1scus/birefnet',
+    ports: [IMAGE()],
+  }),
+  makeReplicateNode({
+    type: 'isnetAnime',
+    label: 'Background removal (rembg)',
+    group: 'Background removal',
+    description:
+      'Background removal (rembg / IS-Net). Verified slug: cjwbw/rembg. For the isnet-anime variant set model_name via Extra inputs (JSON) if the chosen model supports it.',
+    model: 'cjwbw/rembg',
+    ports: [IMAGE()],
+  }),
+
+  // ---- Restore & upscale ----
+  makeReplicateNode({
+    type: 'realEsrgan',
+    label: 'Real-ESRGAN upscale',
+    group: 'Restore & upscale',
+    description: 'Upscale / enhance an image (nightmareai/real-esrgan).',
+    model: 'nightmareai/real-esrgan',
+    ports: [IMAGE()],
+    scalars: [
+      { field: { kind: 'number', key: 'scale', label: 'Scale', min: 1, max: 10, step: 1 }, default: 4 },
+      { field: { kind: 'boolean', key: 'face_enhance', label: 'Face enhance' }, default: false },
+    ],
+  }),
+  makeReplicateNode({
+    type: 'gfpgan',
+    label: 'GFPGAN face restore',
+    group: 'Restore & upscale',
+    description: 'Restore faces in an image (tencentarc/gfpgan).',
+    model: 'tencentarc/gfpgan',
+    ports: [IMAGE({ key: 'img' })],
+    scalars: [
+      {
+        field: {
+          kind: 'select',
+          key: 'version',
+          label: 'Version',
+          options: ['v1.2', 'v1.3', 'v1.4', 'RestoreFormer'].map((v) => ({ value: v, label: v })),
+        },
+        default: 'v1.4',
+      },
+      { field: { kind: 'number', key: 'scale', label: 'Scale', min: 1, max: 10, step: 1 }, default: 2 },
+    ],
+  }),
+
   // ---- Image → text (captioning / VLM) ----
   makeReplicateNode({
     type: 'blipCaption',
     label: 'Image Caption (BLIP)',
+    group: 'Describe',
     description:
       'Lightweight image captioning / VQA (salesforce/blip). Leave the question empty to caption, or ask a question.',
     model: 'salesforce/blip',
@@ -326,6 +416,7 @@ export const aiNodes: NodeDefinition[] = [
   makeReplicateNode({
     type: 'moondream',
     label: 'Moondream (VLM)',
+    group: 'Describe',
     description: 'Small vision-language model — ask a question about the image (lucataco/moondream2).',
     model: 'lucataco/moondream2',
     output: 'text',
@@ -335,8 +426,31 @@ export const aiNodes: NodeDefinition[] = [
     ],
   }),
   makeReplicateNode({
+    type: 'clipInterrogator',
+    label: 'CLIP Interrogator',
+    group: 'Describe',
+    description: 'Reverse-engineer a text prompt from an image (pharmapsychotic/clip-interrogator).',
+    model: 'pharmapsychotic/clip-interrogator',
+    output: 'text',
+    ports: [IMAGE()],
+    scalars: [
+      {
+        field: {
+          kind: 'select',
+          key: 'mode',
+          label: 'Mode',
+          options: ['best', 'fast', 'classic', 'negative'].map((v) => ({ value: v, label: v })),
+        },
+        default: 'best',
+      },
+    ],
+  }),
+
+  // ---- Custom ----
+  makeReplicateNode({
     type: 'replicateCustom',
     label: 'Replicate (custom)',
+    group: 'Custom',
     description:
       'Run any Replicate model. Set the slug, wire up to two images/masks + a prompt, and add any other inputs via Extra inputs (JSON).',
     model: '',

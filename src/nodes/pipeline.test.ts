@@ -248,4 +248,40 @@ describe('LLM + image-to-text (with stubbed fetch)', () => {
     expect(outs.grey?.kind).toBe('image');
     expect(outs.color?.kind).toBe('image');
   });
+
+  it('a text-to-image node runs from just a prompt (no image input)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.endsWith('/models/black-forest-labs/flux-schnell') && (init?.method ?? 'GET') === 'GET') {
+          return jsonResponse({ latest_version: null });
+        }
+        if (u.endsWith('/models/black-forest-labs/flux-schnell/predictions')) {
+          return jsonResponse({ id: 'p', status: 'succeeded', output: ['https://x/gen.png'] });
+        }
+        throw new Error(`unexpected ${u}`);
+      }),
+    );
+    useStore.setState({ apiKey: 'r8-key' });
+    const s = useStore.getState();
+    const p = s.addNode('promptInput');
+    s.updateNodeConfig(p, { text: 'a cat' });
+    const flux = s.addNode('fluxSchnell');
+    s.addConnection({ source: p, sourceHandle: 'out', target: flux, targetHandle: 'prompt' });
+    await useStore.getState().processAutoRun();
+
+    await useStore.getState().runNode(flux);
+    expect(useStore.getState().runtime[flux].status).toBe('upToDate');
+    expect(useStore.getState().runtime[flux].outputs.out?.kind).toBe('image');
+  });
+
+  it('a required prompt is enforced locally before calling the model', async () => {
+    useStore.setState({ apiKey: 'r8-key' });
+    const s = useStore.getState();
+    const flux = s.addNode('fluxSchnell');
+    await useStore.getState().runNode(flux);
+    expect(useStore.getState().runtime[flux].status).toBe('error');
+    expect(useStore.getState().runtime[flux].error).toMatch(/prompt/i);
+  });
 });
