@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/store';
 import { getNodeDefSafe } from '../engine/registry';
 import type { ConnectionSide } from '../store/store';
@@ -18,9 +18,23 @@ const STATUS_ICON: Record<string, { icon: string; cls: string; title: string }> 
 export function NodeView({ id, selected }: NodeProps) {
   const node = useStore((s) => s.nodes.find((n) => n.id === id));
   const rt = useStore((s) => s.runtime[id]);
-  const edges = useStore((s) => s.edges);
-  const runtime = useStore((s) => s.runtime);
   const pending = useStore((s) => s.pendingConnection);
+  const def = node ? getNodeDefSafe(node.type) : undefined;
+
+  // Subscribe only to this node's resolved input values (via shallow compare),
+  // so an unrelated node's status change doesn't re-render every node.
+  const inputValues = useStore(
+    useShallow((s) => {
+      const map: Record<string, DataValue | undefined> = {};
+      if (def) {
+        for (const port of def.inputs) {
+          const edge = s.edges.find((e) => e.target === id && e.targetHandle === port.id);
+          map[port.id] = edge ? s.runtime[edge.source]?.outputs?.[edge.sourceHandle] : undefined;
+        }
+      }
+      return map;
+    }),
+  );
 
   const clickPort = useStore((s) => s.clickPort);
   const runNode = useStore((s) => s.runNode);
@@ -30,18 +44,6 @@ export function NodeView({ id, selected }: NodeProps) {
   const openEditor = useStore((s) => s.openEditor);
   const openPreview = useStore((s) => s.openPreview);
   const updateNodeConfig = useStore((s) => s.updateNodeConfig);
-
-  const def = node ? getNodeDefSafe(node.type) : undefined;
-
-  const inputValues = useMemo(() => {
-    const map: Record<string, DataValue | undefined> = {};
-    if (!def) return map;
-    for (const port of def.inputs) {
-      const edge = edges.find((e) => e.target === id && e.targetHandle === port.id);
-      map[port.id] = edge ? runtime[edge.source]?.outputs?.[edge.sourceHandle] : undefined;
-    }
-    return map;
-  }, [def, edges, runtime, id]);
 
   if (!node || !def) {
     return (
