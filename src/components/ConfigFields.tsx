@@ -24,13 +24,12 @@ export function ConfigFields({
             <span className="config-label">{field.label}</span>
             {field.kind === 'number' && (
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 className="nodrag"
-                value={value == null ? '' : Number(value)}
-                min={field.min}
-                max={field.max}
-                step={field.step ?? 1}
-                onChange={(e) => set(e.target.value === '' ? 0 : Number(e.target.value))}
+                value={value == null ? '' : String(value)}
+                placeholder={field.min != null ? String(field.min) : ''}
+                onChange={(e) => set(e.target.value)}
               />
             )}
             {field.kind === 'text' && !field.multiline && (
