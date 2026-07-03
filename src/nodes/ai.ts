@@ -564,6 +564,15 @@ export const aiNodes: NodeDefinition[] = [
     ],
   }),
   makeReplicateNode({
+    type: 'llava',
+    label: 'LLaVA (VLM)',
+    group: 'Describe',
+    description: 'Larger vision-language model for detailed image Q&A (yorickvp/llava-13b).',
+    model: 'yorickvp/llava-13b',
+    output: 'text',
+    ports: [IMAGE(), { id: 'prompt', label: 'Question', type: 'text', key: 'prompt', required: false }],
+  }),
+  makeReplicateNode({
     type: 'clipInterrogator',
     label: 'CLIP Interrogator',
     group: 'Describe',
