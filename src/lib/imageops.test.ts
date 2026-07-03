@@ -17,6 +17,7 @@ import {
   morphology,
   pixelate,
   posterize,
+  sharpen,
   sobel,
   threshold,
   transform,
@@ -166,6 +167,16 @@ describe('vignette', () => {
     const v = vignette(img, 1);
     expect(px(v, 1, 1)).toEqual([200, 200, 200, 255]); // centre untouched
     expect(px(v, 0, 0)).toEqual([0, 0, 0, 255]); // corner darkened to black
+  });
+});
+
+describe('sharpen', () => {
+  it('leaves a uniform image unchanged (nothing to enhance)', () => {
+    expect(px(sharpen(createImage(3, 3, [120, 120, 120, 255]), 1), 1, 1)).toEqual([120, 120, 120, 255]);
+  });
+  it('amount 0 is a no-op copy', () => {
+    const img = createImage(2, 2, [1, 2, 3, 4]);
+    expect([...sharpen(img, 0).data]).toEqual([...img.data]);
   });
 });
 

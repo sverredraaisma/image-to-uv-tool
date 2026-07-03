@@ -424,6 +424,19 @@ export function boxBlur(img: RasterImage, radius: number): RasterImage {
   return blurPass(blurPass(img, r, true), r, false);
 }
 
+/** Unsharp-mask sharpening: add `amount` × (image − blurred image). Alpha kept. */
+export function sharpen(img: RasterImage, amount: number): RasterImage {
+  if (amount <= 0) return cloneImage(img);
+  const blurred = boxBlur(img, 1);
+  const out = cloneImage(img);
+  for (let i = 0; i < out.data.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      out.data[i + c] = img.data[i + c] + amount * (img.data[i + c] - blurred.data[i + c]);
+    }
+  }
+  return out;
+}
+
 function blurPass(img: RasterImage, r: number, horizontal: boolean): RasterImage {
   const { width: w, height: h } = img;
   const out = createImage(w, h);

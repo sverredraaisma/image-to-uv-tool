@@ -26,6 +26,7 @@ import {
   pixelate,
   posterize,
   resize,
+  sharpen,
   sobel,
   threshold,
   vignette,
@@ -268,6 +269,16 @@ export const blurNode = singleImageOp({
   configFields: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 100, step: 1 }],
   defaultConfig: () => ({ radius: 2 }),
   op: (img, config) => boxBlur(img, num(config.radius, 2)),
+});
+
+export const sharpenNode = singleImageOp({
+  type: 'sharpen',
+  label: 'Sharpen',
+  category: 'Adjust',
+  description: 'Unsharp-mask sharpening.',
+  configFields: [{ kind: 'number', key: 'amount', label: 'Amount', min: 0, max: 5, step: 0.1 }],
+  defaultConfig: () => ({ amount: 1 }),
+  op: (img, config) => sharpen(img, num(config.amount, 1)),
 });
 
 export const gradientMapNode = singleImageOp({
@@ -609,6 +620,7 @@ export const localNodes: NodeDefinition[] = [
   brightnessContrastNode,
   thresholdNode,
   blurNode,
+  sharpenNode,
   levelsNode,
   gradientMapNode,
   hueSaturationNode,

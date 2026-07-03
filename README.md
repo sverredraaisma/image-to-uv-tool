@@ -84,6 +84,7 @@ settling with a stale result.
 | Brightness / Contrast | Adjust | auto | Adjust brightness and contrast. |
 | Threshold | Adjust | auto | Binarise by luminance to black/white. |
 | Box Blur | Adjust | auto | Blur by an adjustable pixel radius. |
+| Sharpen | Adjust | auto | Unsharp-mask sharpening. |
 | Levels | Adjust | auto | Remap tones with black/white points and midtone gamma. |
 | Gradient Map | Adjust | auto | Map luminance to a two-colour gradient. |
 | Edge Detect | Adjust | auto | Sobel edge detection (white edges on black — feeds ControlNet). |
