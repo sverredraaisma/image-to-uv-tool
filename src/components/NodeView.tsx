@@ -3,9 +3,10 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useStore } from '../store/store';
 import { getNodeDefSafe } from '../engine/registry';
 import type { ConnectionSide } from '../store/store';
-import type { DataValue, NodeDefinition, PortSpec } from '../types';
+import type { DataValue, PortSpec } from '../types';
 import { ConfigFields } from './ConfigFields';
 import { ValuePreview } from './ValuePreview';
+import { nodeWidth } from './nodeLayout';
 
 const STATUS_ICON: Record<string, { icon: string; cls: string; title: string }> = {
   outOfDate: { icon: '⚠', cls: 'status-stale', title: 'Out of date' },
@@ -13,23 +14,6 @@ const STATUS_ICON: Record<string, { icon: string; cls: string; title: string }> 
   error: { icon: '✕', cls: 'status-error', title: 'Error' },
   upToDate: { icon: '✓', cls: 'status-ok', title: 'Up to date' },
 };
-
-/**
- * Pick a comfortable node width from its content: the longest port label (which
- * sits next to a fixed-size preview) and the longest inline field label, with a
- * little extra room for multiline text fields. Simple nodes stay compact; busy
- * ones (many outputs, prompt fields) grow up to a cap.
- */
-function nodeWidth(def: NodeDefinition): number {
-  const longestPort = [...def.inputs, ...def.outputs].reduce((m, p) => Math.max(m, p.label.length), 0);
-  const fields = (def.configFields ?? []).filter((f) => !f.advanced);
-  const longestField = fields.reduce((m, f) => Math.max(m, f.label.length), 0);
-  const hasMultiline = fields.some((f) => f.kind === 'text' && f.multiline);
-  const portW = longestPort * 6.6 + 46 /* preview */ + 46 /* handle + gaps */;
-  const fieldW = longestField * 6.6 + 132 /* control + padding */;
-  const width = Math.max(214, portW, fieldW, hasMultiline ? 250 : 0);
-  return Math.round(Math.min(320, width));
-}
 
 export function NodeView({ id, selected }: NodeProps) {
   const node = useStore((s) => s.nodes.find((n) => n.id === id));
