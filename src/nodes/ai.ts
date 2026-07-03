@@ -184,6 +184,14 @@ export const aiNodes: NodeDefinition[] = [
       PROMPT({ required: false }),
     ],
   }),
+  makeReplicateNode({
+    type: 'faceToSticker',
+    label: 'Face to Sticker',
+    group: 'Stylize',
+    description: 'Turn a face photo into a sticker, prompt-guided (fofr/face-to-sticker).',
+    model: 'fofr/face-to-sticker',
+    ports: [IMAGE(), PROMPT({ required: false })],
+  }),
 
   // ---- Depth ----
   makeReplicateNode({

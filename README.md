@@ -99,7 +99,7 @@ settling with a stale result.
 | Heightmap → STL | Export | auto | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width. |
 | **Generate** (text→image) | AI (Replicate) | manual | Flux Schnell, Flux Dev, SDXL, SD 3.5, Recraft v3, Ideogram v2. |
 | **Edit** (image + prompt/mask) | AI (Replicate) | manual | Instruct Pix2Pix, Flux Kontext, Relight (IC-Light), SD Inpainting, Remove Object (LaMa, image + mask), Flux ControlNet (Canny). |
-| **Stylize** | AI (Replicate) | manual | AnimeGAN v2, Style Transfer (reference image + prompt). |
+| **Stylize** | AI (Replicate) | manual | AnimeGAN v2, Style Transfer (reference image + prompt), Face to Sticker. |
 | **Depth** | AI (Replicate) | manual | Depth Anything v2 (grey + colour outputs), Marigold. |
 | **Segment** | AI (Replicate) | manual | SAM 2, SAM 3 (concept), Grounded SAM (mask / inverted / annotated / neg-annotated outputs). |
 | **Background removal** | AI (Replicate) | manual | BiRefNet, rembg / IS-Net, Bria RMBG 2.0. |
