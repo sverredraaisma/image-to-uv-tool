@@ -63,6 +63,35 @@ describe('combine', () => {
     const out = combine([a, b], 'over');
     expect(px(out, 0, 0)).toEqual([0, 0, 255, 255]);
   });
+  it('min darkens per channel', () => {
+    const out = combine([solid(1, 1, [10, 200, 0, 255]), solid(1, 1, [50, 50, 50, 255])], 'min');
+    expect(px(out, 0, 0)).toEqual([10, 50, 0, 255]);
+  });
+  it('add clamps at 255', () => {
+    const out = combine([solid(1, 1, [100, 200, 0, 255]), solid(1, 1, [200, 100, 0, 255])], 'add');
+    expect(px(out, 0, 0)).toEqual([255, 255, 0, 255]);
+  });
+  it('subtract clamps at 0 (per channel, incl. alpha)', () => {
+    const out = combine([solid(1, 1, [100, 50, 0, 255]), solid(1, 1, [30, 80, 10, 255])], 'subtract');
+    expect(px(out, 0, 0)).toEqual([70, 0, 0, 0]);
+  });
+  it('difference is the absolute per-channel delta', () => {
+    const out = combine([solid(1, 1, [100, 50, 255, 255]), solid(1, 1, [30, 80, 10, 255])], 'difference');
+    expect(px(out, 0, 0)).toEqual([70, 30, 245, 0]);
+  });
+  it('average is the per-channel mean', () => {
+    const out = combine([solid(1, 1, [100, 0, 200, 100]), solid(1, 1, [200, 100, 0, 50])], 'average');
+    expect(px(out, 0, 0)).toEqual([150, 50, 100, 75]);
+  });
+  it('screen with black leaves A unchanged', () => {
+    const out = combine([solid(1, 1, [100, 200, 50, 255]), solid(1, 1, [0, 0, 0, 0])], 'screen');
+    expect(px(out, 0, 0)).toEqual([100, 200, 50, 255]);
+  });
+  it('B over A puts the second image on top', () => {
+    const a = solid(1, 1, [255, 0, 0, 0]); // transparent red
+    const b = solid(1, 1, [0, 0, 255, 255]); // opaque blue
+    expect(px(combine([a, b], 'under'), 0, 0)).toEqual([0, 0, 255, 255]);
+  });
   it('resizes mismatched inputs to the first image', () => {
     const a = solid(2, 2, [0, 0, 0, 255]);
     const b = solid(4, 4, [255, 255, 255, 255]);
