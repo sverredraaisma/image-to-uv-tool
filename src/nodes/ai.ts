@@ -505,6 +505,14 @@ export const aiNodes: NodeDefinition[] = [
       },
     ],
   }),
+  makeReplicateNode({
+    type: 'supir',
+    label: 'SUPIR restore',
+    group: 'Restore & upscale',
+    description: 'High-quality photo restoration + upscale, optionally prompt-guided (zsxkib/supir).',
+    model: 'zsxkib/supir',
+    ports: [IMAGE(), PROMPT({ required: false })],
+  }),
 
   // ---- Image → text (captioning / VLM) ----
   makeReplicateNode({
