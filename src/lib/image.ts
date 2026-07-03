@@ -424,6 +424,25 @@ export function boxBlur(img: RasterImage, radius: number): RasterImage {
   return blurPass(blurPass(img, r, true), r, false);
 }
 
+/** Auto-contrast: stretch each RGB channel so its min→0 and max→255. Alpha kept. */
+export function normalize(img: RasterImage): RasterImage {
+  const out = cloneImage(img);
+  for (let c = 0; c < 3; c++) {
+    let min = 255;
+    let max = 0;
+    for (let i = c; i < img.data.length; i += 4) {
+      const v = img.data[i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    if (max > min) {
+      const scale = 255 / (max - min);
+      for (let i = c; i < out.data.length; i += 4) out.data[i] = (img.data[i] - min) * scale;
+    }
+  }
+  return out;
+}
+
 /** Unsharp-mask sharpening: add `amount` × (image − blurred image). Alpha kept. */
 export function sharpen(img: RasterImage, amount: number): RasterImage {
   if (amount <= 0) return cloneImage(img);

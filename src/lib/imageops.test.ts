@@ -15,6 +15,7 @@ import {
   levels,
   maskCombine,
   morphology,
+  normalize,
   pixelate,
   posterize,
   sharpen,
@@ -167,6 +168,18 @@ describe('vignette', () => {
     const v = vignette(img, 1);
     expect(px(v, 1, 1)).toEqual([200, 200, 200, 255]); // centre untouched
     expect(px(v, 0, 0)).toEqual([0, 0, 0, 255]); // corner darkened to black
+  });
+});
+
+describe('normalize', () => {
+  it('stretches each channel to the full range; leaves constant channels alone', () => {
+    const img = createImage(3, 1, [0, 100, 100, 255]);
+    set(img, 0, 0, [50, 100, 100, 255]);
+    set(img, 1, 0, [100, 100, 100, 255]);
+    set(img, 2, 0, [150, 100, 100, 255]);
+    const out = normalize(img);
+    expect([px(out, 0, 0)[0], px(out, 1, 0)[0], px(out, 2, 0)[0]]).toEqual([0, 127, 255]);
+    expect(px(out, 1, 0)[1]).toBe(100); // constant green channel unchanged
   });
 });
 

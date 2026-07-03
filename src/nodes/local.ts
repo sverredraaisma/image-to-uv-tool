@@ -22,6 +22,7 @@ import {
   levels,
   maskCombine,
   morphology,
+  normalize,
   outline,
   pixelate,
   posterize,
@@ -297,6 +298,14 @@ export const gradientMapNode = singleImageOp({
       hexToRgba(str(config.low, '#000000')).slice(0, 3) as [number, number, number],
       hexToRgba(str(config.high, '#ffffff')).slice(0, 3) as [number, number, number],
     ),
+});
+
+export const normalizeNode = singleImageOp({
+  type: 'normalize',
+  label: 'Auto Contrast',
+  category: 'Adjust',
+  description: 'Stretch each channel to the full 0–255 range.',
+  op: (img) => normalize(img),
 });
 
 export const levelsNode = singleImageOp({
@@ -621,6 +630,7 @@ export const localNodes: NodeDefinition[] = [
   thresholdNode,
   blurNode,
   sharpenNode,
+  normalizeNode,
   levelsNode,
   gradientMapNode,
   hueSaturationNode,
