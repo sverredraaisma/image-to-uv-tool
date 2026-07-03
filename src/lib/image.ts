@@ -477,3 +477,16 @@ function morphPass(img: RasterImage, r: number, op: MorphOp, horizontal: boolean
   }
   return out;
 }
+
+/** Reduce each RGB channel to `levels` evenly-spaced values (alpha kept). */
+export function posterize(img: RasterImage, levels: number): RasterImage {
+  const n = Math.max(2, Math.floor(levels));
+  const step = 255 / (n - 1);
+  const out = cloneImage(img);
+  for (let i = 0; i < out.data.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      out.data[i + c] = Math.round(Math.round(out.data[i + c] / step) * step);
+    }
+  }
+  return out;
+}

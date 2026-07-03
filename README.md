@@ -82,9 +82,11 @@ settling with a stale result.
 | Brightness / Contrast | Adjust | auto | Adjust brightness and contrast. |
 | Threshold | Adjust | auto | Binarise by luminance to black/white. |
 | Box Blur | Adjust | auto | Blur by an adjustable pixel radius. |
+| Posterize | Adjust | auto | Reduce each colour channel to a limited number of levels. |
 | Outline | Adjust | auto | Coloured outline of an adjustable thickness around non-transparent pixels. |
 | Alpha Cleanup | Adjust | auto | Snap pixels below an alpha threshold to transparent / black / white. |
 | Crop | Transform | auto | Crop a rectangle from the image. |
+| Resize | Transform | auto | Resize to a target width/height (nearest-neighbour). |
 | Rotate / Flip | Transform | auto | Rotate by 90° steps or flip. |
 | Extract Channel | Mask | auto | Pull one channel (or luminance) out as a greyscale image. |
 | Dilate / Erode | Mask | auto | Grow / shrink bright (white) mask regions by a radius — pairs with the segmentation masks. |

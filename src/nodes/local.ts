@@ -16,6 +16,8 @@ import {
   invert,
   morphology,
   outline,
+  posterize,
+  resize,
   threshold,
   transform,
   type AlphaCleanupMode,
@@ -241,6 +243,16 @@ export const blurNode = singleImageOp({
   op: (img, config) => boxBlur(img, num(config.radius, 2)),
 });
 
+export const posterizeNode = singleImageOp({
+  type: 'posterize',
+  label: 'Posterize',
+  category: 'Adjust',
+  description: 'Reduce each colour channel to a limited number of levels.',
+  configFields: [{ kind: 'number', key: 'levels', label: 'Levels', min: 2, max: 64, step: 1 }],
+  defaultConfig: () => ({ levels: 4 }),
+  op: (img, config) => posterize(img, num(config.levels, 4)),
+});
+
 export const outlineNode = singleImageOp({
   type: 'outline',
   label: 'Outline',
@@ -295,6 +307,20 @@ export const cropNode = singleImageOp({
   defaultConfig: () => ({ x: 0, y: 0, width: 256, height: 256 }),
   op: (img, config) =>
     crop(img, num(config.x, 0), num(config.y, 0), num(config.width, img.width), num(config.height, img.height)),
+});
+
+export const resizeNode = singleImageOp({
+  type: 'resize',
+  label: 'Resize',
+  category: 'Transform',
+  description: 'Resize to a target width/height (nearest-neighbour).',
+  configFields: [
+    { kind: 'number', key: 'width', label: 'Width', min: 1, step: 1 },
+    { kind: 'number', key: 'height', label: 'Height', min: 1, step: 1 },
+  ],
+  defaultConfig: () => ({ width: 256, height: 256 }),
+  op: (img, config) =>
+    resize(img, Math.max(1, num(config.width, img.width)), Math.max(1, num(config.height, img.height))),
 });
 
 export const transformNode = singleImageOp({
@@ -426,9 +452,11 @@ export const localNodes: NodeDefinition[] = [
   brightnessContrastNode,
   thresholdNode,
   blurNode,
+  posterizeNode,
   outlineNode,
   alphaCleanupNode,
   cropNode,
+  resizeNode,
   transformNode,
   extractChannelNode,
   dilateNode,

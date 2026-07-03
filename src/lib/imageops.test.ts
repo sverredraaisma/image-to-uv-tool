@@ -8,6 +8,7 @@ import {
   extractChannel,
   grayscale,
   morphology,
+  posterize,
   threshold,
   transform,
 } from './image';
@@ -99,6 +100,15 @@ describe('extractChannel', () => {
     const img = createImage(1, 1, [10, 20, 30, 40]);
     expect(px(extractChannel(img, 'r'), 0, 0)).toEqual([10, 10, 10, 255]);
     expect(px(extractChannel(img, 'a'), 0, 0)).toEqual([40, 40, 40, 255]);
+  });
+});
+
+describe('posterize', () => {
+  it('snaps channels to the nearest of N levels (2 = black/white)', () => {
+    expect(px(posterize(createImage(1, 1, [100, 200, 10, 128]), 2), 0, 0)).toEqual([0, 255, 0, 128]);
+  });
+  it('keeps a channel that already sits on a level', () => {
+    expect(px(posterize(createImage(1, 1, [255, 0, 128, 255]), 3), 0, 0)).toEqual([255, 0, 128, 255]);
   });
 });
 
