@@ -32,4 +32,12 @@ describe('Toolbar', () => {
     expect(useStore.getState().nodes).toHaveLength(1);
     expect(useStore.getState().nodes[0].type).toBe('promptInput');
   });
+
+  it('Enter adds the top search match', async () => {
+    render(<Toolbar />);
+    await userEvent.click(screen.getByText('+ Add node'));
+    await userEvent.type(screen.getByPlaceholderText('Search nodes…'), 'flux{Enter}');
+    expect(useStore.getState().nodes).toHaveLength(1);
+    expect(useStore.getState().nodes[0].type.toLowerCase()).toContain('flux');
+  });
 });

@@ -38,6 +38,13 @@ function AddNodeMenu() {
               placeholder="Search nodes…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') close();
+                else if (e.key === 'Enter' && query.trim()) {
+                  const first = menu[0]?.groups[0]?.items[0];
+                  if (first) pick(first.type);
+                }
+              }}
             />
             {menu.length === 0 && <div className="menu-empty">No matching nodes</div>}
             {menu.map((cat) => (

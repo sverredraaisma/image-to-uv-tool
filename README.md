@@ -23,7 +23,8 @@ Then open the dev server URL. Paste your Replicate API key in the top-left field
 
 ### The graph
 
-* **Add nodes** from the top-right menu, grouped by category.
+* **Add nodes** from the top-right menu, grouped by category (searchable — type to
+  filter, `Enter` adds the top match, `Esc` closes).
 * **Connect** an output to an input either by **dragging** between the round
   handles, or by **clicking** one port and then the other (click-to-connect).
   Connections are checked for **type compatibility** and rejected if they would
