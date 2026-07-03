@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useStore } from '../store/store';
 import { rasterToDataUrl, browserPlatform } from '../lib/canvas';
 import { downloadBlob, downloadText } from '../lib/download';
+import { stlToAscii, stlToBinary } from '../lib/stl';
 
 export function PreviewModal() {
   const preview = useStore((s) => s.preview);
@@ -26,7 +27,7 @@ export function PreviewModal() {
       const blob = await browserPlatform.encodePngBlob(value);
       downloadBlob(blob, 'output.png');
     } else if (value.kind === 'stl') {
-      downloadText(value.text, 'model.stl', 'model/stl');
+      downloadBlob(new Blob([stlToBinary(value)], { type: 'model/stl' }), 'model.stl');
     } else if (value.kind === 'text') {
       downloadText(value.text, 'text.txt');
     }
@@ -58,8 +59,10 @@ export function PreviewModal() {
           {value.kind === 'text' && <pre className="preview-textfull">{value.text}</pre>}
           {value.kind === 'stl' && (
             <>
-              <div className="preview-meta">{value.triangleCount} triangles (ASCII STL)</div>
-              <pre className="preview-textfull">{value.text.slice(0, 4000)}</pre>
+              <div className="preview-meta">
+                {value.triangleCount} triangles — downloads as binary STL
+              </div>
+              <pre className="preview-textfull">{stlToAscii(value).slice(0, 4000)}</pre>
             </>
           )}
         </div>

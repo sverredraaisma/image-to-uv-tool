@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createImage } from './image';
-import { heightmapToMesh, heightmapToStl } from './stl';
+import { heightmapToMesh, heightmapToStl, stlToAscii, stlToBinary } from './stl';
 
 describe('heightmapToStl', () => {
   it('produces a watertight box for a single included pixel', () => {
@@ -19,15 +19,23 @@ describe('heightmapToStl', () => {
     expect(stl.triangleCount).toBe(12);
   });
 
-  it('emits valid ASCII STL text', () => {
+  it('serialises valid ASCII STL text', () => {
     const img = createImage(2, 2, [255, 255, 255, 255]);
     const stl = heightmapToStl(img, { minWhite: -1, baseThickness: 1, depthRange: 5, width: 4 });
-    expect(stl.text.startsWith('solid heightmap')).toBe(true);
-    expect(stl.text.trimEnd().endsWith('endsolid heightmap')).toBe(true);
-    const facets = stl.text.match(/facet normal/g)?.length ?? 0;
-    expect(facets).toBe(stl.triangleCount);
-    // no NaN coordinates
-    expect(stl.text).not.toMatch(/NaN/);
+    const text = stlToAscii(stl);
+    expect(text.startsWith('solid heightmap')).toBe(true);
+    expect(text.trimEnd().endsWith('endsolid heightmap')).toBe(true);
+    expect(text.match(/facet normal/g)?.length ?? 0).toBe(stl.triangleCount);
+    expect(text).not.toMatch(/NaN/);
+  });
+
+  it('serialises binary STL with the correct size and triangle count', () => {
+    const img = createImage(1, 1, [255, 255, 255, 255]);
+    const stl = heightmapToStl(img, { minWhite: -1, baseThickness: 0, depthRange: 10, width: 2 });
+    const bin = stlToBinary(stl);
+    expect(bin.byteLength).toBe(84 + stl.triangleCount * 50);
+    const count = new DataView(bin.buffer, bin.byteOffset).getUint32(80, true);
+    expect(count).toBe(stl.triangleCount);
   });
 
   it('rejects an over-large heightmap instead of freezing', () => {
@@ -41,6 +49,6 @@ describe('heightmapToStl', () => {
     const white = createImage(1, 1, [255, 255, 255, 255]);
     const stl = heightmapToStl(white, { minWhite: -1, baseThickness: 2, depthRange: 10, width: 1 });
     // max Z should be base(2) + depth(10) = 12 somewhere in the vertices
-    expect(stl.text).toMatch(/ 12($|\s)/);
+    expect(stlToAscii(stl)).toMatch(/ 12($|\s)/);
   });
 });

@@ -23,9 +23,9 @@ export interface TextValue {
 
 export interface StlValue {
   kind: 'stl';
-  /** ASCII STL contents. */
-  text: string;
   triangleCount: number;
+  /** Flat triangle vertices [ax,ay,az, bx,by,bz, cx,cy,cz, …] (length = count*9). */
+  triangles: Float32Array;
 }
 
 /** Any value that can travel along an edge / sit on a port. */

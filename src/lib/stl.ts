@@ -127,20 +127,49 @@ function wall(
   addQuad(mesh, a, b, c, d);
 }
 
-export function meshToAsciiStl(mesh: Mesh, name = 'heightmap'): string {
+/** ASCII STL text (mainly for previews / debugging). */
+export function stlToAscii(stl: StlValue, name = 'heightmap'): string {
+  const t = stl.triangles;
   const lines: string[] = [`solid ${name}`];
-  for (const t of mesh.tris) {
-    const [n0, n1, n2] = normal(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8]);
+  for (let i = 0; i < stl.triangleCount; i++) {
+    const b = i * 9;
+    const [n0, n1, n2] = normal(
+      t[b], t[b + 1], t[b + 2], t[b + 3], t[b + 4], t[b + 5], t[b + 6], t[b + 7], t[b + 8],
+    );
     lines.push(`  facet normal ${n0} ${n1} ${n2}`);
     lines.push('    outer loop');
-    lines.push(`      vertex ${t[0]} ${t[1]} ${t[2]}`);
-    lines.push(`      vertex ${t[3]} ${t[4]} ${t[5]}`);
-    lines.push(`      vertex ${t[6]} ${t[7]} ${t[8]}`);
+    lines.push(`      vertex ${t[b]} ${t[b + 1]} ${t[b + 2]}`);
+    lines.push(`      vertex ${t[b + 3]} ${t[b + 4]} ${t[b + 5]}`);
+    lines.push(`      vertex ${t[b + 6]} ${t[b + 7]} ${t[b + 8]}`);
     lines.push('    endloop');
     lines.push('  endfacet');
   }
   lines.push(`endsolid ${name}`);
   return lines.join('\n');
+}
+
+/** Binary STL bytes (80-byte header + uint32 count + 50 bytes/triangle). */
+export function stlToBinary(stl: StlValue): Uint8Array<ArrayBuffer> {
+  const n = stl.triangleCount;
+  const buf = new ArrayBuffer(84 + n * 50);
+  const view = new DataView(buf);
+  view.setUint32(80, n, true);
+  const t = stl.triangles;
+  let off = 84;
+  for (let i = 0; i < n; i++) {
+    const b = i * 9;
+    const [nx, ny, nz] = normal(
+      t[b], t[b + 1], t[b + 2], t[b + 3], t[b + 4], t[b + 5], t[b + 6], t[b + 7], t[b + 8],
+    );
+    view.setFloat32(off, nx, true);
+    view.setFloat32(off + 4, ny, true);
+    view.setFloat32(off + 8, nz, true);
+    off += 12;
+    for (let v = 0; v < 9; v++, off += 4) view.setFloat32(off, t[b + v], true);
+    view.setUint16(off, 0, true); // attribute byte count
+    off += 2;
+  }
+  return new Uint8Array(buf);
 }
 
 /** Above this many included pixels the mesh/ASCII STL gets pathologically large. */
@@ -166,9 +195,7 @@ export function heightmapToStl(img: RasterImage, opts: HeightmapOptions): StlVal
     );
   }
   const mesh = heightmapToMesh(img, opts);
-  return {
-    kind: 'stl',
-    text: meshToAsciiStl(mesh),
-    triangleCount: mesh.tris.length,
-  };
+  const triangles = new Float32Array(mesh.tris.length * 9);
+  for (let i = 0; i < mesh.tris.length; i++) triangles.set(mesh.tris[i], i * 9);
+  return { kind: 'stl', triangleCount: mesh.tris.length, triangles };
 }
