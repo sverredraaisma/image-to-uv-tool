@@ -79,6 +79,10 @@ export function Toolbar() {
   const loadGraph = useStore((s) => s.loadGraph);
   const clearGraph = useStore((s) => s.clearGraph);
   const addToast = useStore((s) => s.addToast);
+  const undo = useStore((s) => s.undo);
+  const redo = useStore((s) => s.redo);
+  const canUndo = useStore((s) => s.history.length > 0);
+  const canRedo = useStore((s) => s.future.length > 0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onSave = () => {
@@ -137,6 +141,12 @@ export function Toolbar() {
       </div>
 
       <div className="toolbar-right">
+        <button type="button" className="btn" onClick={undo} disabled={!canUndo} title="Undo">
+          ↶
+        </button>
+        <button type="button" className="btn" onClick={redo} disabled={!canRedo} title="Redo">
+          ↷
+        </button>
         <AddNodeMenu />
         <button type="button" className="btn" onClick={onSave}>
           Save

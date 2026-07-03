@@ -31,6 +31,8 @@ function resetStore() {
     editorNodeId: null,
     preview: null,
     toasts: [],
+    history: [],
+    future: [],
   });
 }
 

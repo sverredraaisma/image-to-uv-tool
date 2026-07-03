@@ -78,6 +78,13 @@ export interface ConnectionInput {
   targetHandle: string | null;
 }
 
+interface GraphSnapshot {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+const HISTORY_LIMIT = 50;
+
 export interface StoreState {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -94,6 +101,10 @@ export interface StoreState {
   preview: PreviewState | null;
   toasts: Toast[];
 
+  // undo/redo history of structural graph changes
+  history: GraphSnapshot[];
+  future: GraphSnapshot[];
+
   // settings
   setApiKey: (key: string) => void;
   setOpenRouterKey: (key: string) => void;
@@ -108,6 +119,9 @@ export interface StoreState {
   addConnection: (conn: ConnectionInput) => boolean;
   canConnect: (conn: ConnectionInput) => boolean;
   removeEdge: (id: string) => void;
+  undo: () => void;
+  redo: () => void;
+  _snapshot: () => void;
 
   // connection UX
   clickPort: (nodeId: string, portId: string, side: ConnectionSide) => void;
@@ -187,12 +201,15 @@ export const useStore = create<StoreState>()(
       editorNodeId: null,
       preview: null,
       toasts: [],
+      history: [],
+      future: [],
 
       setApiKey: (key) => set({ apiKey: key }),
       setOpenRouterKey: (key) => set({ openRouterKey: key }),
       setProxyUrl: (url) => set({ proxyUrl: url }),
 
       addNode: (type, position) => {
+        get()._snapshot();
         const def = getNodeDef(type);
         const id = genId('n');
         const node: GraphNode = {
@@ -212,6 +229,7 @@ export const useStore = create<StoreState>()(
       duplicateNode: (id) => {
         const src = get().nodes.find((n) => n.id === id);
         if (!src) return '';
+        get()._snapshot();
         const newId = genId('n');
         const node: GraphNode = {
           id: newId,
@@ -226,6 +244,8 @@ export const useStore = create<StoreState>()(
       },
 
       removeNode: (id) => {
+        if (!get().nodes.some((n) => n.id === id)) return;
+        get()._snapshot();
         runControllers.get(id)?.abort(); // stop an in-flight run for this node
         const { edges, selectedNodeId, editorNodeId } = get();
         const affected = downstreamNodeIds(id, edges);
@@ -248,10 +268,12 @@ export const useStore = create<StoreState>()(
         void get().processAutoRun();
       },
 
-      setNodePosition: (id, position) =>
+      setNodePosition: (id, position) => {
+        get()._snapshot();
         set((s) => ({
           nodes: s.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
-        })),
+        }));
+      },
 
       updateNodeConfig: (id, patch) => {
         set((s) => ({
@@ -287,6 +309,7 @@ export const useStore = create<StoreState>()(
         ) {
           return false;
         }
+        get()._snapshot();
         let edges = s.edges;
         if (!check.multiple) {
           edges = edges.filter((e) => !(e.target === target && e.targetHandle === targetHandle));
@@ -300,13 +323,51 @@ export const useStore = create<StoreState>()(
 
       canConnect: (conn) => checkConnection(get().nodes, get().edges, conn).ok,
 
+      _snapshot: () =>
+        set((s) => ({
+          history: [...s.history.slice(-(HISTORY_LIMIT - 1)), { nodes: s.nodes, edges: s.edges }],
+          future: [],
+        })),
+
+      undo: () => {
+        const { history } = get();
+        if (!history.length) return;
+        const prev = history[history.length - 1];
+        set((s) => ({
+          nodes: prev.nodes,
+          edges: prev.edges,
+          history: s.history.slice(0, -1),
+          future: [{ nodes: s.nodes, edges: s.edges }, ...s.future].slice(0, HISTORY_LIMIT),
+          runtime: {},
+          epochs: {},
+          pendingConnection: null,
+        }));
+        void get().processAutoRun();
+      },
+
+      redo: () => {
+        const { future } = get();
+        if (!future.length) return;
+        const next = future[0];
+        set((s) => ({
+          nodes: next.nodes,
+          edges: next.edges,
+          future: s.future.slice(1),
+          history: [...s.history.slice(-(HISTORY_LIMIT - 1)), { nodes: s.nodes, edges: s.edges }],
+          runtime: {},
+          epochs: {},
+          pendingConnection: null,
+        }));
+        void get().processAutoRun();
+      },
+
       removeEdge: (id) => {
         const edge = get().edges.find((e) => e.id === id);
+        if (!edge) return;
+        get()._snapshot();
         set((s) => ({ edges: s.edges.filter((e) => e.id !== id) }));
-        if (edge) {
-          get().markOutOfDate(edge.target);
-          void get().processAutoRun();
-        }
+        get().markOutOfDate(edge.target);
+        void get().processAutoRun();
       },
 
       clickPort: (nodeId, portId, side) => {
@@ -532,6 +593,8 @@ export const useStore = create<StoreState>()(
           editorNodeId: null,
           preview: null,
           toasts: [],
+          history: [],
+          future: [],
         }),
 
       exportGraph: () => {
@@ -540,6 +603,7 @@ export const useStore = create<StoreState>()(
       },
 
       loadGraph: (graph) => {
+        get()._snapshot();
         set({
           nodes: graph.nodes ?? [],
           edges: graph.edges ?? [],
@@ -554,6 +618,8 @@ export const useStore = create<StoreState>()(
       },
 
       clearGraph: () => {
+        if (!get().nodes.length && !get().edges.length) return;
+        get()._snapshot();
         set({
           nodes: [],
           edges: [],

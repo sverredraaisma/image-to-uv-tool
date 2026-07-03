@@ -105,6 +105,8 @@ beforeEach(() => {
     editorNodeId: null,
     preview: null,
     toasts: [],
+    history: [],
+    future: [],
   });
   for (const k of Object.keys(runCounts)) delete runCounts[k];
   releaseAsync = null;
@@ -262,6 +264,36 @@ describe('click-to-connect', () => {
     store().clickPort(a2, 'out', 'output');
     expect(store().pendingConnection?.nodeId).toBe(a2);
     expect(store().edges).toHaveLength(0);
+  });
+});
+
+describe('undo / redo', () => {
+  it('undo restores a removed node and its edges; redo re-removes it', async () => {
+    const { b } = await buildChain();
+    const edgeCount = store().edges.length;
+    store().removeNode(b);
+    await store().processAutoRun();
+    expect(store().nodes.some((n) => n.id === b)).toBe(false);
+    store().undo();
+    expect(store().nodes.some((n) => n.id === b)).toBe(true);
+    expect(store().edges).toHaveLength(edgeCount);
+    store().redo();
+    expect(store().nodes.some((n) => n.id === b)).toBe(false);
+  });
+
+  it('undo removes a just-added node', () => {
+    store().addNode('test.const');
+    expect(store().nodes).toHaveLength(1);
+    store().undo();
+    expect(store().nodes).toHaveLength(0);
+  });
+
+  it('a new action after undo clears the redo stack', () => {
+    store().addNode('test.const');
+    store().undo();
+    expect(store().future.length).toBeGreaterThan(0);
+    store().addNode('test.pass');
+    expect(store().future).toHaveLength(0);
   });
 });
 
