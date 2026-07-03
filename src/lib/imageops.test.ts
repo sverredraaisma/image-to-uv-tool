@@ -7,6 +7,7 @@ import {
   crop,
   extractChannel,
   grayscale,
+  hueSaturation,
   maskCombine,
   morphology,
   posterize,
@@ -101,6 +102,18 @@ describe('extractChannel', () => {
     const img = createImage(1, 1, [10, 20, 30, 40]);
     expect(px(extractChannel(img, 'r'), 0, 0)).toEqual([10, 10, 10, 255]);
     expect(px(extractChannel(img, 'a'), 0, 0)).toEqual([40, 40, 40, 255]);
+  });
+});
+
+describe('hueSaturation', () => {
+  it('shifts red 120° to green', () => {
+    expect(px(hueSaturation(createImage(1, 1, [255, 0, 0, 255]), 120, 1), 0, 0)).toEqual([0, 255, 0, 255]);
+  });
+  it('saturation 0 desaturates to grey (alpha kept)', () => {
+    const out = px(hueSaturation(createImage(1, 1, [255, 0, 0, 200]), 0, 0), 0, 0);
+    expect(out[0]).toBe(out[1]);
+    expect(out[1]).toBe(out[2]);
+    expect(out[3]).toBe(200);
   });
 });
 

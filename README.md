@@ -82,6 +82,7 @@ settling with a stale result.
 | Brightness / Contrast | Adjust | auto | Adjust brightness and contrast. |
 | Threshold | Adjust | auto | Binarise by luminance to black/white. |
 | Box Blur | Adjust | auto | Blur by an adjustable pixel radius. |
+| Hue / Saturation | Adjust | auto | Shift hue and scale saturation. |
 | Posterize | Adjust | auto | Reduce each colour channel to a limited number of levels. |
 | Outline | Adjust | auto | Coloured outline of an adjustable thickness around non-transparent pixels. |
 | Alpha Cleanup | Adjust | auto | Snap pixels below an alpha threshold to transparent / black / white. |

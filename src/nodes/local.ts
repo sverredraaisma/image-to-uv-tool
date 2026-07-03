@@ -13,6 +13,7 @@ import {
   extractChannel,
   grayscale,
   hexToRgba,
+  hueSaturation,
   invert,
   maskCombine,
   morphology,
@@ -243,6 +244,19 @@ export const blurNode = singleImageOp({
   configFields: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 100, step: 1 }],
   defaultConfig: () => ({ radius: 2 }),
   op: (img, config) => boxBlur(img, num(config.radius, 2)),
+});
+
+export const hueSaturationNode = singleImageOp({
+  type: 'hueSaturation',
+  label: 'Hue / Saturation',
+  category: 'Adjust',
+  description: 'Shift hue and scale saturation.',
+  configFields: [
+    { kind: 'number', key: 'hue', label: 'Hue shift (°)', min: -180, max: 180, step: 1 },
+    { kind: 'number', key: 'saturation', label: 'Saturation ×', min: 0, max: 2, step: 0.05 },
+  ],
+  defaultConfig: () => ({ hue: 0, saturation: 1 }),
+  op: (img, config) => hueSaturation(img, num(config.hue, 0), num(config.saturation, 1)),
 });
 
 export const posterizeNode = singleImageOp({
@@ -489,6 +503,7 @@ export const localNodes: NodeDefinition[] = [
   brightnessContrastNode,
   thresholdNode,
   blurNode,
+  hueSaturationNode,
   posterizeNode,
   outlineNode,
   alphaCleanupNode,

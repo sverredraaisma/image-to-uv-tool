@@ -532,3 +532,63 @@ export function posterize(img: RasterImage, levels: number): RasterImage {
   }
   return out;
 }
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+  }
+  return [h, s, l];
+}
+
+function hue2rgb(p: number, q: number, t: number): number {
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return [v, v, v];
+  }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [
+    Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+    Math.round(hue2rgb(p, q, h) * 255),
+    Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
+  ];
+}
+
+/** Shift hue (degrees) and scale saturation (multiplier), keeping alpha. */
+export function hueSaturation(img: RasterImage, hueDegrees: number, satMultiplier: number): RasterImage {
+  const out = cloneImage(img);
+  const shift = hueDegrees / 360;
+  for (let i = 0; i < out.data.length; i += 4) {
+    const [h, s, l] = rgbToHsl(out.data[i], out.data[i + 1], out.data[i + 2]);
+    let nh = (h + shift) % 1;
+    if (nh < 0) nh += 1;
+    const ns = Math.max(0, Math.min(1, s * satMultiplier));
+    const [r, g, b] = hslToRgb(nh, ns, l);
+    out.data[i] = r;
+    out.data[i + 1] = g;
+    out.data[i + 2] = b;
+  }
+  return out;
+}
