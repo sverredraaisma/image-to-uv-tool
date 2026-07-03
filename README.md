@@ -102,7 +102,7 @@ settling with a stale result.
 | **Stylize** | AI (Replicate) | manual | AnimeGAN v2 (cartoon/anime). |
 | **Depth** | AI (Replicate) | manual | Depth Anything v2 (grey + colour outputs), Marigold. |
 | **Segment** | AI (Replicate) | manual | SAM 2, SAM 3 (concept), Grounded SAM (mask / inverted / annotated / neg-annotated outputs). |
-| **Background removal** | AI (Replicate) | manual | BiRefNet, rembg / IS-Net. |
+| **Background removal** | AI (Replicate) | manual | BiRefNet, rembg / IS-Net, Bria RMBG 2.0. |
 | **Restore & upscale** | AI (Replicate) | manual | Real-ESRGAN, GFPGAN, CodeFormer (face restore), Colorize (DDColor), Clarity Upscaler. |
 | **Describe** (image→text) | AI (Replicate) | manual | Image Caption (BLIP), Moondream (VLM), CLIP Interrogator, OCR (text extract). |
 | **Custom** | AI (Replicate) | manual | Replicate (custom) — any model: set the slug, wire images/prompt, add anything else via JSON. |

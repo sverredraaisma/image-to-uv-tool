@@ -414,6 +414,14 @@ export const aiNodes: NodeDefinition[] = [
     model: 'cjwbw/rembg',
     ports: [IMAGE()],
   }),
+  makeReplicateNode({
+    type: 'briaRmbg',
+    label: 'Bria RMBG 2.0',
+    group: 'Background removal',
+    description: 'Commercial-grade background removal (bria/remove-background).',
+    model: 'bria/remove-background',
+    ports: [IMAGE()],
+  }),
 
   // ---- Restore & upscale ----
   makeReplicateNode({
