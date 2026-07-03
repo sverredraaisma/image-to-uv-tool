@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
   useNodesState,
+  useEdgesState,
   type Node,
   type Edge,
   type Connection,
@@ -47,17 +48,26 @@ export function Canvas() {
     );
   }, [storeNodes, setRfNodes]);
 
-  const edges: Edge[] = useMemo(
-    () =>
-      storeEdges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-      })),
-    [storeEdges],
-  );
+  // Edges also live in local state so React Flow can track their selection —
+  // otherwise clicking an edge never marks it selected and Delete can't remove
+  // it. Removals are propagated back to the store.
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  useEffect(() => {
+    setRfEdges((prev) =>
+      storeEdges.map((e) => {
+        const existing = prev.find((p) => p.id === e.id);
+        return {
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+          selected: existing?.selected ?? false,
+        };
+      }),
+    );
+  }, [storeEdges, setRfEdges]);
 
   const handleNodesChange = (changes: NodeChange<Node>[]) => {
     onNodesChange(changes); // keep local state smooth (drag, select…)
@@ -67,7 +77,8 @@ export function Canvas() {
     }
   };
 
-  const onEdgesChange = (changes: EdgeChange[]) => {
+  const handleEdgesChange = (changes: EdgeChange[]) => {
+    onEdgesChange(changes); // keep local state (selection) in sync
     for (const c of changes) if (c.type === 'remove') removeEdge(c.id);
   };
 
@@ -75,11 +86,11 @@ export function Canvas() {
     <div className={`canvas ${pending ? 'connecting' : ''}`}>
       <ReactFlow
         nodes={rfNodes}
-        edges={edges}
+        edges={rfEdges}
         nodeTypes={nodeTypes}
         onNodesChange={handleNodesChange}
         onNodeDragStop={(_e, node) => setNodePosition(node.id, node.position)}
-        onEdgesChange={onEdgesChange}
+        onEdgesChange={handleEdgesChange}
         onConnect={(c: Connection) => addConnection(c)}
         isValidConnection={(c) => canConnect(c as Connection)}
         onPaneClick={() => {
