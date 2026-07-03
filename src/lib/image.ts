@@ -668,3 +668,36 @@ export function colorKeyMask(
   }
   return out;
 }
+
+const SOBEL_X = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
+const SOBEL_Y = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+
+/** Sobel edge detection: white edges on black (gradient magnitude of luminance). */
+export function sobel(img: RasterImage): RasterImage {
+  const { width: w, height: h } = img;
+  const out = createImage(w, h, [0, 0, 0, 255]);
+  const lumAt = (x: number, y: number) => {
+    const i = (Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x))) * 4;
+    return luminance(img.data[i], img.data[i + 1], img.data[i + 2]);
+  };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let gx = 0;
+      let gy = 0;
+      let k = 0;
+      for (let j = -1; j <= 1; j++) {
+        for (let i = -1; i <= 1; i++, k++) {
+          const l = lumAt(x + i, y + j);
+          gx += l * SOBEL_X[k];
+          gy += l * SOBEL_Y[k];
+        }
+      }
+      const mag = Math.min(255, Math.hypot(gx, gy));
+      const di = (y * w + x) * 4;
+      out.data[di] = mag;
+      out.data[di + 1] = mag;
+      out.data[di + 2] = mag;
+    }
+  }
+  return out;
+}

@@ -24,6 +24,7 @@ import {
   outline,
   posterize,
   resize,
+  sobel,
   threshold,
   transform,
   type AlphaCleanupMode,
@@ -300,6 +301,14 @@ export const hueSaturationNode = singleImageOp({
   op: (img, config) => hueSaturation(img, num(config.hue, 0), num(config.saturation, 1)),
 });
 
+export const edgeDetectNode = singleImageOp({
+  type: 'edgeDetect',
+  label: 'Edge Detect',
+  category: 'Adjust',
+  description: 'Sobel edge detection — white edges on black (feeds ControlNet).',
+  op: (img) => sobel(img),
+});
+
 export const posterizeNode = singleImageOp({
   type: 'posterize',
   label: 'Posterize',
@@ -568,6 +577,7 @@ export const localNodes: NodeDefinition[] = [
   levelsNode,
   gradientMapNode,
   hueSaturationNode,
+  edgeDetectNode,
   posterizeNode,
   outlineNode,
   alphaCleanupNode,

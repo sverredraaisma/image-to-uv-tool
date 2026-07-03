@@ -15,6 +15,7 @@ import {
   maskCombine,
   morphology,
   posterize,
+  sobel,
   threshold,
   transform,
 } from './image';
@@ -128,6 +129,17 @@ describe('downscaleToMax', () => {
   it('leaves small images and maxDim<=0 unchanged', () => {
     expect(downscaleToMax(createImage(40, 30), 100).width).toBe(40);
     expect(downscaleToMax(createImage(200, 200), 0).width).toBe(200);
+  });
+});
+
+describe('sobel', () => {
+  it('a uniform image has no edges', () => {
+    expect(px(sobel(createImage(3, 3, [128, 128, 128, 255])), 1, 1)).toEqual([0, 0, 0, 255]);
+  });
+  it('a hard boundary yields bright edge pixels', () => {
+    const img = createImage(3, 3, [0, 0, 0, 255]);
+    for (let y = 0; y < 3; y++) set(img, 2, y, [255, 255, 255, 255]); // white right column
+    expect(px(sobel(img), 1, 1)[0]).toBeGreaterThan(0);
   });
 });
 
