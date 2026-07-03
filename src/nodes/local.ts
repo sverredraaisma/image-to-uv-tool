@@ -15,6 +15,7 @@ import {
   hexToRgba,
   hueSaturation,
   invert,
+  levels,
   maskCombine,
   morphology,
   outline,
@@ -244,6 +245,20 @@ export const blurNode = singleImageOp({
   configFields: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 100, step: 1 }],
   defaultConfig: () => ({ radius: 2 }),
   op: (img, config) => boxBlur(img, num(config.radius, 2)),
+});
+
+export const levelsNode = singleImageOp({
+  type: 'levels',
+  label: 'Levels',
+  category: 'Adjust',
+  description: 'Remap tones with black/white points and midtone gamma.',
+  configFields: [
+    { kind: 'number', key: 'black', label: 'Black point', min: 0, max: 255, step: 1 },
+    { kind: 'number', key: 'white', label: 'White point', min: 0, max: 255, step: 1 },
+    { kind: 'number', key: 'gamma', label: 'Gamma', min: 0.1, max: 5, step: 0.05 },
+  ],
+  defaultConfig: () => ({ black: 0, white: 255, gamma: 1 }),
+  op: (img, config) => levels(img, num(config.black, 0), num(config.white, 255), num(config.gamma, 1)),
 });
 
 export const hueSaturationNode = singleImageOp({
@@ -503,6 +518,7 @@ export const localNodes: NodeDefinition[] = [
   brightnessContrastNode,
   thresholdNode,
   blurNode,
+  levelsNode,
   hueSaturationNode,
   posterizeNode,
   outlineNode,

@@ -8,6 +8,7 @@ import {
   extractChannel,
   grayscale,
   hueSaturation,
+  levels,
   maskCombine,
   morphology,
   posterize,
@@ -102,6 +103,16 @@ describe('extractChannel', () => {
     const img = createImage(1, 1, [10, 20, 30, 40]);
     expect(px(extractChannel(img, 'r'), 0, 0)).toEqual([10, 10, 10, 255]);
     expect(px(extractChannel(img, 'a'), 0, 0)).toEqual([40, 40, 40, 255]);
+  });
+});
+
+describe('levels', () => {
+  it('is identity with default black/white/gamma', () => {
+    expect(px(levels(createImage(1, 1, [10, 128, 240, 55]), 0, 255, 1), 0, 0)).toEqual([10, 128, 240, 55]);
+  });
+  it('stretches contrast between black and white points', () => {
+    // black=0, white=128: 64 -> 128, 128 -> 255, 200 -> clamped 255
+    expect(px(levels(createImage(1, 1, [64, 128, 200, 255]), 0, 128, 1), 0, 0)).toEqual([128, 255, 255, 255]);
   });
 });
 

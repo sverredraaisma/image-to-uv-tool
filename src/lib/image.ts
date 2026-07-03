@@ -576,6 +576,29 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   ];
 }
 
+/**
+ * Levels adjustment: remap each RGB channel so `blackPoint` maps to 0 and
+ * `whitePoint` maps to 255, with a midtone `gamma` (>1 brightens). Alpha kept.
+ */
+export function levels(
+  img: RasterImage,
+  blackPoint: number,
+  whitePoint: number,
+  gamma: number,
+): RasterImage {
+  const out = cloneImage(img);
+  const range = Math.max(1, whitePoint - blackPoint);
+  const invGamma = 1 / Math.max(0.01, gamma);
+  for (let i = 0; i < out.data.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      let t = (out.data[i + c] - blackPoint) / range;
+      t = Math.max(0, Math.min(1, t));
+      out.data[i + c] = Math.round(Math.pow(t, invGamma) * 255);
+    }
+  }
+  return out;
+}
+
 /** Shift hue (degrees) and scale saturation (multiplier), keeping alpha. */
 export function hueSaturation(img: RasterImage, hueDegrees: number, satMultiplier: number): RasterImage {
   const out = cloneImage(img);
