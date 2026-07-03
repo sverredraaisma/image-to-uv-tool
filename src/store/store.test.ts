@@ -222,6 +222,40 @@ describe('persistence', () => {
   });
 });
 
+describe('click-to-connect', () => {
+  it('connects clicking an output then a compatible input (either order)', () => {
+    const a = store().addNode('test.const'); // text output 'out'
+    const b = store().addNode('test.pass'); // text input 'in'
+    store().clickPort(a, 'out', 'output');
+    store().clickPort(b, 'in', 'input');
+    expect(store().pendingConnection).toBeNull();
+    expect(store().edges).toHaveLength(1);
+    expect(store().edges[0]).toMatchObject({ source: a, sourceHandle: 'out', target: b, targetHandle: 'in' });
+
+    const c = store().addNode('test.pass');
+    store().clickPort(c, 'in', 'input'); // input first this time
+    store().clickPort(a, 'out', 'output');
+    expect(store().edges.some((e) => e.source === a && e.target === c)).toBe(true);
+  });
+
+  it('clicking the same port again cancels', () => {
+    const a = store().addNode('test.const');
+    store().clickPort(a, 'out', 'output');
+    store().clickPort(a, 'out', 'output');
+    expect(store().pendingConnection).toBeNull();
+    expect(store().edges).toHaveLength(0);
+  });
+
+  it('clicking another port on the same side switches the pending selection', () => {
+    const a = store().addNode('test.const');
+    const a2 = store().addNode('test.const');
+    store().clickPort(a, 'out', 'output');
+    store().clickPort(a2, 'out', 'output');
+    expect(store().pendingConnection?.nodeId).toBe(a2);
+    expect(store().edges).toHaveLength(0);
+  });
+});
+
 describe('node + edge removal', () => {
   it('removing a node drops its edges and downstream goes stale', async () => {
     const { a, b } = await buildChain();

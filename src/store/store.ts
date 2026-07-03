@@ -315,7 +315,7 @@ export const useStore = create<StoreState>()(
           set({ pendingConnection: { nodeId, portId, side } });
           return;
         }
-        if (pending.nodeId === nodeId && pending.portId === portId) {
+        if (pending.nodeId === nodeId && pending.portId === portId && pending.side === side) {
           set({ pendingConnection: null });
           return;
         }
