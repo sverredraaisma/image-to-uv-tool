@@ -327,6 +327,14 @@ export const aiNodes: NodeDefinition[] = [
       { id: 'color', label: 'Colour depth', type: 'image', key: 'color_depth' },
     ],
   }),
+  makeReplicateNode({
+    type: 'marigoldDepth',
+    label: 'Marigold Depth',
+    group: 'Depth',
+    description: 'High-quality diffusion-based depth estimation (prs-eth/marigold).',
+    model: 'prs-eth/marigold',
+    ports: [IMAGE()],
+  }),
   // ---- Segment ----
   makeReplicateNode({
     type: 'sam2Image',
