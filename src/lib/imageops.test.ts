@@ -6,6 +6,7 @@ import {
   colorKeyMask,
   createImage,
   crop,
+  downscaleToMax,
   extractChannel,
   gradientMap,
   grayscale,
@@ -116,6 +117,17 @@ describe('colorKeyMask', () => {
     const mask = colorKeyMask(img, [0, 255, 0], 40);
     expect(px(mask, 0, 0)).toEqual([255, 255, 255, 255]); // green matched
     expect(px(mask, 1, 0)).toEqual([0, 0, 0, 255]); // red not matched
+  });
+});
+
+describe('downscaleToMax', () => {
+  it('scales the longest side down to the cap, preserving aspect', () => {
+    const out = downscaleToMax(createImage(100, 50), 50);
+    expect([out.width, out.height]).toEqual([50, 25]);
+  });
+  it('leaves small images and maxDim<=0 unchanged', () => {
+    expect(downscaleToMax(createImage(40, 30), 100).width).toBe(40);
+    expect(downscaleToMax(createImage(200, 200), 0).width).toBe(200);
   });
 });
 

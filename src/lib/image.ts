@@ -52,6 +52,17 @@ export function resize(img: RasterImage, width: number, height: number): RasterI
   return out;
 }
 
+/**
+ * Downscale so the longest side is at most `maxDim` (aspect preserved). Returns
+ * a copy unchanged when `maxDim <= 0` or the image already fits.
+ */
+export function downscaleToMax(img: RasterImage, maxDim: number): RasterImage {
+  const longest = Math.max(img.width, img.height);
+  if (maxDim <= 0 || longest <= maxDim) return cloneImage(img);
+  const scale = maxDim / longest;
+  return resize(img, Math.max(1, Math.round(img.width * scale)), Math.max(1, Math.round(img.height * scale)));
+}
+
 export type InvertChannels = { r: boolean; g: boolean; b: boolean; a: boolean };
 
 /** Invert the selected RGBA channels. */

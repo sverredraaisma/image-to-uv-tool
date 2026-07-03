@@ -11,6 +11,7 @@ import {
   combine,
   createImage,
   crop,
+  downscaleToMax,
   extractChannel,
   gradientMap,
   grayscale,
@@ -72,15 +73,20 @@ export const imageInputNode: NodeDefinition = {
   type: 'imageInput',
   label: 'Image Input',
   category: 'Input',
-  description: 'Upload an image to use as an output.',
+  description: 'Upload an image to use as an output. Optionally cap the working resolution.',
   autoRun: true,
   inputs: [],
   outputs: [{ id: 'out', label: 'Image', type: 'image' }],
-  defaultConfig: () => ({ src: '', name: '' }),
+  configFields: [
+    { kind: 'number', key: 'maxSize', label: 'Max size (px, 0 = original)', min: 0, step: 64 },
+  ],
+  defaultConfig: () => ({ src: '', name: '', maxSize: 0 }),
   compute: async ({ config }) => {
     const src = str(config.src);
     if (!src) return { out: undefined };
-    return { out: await platform.decodeImage(src) };
+    const img = await platform.decodeImage(src);
+    const maxSize = num(config.maxSize, 0);
+    return { out: maxSize > 0 ? downscaleToMax(img, maxSize) : img };
   },
 };
 
