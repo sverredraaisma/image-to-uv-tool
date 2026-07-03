@@ -233,6 +233,19 @@ describe('node + edge removal', () => {
     expect((store().runtime[b].outputs.out as { text: string }).text).toBe('');
   });
 
+  it('duplicateNode copies type + config with a new id and offset position', () => {
+    const a = store().addNode('test.const');
+    store().updateNodeConfig(a, { v: '9' });
+    const b = store().duplicateNode(a);
+    expect(b).not.toBe(a);
+    const orig = store().nodes.find((n) => n.id === a)!;
+    const dup = store().nodes.find((n) => n.id === b)!;
+    expect(dup.type).toBe('test.const');
+    expect(dup.config.v).toBe('9');
+    expect(dup.config).not.toBe(orig.config); // cloned, not shared
+    expect(dup.position.x).toBeGreaterThan(orig.position.x);
+  });
+
   it('clears a pending connection that referenced the removed node', async () => {
     const a = store().addNode('test.const');
     await store().processAutoRun();

@@ -40,6 +40,7 @@ export function NodeView({ id, selected }: NodeProps) {
   const runNode = useStore((s) => s.runNode);
   const cancelNode = useStore((s) => s.cancelNode);
   const bringUpToDate = useStore((s) => s.bringUpToDate);
+  const duplicateNode = useStore((s) => s.duplicateNode);
   const removeNode = useStore((s) => s.removeNode);
   const openEditor = useStore((s) => s.openEditor);
   const openPreview = useStore((s) => s.openPreview);
@@ -131,6 +132,9 @@ export function NodeView({ id, selected }: NodeProps) {
               ⚙
             </button>
           )}
+          <button type="button" className="icon-btn" title="Duplicate node" onClick={() => duplicateNode(id)}>
+            ⧉
+          </button>
           <button
             type="button"
             className="icon-btn icon-danger"

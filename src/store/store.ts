@@ -101,6 +101,7 @@ export interface StoreState {
 
   // graph mutation
   addNode: (type: string, position?: { x: number; y: number }) => string;
+  duplicateNode: (id: string) => string;
   removeNode: (id: string) => void;
   setNodePosition: (id: string, position: { x: number; y: number }) => void;
   updateNodeConfig: (id: string, patch: NodeConfig) => void;
@@ -206,6 +207,22 @@ export const useStore = create<StoreState>()(
         }));
         void get().processAutoRun();
         return id;
+      },
+
+      duplicateNode: (id) => {
+        const src = get().nodes.find((n) => n.id === id);
+        if (!src) return '';
+        const newId = genId('n');
+        const node: GraphNode = {
+          id: newId,
+          type: src.type,
+          position: { x: src.position.x + 40, y: src.position.y + 40 },
+          // config is JSON-serialisable (it is persisted), so a clone is safe.
+          config: JSON.parse(JSON.stringify(src.config)),
+        };
+        set((s) => ({ nodes: [...s.nodes, node], runtime: { ...s.runtime, [newId]: defaultRuntime() } }));
+        void get().processAutoRun();
+        return newId;
       },
 
       removeNode: (id) => {
