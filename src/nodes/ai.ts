@@ -212,6 +212,25 @@ export const aiNodes: NodeDefinition[] = [
       },
     ],
   }),
+  makeReplicateNode({
+    type: 'ideogramV2',
+    label: 'Ideogram v2',
+    group: 'Generate',
+    description: 'Text-to-image with excellent in-image text rendering (ideogram-ai/ideogram-v2).',
+    model: 'ideogram-ai/ideogram-v2',
+    ports: [PROMPT()],
+    scalars: [
+      {
+        field: {
+          kind: 'select',
+          key: 'aspect_ratio',
+          label: 'Aspect ratio',
+          options: ['1:1', '16:9', '9:16', '4:3', '3:4'].map((v) => ({ value: v, label: v })),
+        },
+        default: '1:1',
+      },
+    ],
+  }),
 
   // ---- Edit (image + instruction → image) ----
   makeReplicateNode({
@@ -391,6 +410,17 @@ export const aiNodes: NodeDefinition[] = [
     description: 'Colourise black & white photos (piddnad/ddcolor).',
     model: 'piddnad/ddcolor',
     ports: [IMAGE()],
+  }),
+  makeReplicateNode({
+    type: 'clarityUpscaler',
+    label: 'Clarity Upscaler',
+    group: 'Restore & upscale',
+    description: 'Creative, detail-adding upscaler with an optional prompt (philz1337x/clarity-upscaler).',
+    model: 'philz1337x/clarity-upscaler',
+    ports: [IMAGE(), PROMPT({ required: false })],
+    scalars: [
+      { field: { kind: 'number', key: 'scale_factor', label: 'Scale factor', min: 1, max: 4, step: 1 }, default: 2 },
+    ],
   }),
 
   // ---- Image → text (captioning / VLM) ----

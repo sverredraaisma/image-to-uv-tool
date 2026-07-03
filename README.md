@@ -94,12 +94,12 @@ settling with a stale result.
 | Combine Masks | Mask | auto | Boolean-combine two masks (AND / OR / A−B / XOR). |
 | Area Picker | Mask | auto | Click points on the image (large editor); a magic-wand flood-fill from those points (adjustable tolerance) produces a white mask. Points are saved. |
 | Heightmap → STL | Export | auto | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width. |
-| **Generate** (text→image) | AI (Replicate) | manual | Flux Schnell, SDXL, Recraft v3. |
+| **Generate** (text→image) | AI (Replicate) | manual | Flux Schnell, SDXL, Recraft v3, Ideogram v2. |
 | **Edit** (image + prompt/mask) | AI (Replicate) | manual | Instruct Pix2Pix, SD Inpainting (image + mask + prompt), Flux ControlNet (Canny). |
 | **Depth** | AI (Replicate) | manual | Depth Anything v2 — `model_size`; grey + colour depth outputs. |
 | **Segment** | AI (Replicate) | manual | SAM 2, SAM 3 (concept), Grounded SAM (mask / inverted / annotated / neg-annotated outputs). |
 | **Background removal** | AI (Replicate) | manual | BiRefNet, rembg / IS-Net. |
-| **Restore & upscale** | AI (Replicate) | manual | Real-ESRGAN, GFPGAN (face restore), Colorize (DDColor). |
+| **Restore & upscale** | AI (Replicate) | manual | Real-ESRGAN, GFPGAN (face restore), Colorize (DDColor), Clarity Upscaler. |
 | **Describe** (image→text) | AI (Replicate) | manual | Image Caption (BLIP), Moondream (VLM), CLIP Interrogator, OCR (text extract). |
 | **Custom** | AI (Replicate) | manual | Replicate (custom) — any model: set the slug, wire images/prompt, add anything else via JSON. |
 | **LLMs** | AI (OpenRouter) | manual | Llama 3.1 8B, Gemini Flash, GPT-4o mini, custom — a prompt plus optional wired text input → text. |
