@@ -314,6 +314,18 @@ export const aiNodes: NodeDefinition[] = [
     model: '412392713/animegan-v2',
     ports: [IMAGE()],
   }),
+  makeReplicateNode({
+    type: 'styleTransfer',
+    label: 'Style Transfer',
+    group: 'Stylize',
+    description: 'Restyle an image using a reference style image + prompt (fofr/style-transfer).',
+    model: 'fofr/style-transfer',
+    ports: [
+      IMAGE(),
+      { id: 'style', label: 'Style image', type: 'image', key: 'style_image', required: false },
+      PROMPT({ required: false }),
+    ],
+  }),
 
   // ---- Depth ----
   makeReplicateNode({
