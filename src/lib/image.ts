@@ -616,6 +616,22 @@ export function hueSaturation(img: RasterImage, hueDegrees: number, satMultiplie
   return out;
 }
 
+/** Map each pixel's luminance (0→low, 255→high) to a two-colour gradient. */
+export function gradientMap(
+  img: RasterImage,
+  low: [number, number, number],
+  high: [number, number, number],
+): RasterImage {
+  const out = cloneImage(img);
+  for (let i = 0; i < out.data.length; i += 4) {
+    const t = luminance(out.data[i], out.data[i + 1], out.data[i + 2]) / 255;
+    out.data[i] = low[0] + (high[0] - low[0]) * t;
+    out.data[i + 1] = low[1] + (high[1] - low[1]) * t;
+    out.data[i + 2] = low[2] + (high[2] - low[2]) * t;
+  }
+  return out;
+}
+
 /**
  * Chroma key: white where a pixel's colour is within `tolerance` (max per-
  * channel RGB distance) of the target colour, black elsewhere. Opaque mask.

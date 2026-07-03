@@ -83,6 +83,7 @@ settling with a stale result.
 | Threshold | Adjust | auto | Binarise by luminance to black/white. |
 | Box Blur | Adjust | auto | Blur by an adjustable pixel radius. |
 | Levels | Adjust | auto | Remap tones with black/white points and midtone gamma. |
+| Gradient Map | Adjust | auto | Map luminance to a two-colour gradient. |
 | Hue / Saturation | Adjust | auto | Shift hue and scale saturation. |
 | Posterize | Adjust | auto | Reduce each colour channel to a limited number of levels. |
 | Outline | Adjust | auto | Coloured outline of an adjustable thickness around non-transparent pixels. |

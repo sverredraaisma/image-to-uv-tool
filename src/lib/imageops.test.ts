@@ -7,6 +7,7 @@ import {
   createImage,
   crop,
   extractChannel,
+  gradientMap,
   grayscale,
   hueSaturation,
   levels,
@@ -115,6 +116,15 @@ describe('colorKeyMask', () => {
     const mask = colorKeyMask(img, [0, 255, 0], 40);
     expect(px(mask, 0, 0)).toEqual([255, 255, 255, 255]); // green matched
     expect(px(mask, 1, 0)).toEqual([0, 0, 0, 255]); // red not matched
+  });
+});
+
+describe('gradientMap', () => {
+  it('maps luminance to the low/high colours', () => {
+    const white = px(gradientMap(createImage(1, 1, [255, 255, 255, 255]), [0, 0, 0], [255, 0, 0]), 0, 0);
+    const black = px(gradientMap(createImage(1, 1, [0, 0, 0, 200]), [0, 0, 0], [255, 0, 0]), 0, 0);
+    expect(white).toEqual([255, 0, 0, 255]); // luminance 255 -> high
+    expect(black).toEqual([0, 0, 0, 200]); // luminance 0 -> low, alpha kept
   });
 });
 

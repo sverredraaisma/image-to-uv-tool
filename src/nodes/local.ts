@@ -12,6 +12,7 @@ import {
   createImage,
   crop,
   extractChannel,
+  gradientMap,
   grayscale,
   hexToRgba,
   hueSaturation,
@@ -246,6 +247,24 @@ export const blurNode = singleImageOp({
   configFields: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 100, step: 1 }],
   defaultConfig: () => ({ radius: 2 }),
   op: (img, config) => boxBlur(img, num(config.radius, 2)),
+});
+
+export const gradientMapNode = singleImageOp({
+  type: 'gradientMap',
+  label: 'Gradient Map',
+  category: 'Adjust',
+  description: 'Map luminance to a two-colour gradient.',
+  configFields: [
+    { kind: 'color', key: 'low', label: 'Shadows' },
+    { kind: 'color', key: 'high', label: 'Highlights' },
+  ],
+  defaultConfig: () => ({ low: '#000000', high: '#ffffff' }),
+  op: (img, config) =>
+    gradientMap(
+      img,
+      hexToRgba(str(config.low, '#000000')).slice(0, 3) as [number, number, number],
+      hexToRgba(str(config.high, '#ffffff')).slice(0, 3) as [number, number, number],
+    ),
 });
 
 export const levelsNode = singleImageOp({
@@ -541,6 +560,7 @@ export const localNodes: NodeDefinition[] = [
   thresholdNode,
   blurNode,
   levelsNode,
+  gradientMapNode,
   hueSaturationNode,
   posterizeNode,
   outlineNode,
