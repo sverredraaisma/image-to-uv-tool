@@ -9,36 +9,17 @@
 // even as Replicate model schemas change, and lets you add every input a model
 // supports.
 
-import type { ComputeResult, ConfigField, NodeDefinition, PortSpec, PortType } from '../types';
+import type { ComputeResult, ConfigField, NodeDefinition, PortSpec } from '../types';
 import { platform } from '../lib/platform';
-import { firstOutputText, firstOutputUrl, runModel } from '../lib/replicate';
-import { asImage, asText, str } from './helpers';
-
-interface AiPort {
-  id: string;
-  label: string;
-  type: PortType;
-  /** Default Replicate input key this port feeds (editable per node). */
-  key: string;
-  required?: boolean;
-}
-
-/** An output port. Models can return several things (array items / object keys). */
-interface AiOutput {
-  id: string;
-  label: string;
-  type: 'image' | 'text';
-  /** Pick this array index from the model output. */
-  index?: number;
-  /** Pick this object key from the model output. */
-  key?: string;
-}
-
-/** A model-specific scalar input (number/enum/boolean) with its real default. */
-interface AiScalar {
-  field: ConfigField;
-  default: unknown;
-}
+import { runModel } from '../lib/replicate';
+import { str } from './helpers';
+import {
+  buildReplicateInput,
+  resolveOutputs,
+  type AiOutput,
+  type AiPort,
+  type AiScalar,
+} from './aiMapping';
 
 interface AiSpec {
   type: string;
@@ -57,21 +38,6 @@ interface AiSpec {
   outputKey?: string;
   /** Shorthand for a single output's type when `outputs` is omitted. */
   output?: 'image' | 'text';
-}
-
-function coerceScalar(field: ConfigField, value: unknown): unknown {
-  if (field.kind === 'number') return Number(value);
-  if (field.kind === 'boolean') return Boolean(value);
-  return value;
-}
-
-/** Narrow a model output to the sub-value for a specific output port. */
-function pickOutput(output: unknown, out: AiOutput): unknown {
-  if (out.index != null && Array.isArray(output)) return output[out.index];
-  if (out.key != null && output && typeof output === 'object' && !Array.isArray(output)) {
-    return (output as Record<string, unknown>)[out.key];
-  }
-  return output;
 }
 
 function makeReplicateNode(spec: AiSpec): NodeDefinition {
@@ -142,58 +108,26 @@ function makeReplicateNode(spec: AiSpec): NodeDefinition {
     compute: async ({ inputs: inp, config, apiKey, proxyUrl, signal, onProgress }) => {
       if (!apiKey) throw new Error('Set your Replicate API key first');
       const model = str(config.model, spec.model);
-      const input: Record<string, unknown> = {};
 
-      for (const p of spec.ports) {
-        const key = str(config[`${p.id}Key`], p.key);
-        if (p.type === 'image' || p.type === 'mask') {
-          const img = asImage(inp[p.id]);
-          if (p.required && !img) throw new Error(`Missing required input: ${p.label}`);
-          if (img) {
-            onProgress?.(`Encoding ${p.label}…`);
-            input[key] = platform.encodePng(img);
-          }
-        } else if (p.type === 'text') {
-          const text = asText(inp[p.id]) ?? str(config[p.id]);
-          if (p.required && !text) throw new Error(`Missing required input: ${p.label}`);
-          if (text) input[key] = text;
-        }
-      }
-
-      for (const s of scalars) {
-        const v = config[s.field.key];
-        if (v !== '' && v !== undefined && v !== null) input[s.field.key] = coerceScalar(s.field, v);
-      }
-
-      const extra = str(config.extraInputs).trim();
-      if (extra) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(extra);
-        } catch {
-          throw new Error('“Extra inputs” is not valid JSON');
-        }
-        if (parsed && typeof parsed === 'object') Object.assign(input, parsed);
-      }
+      onProgress?.('Encoding inputs…');
+      const input = buildReplicateInput(spec.ports, scalars, config, inp, platform.encodePng);
 
       const modelOutput = await runModel(model, input, { apiKey, proxyUrl, signal, onProgress });
 
-      // Split the model output across the declared output ports, downloading
-      // every image output in parallel so all previews are populated.
+      // Resolve each output port to a URL/text, then download image URLs in
+      // parallel so all previews are populated.
+      const resolved = resolveOutputs(
+        outputPorts,
+        modelOutput,
+        singleDefaultOutput,
+        str(config.outputKey) || undefined,
+      );
       const result: ComputeResult = {};
       const jobs: Promise<void>[] = [];
-      for (const o of outputPorts) {
-        const picked = pickOutput(modelOutput, o);
-        if (o.type === 'text') {
-          const text = firstOutputText(picked);
-          result[o.id] = text != null ? { kind: 'text', text } : undefined;
-        } else {
-          const preferredKey = singleDefaultOutput ? str(config.outputKey) || undefined : undefined;
-          const url = firstOutputUrl(picked, preferredKey);
-          if (url) {
-            jobs.push(platform.fetchImage(url, signal).then((img) => void (result[o.id] = img)));
-          }
-        }
+      for (const [portId, out] of Object.entries(resolved)) {
+        if (!out) result[portId] = undefined;
+        else if ('text' in out) result[portId] = { kind: 'text', text: out.text };
+        else jobs.push(platform.fetchImage(out.url, signal).then((img) => void (result[portId] = img)));
       }
       if (jobs.length) onProgress?.('Downloading results…');
       await Promise.all(jobs);
@@ -254,6 +188,28 @@ export const aiNodes: NodeDefinition[] = [
     ports: [
       PROMPT(),
       { id: 'negative_prompt', label: 'Negative prompt', type: 'text', key: 'negative_prompt', required: false },
+    ],
+  }),
+  makeReplicateNode({
+    type: 'recraftV3',
+    label: 'Recraft v3',
+    group: 'Generate',
+    description: 'High-quality text-to-image with styles (recraft-ai/recraft-v3).',
+    model: 'recraft-ai/recraft-v3',
+    ports: [PROMPT()],
+    scalars: [
+      {
+        field: {
+          kind: 'select',
+          key: 'size',
+          label: 'Size',
+          options: ['1024x1024', '1365x1024', '1024x1365', '1536x1024', '1024x1536'].map((v) => ({
+            value: v,
+            label: v,
+          })),
+        },
+        default: '1024x1024',
+      },
     ],
   }),
 
@@ -397,6 +353,14 @@ export const aiNodes: NodeDefinition[] = [
       },
       { field: { kind: 'number', key: 'scale', label: 'Scale', min: 1, max: 10, step: 1 }, default: 2 },
     ],
+  }),
+  makeReplicateNode({
+    type: 'ddcolor',
+    label: 'Colorize (DDColor)',
+    group: 'Restore & upscale',
+    description: 'Colourise black & white photos (piddnad/ddcolor).',
+    model: 'piddnad/ddcolor',
+    ports: [IMAGE()],
   }),
 
   // ---- Image → text (captioning / VLM) ----
