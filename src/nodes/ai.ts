@@ -391,6 +391,14 @@ export const aiNodes: NodeDefinition[] = [
     model: 'zsxkib/supir',
     ports: [IMAGE(), PROMPT({ required: false })],
   }),
+  makeReplicateNode({
+    type: 'nafnet',
+    label: 'NAFNet (deblur/denoise)',
+    group: 'Restore & upscale',
+    description: 'Image deblurring / denoising restoration (megvii-research/nafnet).',
+    model: 'megvii-research/nafnet',
+    ports: [IMAGE()],
+  }),
 
   // ---- Image → text (captioning / VLM) ----
   makeReplicateNode({
