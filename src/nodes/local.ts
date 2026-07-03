@@ -14,6 +14,7 @@ import {
   grayscale,
   hexToRgba,
   invert,
+  maskCombine,
   morphology,
   outline,
   posterize,
@@ -23,6 +24,7 @@ import {
   type AlphaCleanupMode,
   type Channel,
   type CombineMode,
+  type MaskOp,
   type TransformOp,
 } from '../lib/image';
 import { magicWandMask, type Point } from '../lib/magicWand';
@@ -371,6 +373,41 @@ export const extractChannelNode = singleImageOp({
   op: (img, config) => extractChannel(img, str(config.channel, 'lum') as Channel),
 });
 
+export const maskCombineNode: NodeDefinition = {
+  type: 'maskCombine',
+  label: 'Combine Masks',
+  category: 'Mask',
+  description: 'Boolean-combine two masks (AND / OR / subtract / XOR).',
+  autoRun: true,
+  inputs: [
+    { id: 'a', label: 'Mask A', type: 'mask' },
+    { id: 'b', label: 'Mask B', type: 'mask' },
+  ],
+  outputs: [{ id: 'out', label: 'Mask', type: 'mask' }],
+  configFields: [
+    {
+      kind: 'select',
+      key: 'op',
+      label: 'Operation',
+      options: [
+        { value: 'and', label: 'AND (intersection)' },
+        { value: 'or', label: 'OR (union)' },
+        { value: 'subtract', label: 'A minus B' },
+        { value: 'xor', label: 'XOR (difference)' },
+      ],
+    },
+  ],
+  defaultConfig: () => ({ op: 'or' satisfies MaskOp }),
+  compute: ({ inputs, config }) => {
+    const a = asImage(inputs.a);
+    const b = asImage(inputs.b);
+    if (a && b) return { out: maskCombine(a, b, str(config.op, 'or') as MaskOp) };
+    if (a) return { out: a };
+    if (b) return { out: b };
+    return { out: undefined };
+  },
+};
+
 export const dilateNode = singleImageOp({
   type: 'dilate',
   label: 'Dilate',
@@ -459,6 +496,7 @@ export const localNodes: NodeDefinition[] = [
   resizeNode,
   transformNode,
   extractChannelNode,
+  maskCombineNode,
   dilateNode,
   erodeNode,
   areaPickerNode,

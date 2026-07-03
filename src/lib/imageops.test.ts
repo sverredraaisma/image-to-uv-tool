@@ -7,6 +7,7 @@ import {
   crop,
   extractChannel,
   grayscale,
+  maskCombine,
   morphology,
   posterize,
   threshold,
@@ -100,6 +101,34 @@ describe('extractChannel', () => {
     const img = createImage(1, 1, [10, 20, 30, 40]);
     expect(px(extractChannel(img, 'r'), 0, 0)).toEqual([10, 10, 10, 255]);
     expect(px(extractChannel(img, 'a'), 0, 0)).toEqual([40, 40, 40, 255]);
+  });
+});
+
+describe('maskCombine', () => {
+  // A = [white, black], B = [white, white]
+  const maskA = () => {
+    const m = createImage(2, 1, [0, 0, 0, 255]);
+    set(m, 0, 0, [255, 255, 255, 255]);
+    return m;
+  };
+  const maskB = () => createImage(2, 1, [255, 255, 255, 255]);
+  const on = (m: ReturnType<typeof maskA>, x: number) => px(m, x, 0)[0] === 255;
+
+  it('AND keeps the intersection', () => {
+    const r = maskCombine(maskA(), maskB(), 'and');
+    expect([on(r, 0), on(r, 1)]).toEqual([true, false]);
+  });
+  it('OR keeps the union', () => {
+    const r = maskCombine(maskA(), maskB(), 'or');
+    expect([on(r, 0), on(r, 1)]).toEqual([true, true]);
+  });
+  it('subtract removes B from A', () => {
+    const r = maskCombine(maskA(), maskB(), 'subtract');
+    expect([on(r, 0), on(r, 1)]).toEqual([false, false]);
+  });
+  it('XOR keeps the symmetric difference', () => {
+    const r = maskCombine(maskA(), maskB(), 'xor');
+    expect([on(r, 0), on(r, 1)]).toEqual([false, true]);
   });
 });
 

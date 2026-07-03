@@ -478,6 +478,48 @@ function morphPass(img: RasterImage, r: number, op: MorphOp, horizontal: boolean
   return out;
 }
 
+export type MaskOp = 'and' | 'or' | 'subtract' | 'xor';
+
+/**
+ * Boolean-combine two masks. A pixel is "on" where luminance >= threshold;
+ * result is a white(on)/black(off) opaque mask. `b` is resized to match `a`.
+ */
+export function maskCombine(
+  a: RasterImage,
+  b: RasterImage,
+  op: MaskOp,
+  threshold = 128,
+): RasterImage {
+  const bb = resize(b, a.width, a.height);
+  const out = createImage(a.width, a.height, [0, 0, 0, 255]);
+  for (let p = 0; p < a.width * a.height; p++) {
+    const i = p * 4;
+    const aOn = luminance(a.data[i], a.data[i + 1], a.data[i + 2]) >= threshold;
+    const bOn = luminance(bb.data[i], bb.data[i + 1], bb.data[i + 2]) >= threshold;
+    let on = false;
+    switch (op) {
+      case 'and':
+        on = aOn && bOn;
+        break;
+      case 'or':
+        on = aOn || bOn;
+        break;
+      case 'subtract':
+        on = aOn && !bOn;
+        break;
+      case 'xor':
+        on = aOn !== bOn;
+        break;
+    }
+    if (on) {
+      out.data[i] = 255;
+      out.data[i + 1] = 255;
+      out.data[i + 2] = 255;
+    }
+  }
+  return out;
+}
+
 /** Reduce each RGB channel to `levels` evenly-spaced values (alpha kept). */
 export function posterize(img: RasterImage, levels: number): RasterImage {
   const n = Math.max(2, Math.floor(levels));
