@@ -213,6 +213,16 @@ export const aiNodes: NodeDefinition[] = [
     ],
   }),
 
+  // ---- Edit (image + instruction → image) ----
+  makeReplicateNode({
+    type: 'instructPix2Pix',
+    label: 'Instruct Pix2Pix',
+    group: 'Edit',
+    description: 'Edit an image with a text instruction (timothybrooks/instruct-pix2pix).',
+    model: 'timothybrooks/instruct-pix2pix',
+    ports: [IMAGE(), PROMPT({ label: 'Instruction' })],
+  }),
+
   // ---- Depth ----
   makeReplicateNode({
     type: 'depthAnythingV2',
@@ -408,6 +418,15 @@ export const aiNodes: NodeDefinition[] = [
         default: 'best',
       },
     ],
+  }),
+  makeReplicateNode({
+    type: 'ocr',
+    label: 'OCR (text extract)',
+    group: 'Describe',
+    description: 'Extract text from an image (abiruyt/text-extract-ocr).',
+    model: 'abiruyt/text-extract-ocr',
+    output: 'text',
+    ports: [IMAGE()],
   }),
 
   // ---- Custom ----
