@@ -143,7 +143,28 @@ export function meshToAsciiStl(mesh: Mesh, name = 'heightmap'): string {
   return lines.join('\n');
 }
 
+/** Above this many included pixels the mesh/ASCII STL gets pathologically large. */
+export const MAX_STL_PIXELS = 90_000;
+
+function includedCount(img: RasterImage, opts: HeightmapOptions): number {
+  if (opts.minWhite < 0) return img.width * img.height;
+  let n = 0;
+  for (let p = 0; p < img.width * img.height; p++) {
+    const i = p * 4;
+    if (luminance(img.data[i], img.data[i + 1], img.data[i + 2]) >= opts.minWhite) n++;
+  }
+  return n;
+}
+
 export function heightmapToStl(img: RasterImage, opts: HeightmapOptions): StlValue {
+  // Each included pixel becomes up to 12 triangles, so a large heightmap would
+  // freeze the tab / produce hundreds of MB of ASCII STL. Guard early.
+  const included = includedCount(img, opts);
+  if (included > MAX_STL_PIXELS) {
+    throw new Error(
+      `Heightmap too detailed (${included} included pixels) — resize it smaller (≈300×300) before generating an STL.`,
+    );
+  }
   const mesh = heightmapToMesh(img, opts);
   return {
     kind: 'stl',

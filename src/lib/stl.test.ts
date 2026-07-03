@@ -30,6 +30,13 @@ describe('heightmapToStl', () => {
     expect(stl.text).not.toMatch(/NaN/);
   });
 
+  it('rejects an over-large heightmap instead of freezing', () => {
+    const img = createImage(400, 400, [255, 255, 255, 255]); // 160k > 90k limit
+    expect(() =>
+      heightmapToStl(img, { minWhite: -1, baseThickness: 0, depthRange: 10, width: 100 }),
+    ).toThrow(/too detailed/i);
+  });
+
   it('height scales with white value and base thickness', () => {
     const white = createImage(1, 1, [255, 255, 255, 255]);
     const stl = heightmapToStl(white, { minWhite: -1, baseThickness: 2, depthRange: 10, width: 1 });

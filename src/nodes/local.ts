@@ -523,7 +523,7 @@ export const heightmapStlNode: NodeDefinition = {
   type: 'heightmapStl',
   label: 'Heightmap → STL',
   category: 'Export',
-  description: 'Turn a heightmap into an STL solid (white = tall).',
+  description: 'Turn a heightmap into an STL solid (white = tall). Resize large images first.',
   autoRun: true,
   inputs: [{ id: 'in', label: 'Heightmap', type: 'image' }],
   outputs: [{ id: 'out', label: 'STL', type: 'stl' }],
