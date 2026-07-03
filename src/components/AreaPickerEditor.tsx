@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useStore } from '../store/store';
 import { rasterToDataUrl } from '../lib/canvas';
+import { num } from '../nodes/helpers';
 import type { Point } from '../lib/magicWand';
 import type { RasterImage } from '../types';
 
@@ -22,7 +23,7 @@ export function AreaPickerEditor({ nodeId }: { nodeId: string }) {
 
   if (!node) return null;
   const points = (Array.isArray(node.config.points) ? node.config.points : []) as Point[];
-  const tolerance = Number(node.config.tolerance ?? 32);
+  const tolerance = num(node.config.tolerance, 32);
 
   const onImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
     if (!inputImage) return;
