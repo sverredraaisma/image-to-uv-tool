@@ -224,6 +224,7 @@ export const useStore = create<StoreState>()(
             epochs,
             selectedNodeId: selectedNodeId === id ? null : s.selectedNodeId,
             editorNodeId: editorNodeId === id ? null : s.editorNodeId,
+            pendingConnection: s.pendingConnection?.nodeId === id ? null : s.pendingConnection,
           };
         });
         for (const d of affected) get().markOutOfDate(d);

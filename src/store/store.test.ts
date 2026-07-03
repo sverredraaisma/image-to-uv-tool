@@ -233,6 +233,15 @@ describe('node + edge removal', () => {
     expect((store().runtime[b].outputs.out as { text: string }).text).toBe('');
   });
 
+  it('clears a pending connection that referenced the removed node', async () => {
+    const a = store().addNode('test.const');
+    await store().processAutoRun();
+    store().clickPort(a, 'out', 'output');
+    expect(store().pendingConnection?.nodeId).toBe(a);
+    store().removeNode(a);
+    expect(store().pendingConnection).toBeNull();
+  });
+
   it('does not resurrect runtime for a node removed mid-run', async () => {
     const id = store().addNode('test.async');
     const running = store().runNode(id); // starts the async compute (now pending)
