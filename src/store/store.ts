@@ -15,11 +15,11 @@ import {
   descendants,
   downstreamNodeIds,
   topoSort,
-  upstreamNodeIds,
   wouldCreateCycle,
 } from '../engine/graph';
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
+import { findReadyAutoNode, gatherInputs } from '../engine/schedule';
 import { createSafeStorage } from './safeStorage';
 import '../nodes'; // side-effect: register built-in node definitions
 
@@ -165,23 +165,6 @@ function checkConnection(
     return { ok: false, reason: 'Connection would create a cycle' };
   }
   return { ok: true, multiple: inPort.multiple };
-}
-
-function gatherInputs(
-  edges: GraphEdge[],
-  runtime: Record<string, NodeRuntime>,
-  node: GraphNode,
-): ComputeContext['inputs'] {
-  const def = getNodeDef(node.type);
-  const result: ComputeContext['inputs'] = {};
-  for (const port of def.inputs) {
-    const incoming = edges.filter((e) => e.target === node.id && e.targetHandle === port.id);
-    const values = incoming
-      .map((e) => runtime[e.source]?.outputs?.[e.sourceHandle])
-      .filter((v): v is DataValue => v !== undefined);
-    result[port.id] = port.multiple ? values : values[0];
-  }
-  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +360,7 @@ export const useStore = create<StoreState>()(
 
         try {
           const s = get();
-          const inputs = gatherInputs(s.edges, s.runtime, node);
+          const inputs = gatherInputs(def.inputs, s.edges, s.runtime, id);
           const ctx: ComputeContext = {
             inputs,
             config: node.config,
@@ -447,22 +430,16 @@ export const useStore = create<StoreState>()(
         autoRunPending = true;
         if (autoRunPromise) return autoRunPromise;
         const sweep = async () => {
-          let progressed = true;
-          while (progressed) {
-            progressed = false;
+          for (;;) {
             const { nodes, edges, runtime } = get();
-            for (const n of nodes) {
-              const def = getNodeDefSafe(n.type);
-              if (!def || !def.autoRun) continue;
-              if (statusOf(runtime, n.id) !== 'outOfDate') continue;
-              const ready = upstreamNodeIds(n.id, edges).every(
-                (u) => statusOf(runtime, u) === 'upToDate',
-              );
-              if (!ready) continue;
-              await get()._executeNode(n.id);
-              progressed = true;
-              break;
-            }
+            const ready = findReadyAutoNode(
+              nodes,
+              edges,
+              runtime,
+              (type) => getNodeDefSafe(type)?.autoRun ?? false,
+            );
+            if (!ready) break;
+            await get()._executeNode(ready);
           }
         };
         autoRunPromise = (async () => {
