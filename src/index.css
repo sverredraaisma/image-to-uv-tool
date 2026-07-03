@@ -65,8 +65,17 @@ textarea { resize: vertical; }
   border-radius: var(--radius); padding: 8px; width: 230px;
   max-height: 70vh; overflow-y: auto; box-shadow: 0 12px 30px rgba(0,0,0,.5);
 }
+.menu-search { width: 100%; margin-bottom: 8px; position: sticky; top: 0; }
+.menu-empty { padding: 12px 6px; color: var(--text-dim); font-size: 12px; text-align: center; }
 .menu-group { margin-bottom: 8px; }
-.menu-group-title { font-size: 10px; text-transform: uppercase; color: var(--text-dim); padding: 4px 6px; }
+.menu-group-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text); font-weight: 700; padding: 4px 6px;
+}
+.menu-subgroup-title {
+  font-size: 9px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text-dim); padding: 5px 6px 2px 10px;
+}
 .menu-item {
   display: block; width: 100%; text-align: left; background: transparent;
   color: var(--text); border: none; border-radius: 5px; padding: 6px 8px; font-size: 12px;
