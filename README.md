@@ -48,7 +48,8 @@ still out of date it runs first.
 * **Auto-run** nodes (image ops, inputs, compose, cleanup…) recompute
   automatically as soon as their inputs are ready. They are cheap.
 * **Manual** nodes (the AI/Replicate nodes) never run on their own — press
-  **Run ▶** on the node so you don't spend tokens by accident.
+  **Run ▶** on the node so you don't spend tokens by accident. While running you
+  can **Cancel ✕** it (aborts the request).
 * **Bring up to date** (the ⟳ button on a node) forces the node *and everything
   downstream of it* to recompute, forcing manual nodes to run as it cascades.
 
@@ -89,7 +90,7 @@ settling with a stale result.
 | Area Picker | Mask | auto | Click points on the image (large editor); a magic-wand flood-fill from those points (adjustable tolerance) produces a white mask. Points are saved. |
 | Heightmap → STL | Export | auto | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width. |
 | **Generate** (text→image) | AI (Replicate) | manual | Flux Schnell, SDXL, Recraft v3. |
-| **Edit** (image + instruction) | AI (Replicate) | manual | Instruct Pix2Pix. |
+| **Edit** (image + prompt/mask) | AI (Replicate) | manual | Instruct Pix2Pix, SD Inpainting (image + mask + prompt), Flux ControlNet (Canny). |
 | **Depth** | AI (Replicate) | manual | Depth Anything v2 — `model_size`; grey + colour depth outputs. |
 | **Segment** | AI (Replicate) | manual | SAM 2, SAM 3 (concept), Grounded SAM (mask / inverted / annotated / neg-annotated outputs). |
 | **Background removal** | AI (Replicate) | manual | BiRefNet, rembg / IS-Net. |

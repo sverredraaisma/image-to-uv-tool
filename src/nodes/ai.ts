@@ -222,6 +222,26 @@ export const aiNodes: NodeDefinition[] = [
     model: 'timothybrooks/instruct-pix2pix',
     ports: [IMAGE(), PROMPT({ label: 'Instruction' })],
   }),
+  makeReplicateNode({
+    type: 'sdInpaint',
+    label: 'SD Inpainting',
+    group: 'Edit',
+    description: 'Fill a masked region from a prompt (stability-ai/stable-diffusion-inpainting).',
+    model: 'stability-ai/stable-diffusion-inpainting',
+    ports: [
+      IMAGE(),
+      { id: 'mask', label: 'Mask', type: 'mask', key: 'mask', required: false },
+      PROMPT(),
+    ],
+  }),
+  makeReplicateNode({
+    type: 'fluxCanny',
+    label: 'Flux ControlNet (Canny)',
+    group: 'Edit',
+    description: 'Structure-guided generation from a control image + prompt (black-forest-labs/flux-canny-dev).',
+    model: 'black-forest-labs/flux-canny-dev',
+    ports: [IMAGE({ key: 'control_image', label: 'Control image' }), PROMPT()],
+  }),
 
   // ---- Depth ----
   makeReplicateNode({
