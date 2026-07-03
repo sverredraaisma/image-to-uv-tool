@@ -180,6 +180,25 @@ export const aiNodes: NodeDefinition[] = [
     ],
   }),
   makeReplicateNode({
+    type: 'fluxDev',
+    label: 'Flux Dev',
+    group: 'Generate',
+    description: 'Higher-quality (slower) text-to-image (black-forest-labs/flux-dev).',
+    model: 'black-forest-labs/flux-dev',
+    ports: [PROMPT()],
+    scalars: [
+      {
+        field: {
+          kind: 'select',
+          key: 'aspect_ratio',
+          label: 'Aspect ratio',
+          options: ['1:1', '16:9', '9:16', '4:3', '3:4'].map((v) => ({ value: v, label: v })),
+        },
+        default: '1:1',
+      },
+    ],
+  }),
+  makeReplicateNode({
     type: 'sdxl',
     label: 'SDXL',
     group: 'Generate',
