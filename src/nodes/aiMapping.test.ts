@@ -45,6 +45,26 @@ describe('buildReplicateInput', () => {
     expect(input).toEqual({ prompt: 'typed' });
   });
 
+  it('uses the inline value when the wired text is empty, but the wire when non-empty', () => {
+    const empty = buildReplicateInput(
+      [promptPort],
+      [],
+      { promptKey: 'prompt', prompt: 'typed' },
+      { prompt: text('') },
+      enc,
+    );
+    expect(empty).toEqual({ prompt: 'typed' });
+
+    const wired = buildReplicateInput(
+      [promptPort],
+      [],
+      { promptKey: 'prompt', prompt: 'typed' },
+      { prompt: text('from wire') },
+      enc,
+    );
+    expect(wired).toEqual({ prompt: 'from wire' });
+  });
+
   it('honours the editable input key', () => {
     const input = buildReplicateInput(
       [{ ...imagePort, required: false }],

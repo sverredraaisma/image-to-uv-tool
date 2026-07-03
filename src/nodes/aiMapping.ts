@@ -60,7 +60,10 @@ export function buildReplicateInput(
       if (p.required && !img) throw new Error(`Missing required input: ${p.label}`);
       if (img) input[key] = encodeImage(img);
     } else if (p.type === 'text') {
-      const text = asText(inputs[p.id]) ?? str(config[p.id]);
+      // Prefer a non-empty wired value; otherwise fall back to the inline field
+      // (an empty wire shouldn't shadow text typed on the node).
+      const wired = asText(inputs[p.id]);
+      const text = wired && wired.length > 0 ? wired : str(config[p.id]);
       if (p.required && !text) throw new Error(`Missing required input: ${p.label}`);
       if (text) input[key] = text;
     }
