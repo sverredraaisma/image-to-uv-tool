@@ -88,16 +88,17 @@ settling with a stale result.
 | Extract Channel | Mask | auto | Pull one channel (or luminance) out as a greyscale image. |
 | Area Picker | Mask | auto | Click points on the image (large editor); a magic-wand flood-fill from those points (adjustable tolerance) produces a white mask. Points are saved. |
 | Heightmap → STL | Export | auto | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width. |
-| Depth Anything v2 | AI (Replicate) | manual | Monocular depth estimation (`chenxwh/depth-anything-v2`) — `model_size`; **grey + colour depth outputs**. |
-| SAM 2 (image) | AI (Replicate) | manual | Segment Anything 2, automatic masks — `meta/sam-2`. |
-| SAM 3 (concept) | AI (Replicate) | manual | Concept segmentation via a text prompt + image — defaults to `lucataco/sam3-video`. |
-| Grounded SAM | AI (Replicate) | manual | Text-prompted segmentation (Grounding DINO + SAM): mask what a prompt describes, subtract a negative prompt — `schananas/grounded_sam`. **Outputs: mask, inverted mask, annotated, neg. annotated.** |
-| BiRefNet | AI (Replicate) | manual | High-accuracy background removal — `men1scus/birefnet`. |
-| Background removal (rembg) | AI (Replicate) | manual | rembg / IS-Net background removal — `cjwbw/rembg`. |
-| Image Caption (BLIP) | AI (Replicate) | manual | Image → text captioning / VQA — `salesforce/blip`. |
-| Moondream (VLM) | AI (Replicate) | manual | Small vision-language model, ask about an image — `lucataco/moondream2`. |
-| Replicate (custom) | AI (Replicate) | manual | Run any model: set the slug, wire images/prompt, add anything else via JSON. |
-| Llama 3.1 8B · Gemini Flash · GPT-4o mini · OpenRouter (custom) | AI (OpenRouter) | manual | LLM nodes: a prompt plus optional wired text input → text output. |
+| **Generate** (text→image) | AI (Replicate) | manual | Flux Schnell, SDXL, Recraft v3. |
+| **Depth** | AI (Replicate) | manual | Depth Anything v2 — `model_size`; grey + colour depth outputs. |
+| **Segment** | AI (Replicate) | manual | SAM 2, SAM 3 (concept), Grounded SAM (mask / inverted / annotated / neg-annotated outputs). |
+| **Background removal** | AI (Replicate) | manual | BiRefNet, rembg / IS-Net. |
+| **Restore & upscale** | AI (Replicate) | manual | Real-ESRGAN, GFPGAN (face restore), Colorize (DDColor). |
+| **Describe** (image→text) | AI (Replicate) | manual | Image Caption (BLIP), Moondream (VLM), CLIP Interrogator. |
+| **Custom** | AI (Replicate) | manual | Replicate (custom) — any model: set the slug, wire images/prompt, add anything else via JSON. |
+| **LLMs** | AI (OpenRouter) | manual | Llama 3.1 8B, Gemini Flash, GPT-4o mini, custom — a prompt plus optional wired text input → text. |
+
+AI models are grouped by capability in the **+ Add node** menu, which is
+sorted and has a live search filter.
 
 Image data flows between nodes as raw RGBA buffers (`RasterImage`), so every
 image operation is a pure, testable function. `mask` and `image` ports are
@@ -179,6 +180,7 @@ src/
     platform.ts / canvas.ts  DOM/canvas adapter (decode/encode/fetch images)
     download.ts            file downloads
   nodes/                   node definitions (local.ts, ai.ts, llm.ts) + registration
+    aiMapping.ts           pure port/config ↔ Replicate request/response mapping (unit-tested)
   store/store.ts           Zustand store: graph state, persistence, scheduler
   components/              React Flow canvas, node view, toolbar, modals, toasts
 ```
