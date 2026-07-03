@@ -383,6 +383,9 @@ export const useStore = create<StoreState>()(
           };
           const result = await def.compute(ctx);
 
+          // Node deleted while running — drop the result, don't resurrect it.
+          if (!get().nodes.some((n) => n.id === id)) return;
+
           // Invalidated mid-run: discard the stale result and stay out of date so
           // the scheduler re-runs us with the fresh config/inputs.
           if ((get().epochs[id] ?? 0) !== startEpoch) {
@@ -404,6 +407,7 @@ export const useStore = create<StoreState>()(
           // A node that just ran ("changed") makes its direct dependents stale.
           for (const d of downstreamNodeIds(id, get().edges)) get().markOutOfDate(d);
         } catch (err) {
+          if (!get().nodes.some((n) => n.id === id)) return;
           const message = err instanceof Error ? err.message : String(err);
           set((st) => ({
             runtime: {

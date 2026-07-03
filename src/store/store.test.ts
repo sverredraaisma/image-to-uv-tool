@@ -57,7 +57,22 @@ const imageInNode: NodeDefinition = {
   defaultConfig: () => ({}),
   compute: () => ({ out: undefined }),
 };
-[constNode, passNode, manualNode, imageInNode].forEach(registerNode);
+// A manual node whose async compute we resolve by hand, to test mid-run edits.
+let releaseAsync: (() => void) | null = null;
+const asyncNode: NodeDefinition = {
+  type: 'test.async',
+  label: 'Async',
+  category: 'test',
+  autoRun: false,
+  inputs: [],
+  outputs: [{ id: 'out', label: 'out', type: 'text' }],
+  defaultConfig: () => ({}),
+  compute: () =>
+    new Promise((resolve) => {
+      releaseAsync = () => resolve({ out: { kind: 'text', text: 'done' } });
+    }),
+};
+[constNode, passNode, manualNode, imageInNode, asyncNode].forEach(registerNode);
 
 const store = () => useStore.getState();
 
@@ -77,6 +92,7 @@ beforeEach(() => {
     toasts: [],
   });
   for (const k of Object.keys(runCounts)) delete runCounts[k];
+  releaseAsync = null;
 });
 
 async function buildChain() {
@@ -200,5 +216,16 @@ describe('node + edge removal', () => {
     expect(store().edges.some((e) => e.source === a)).toBe(false);
     // b lost its input -> recomputed to empty
     expect((store().runtime[b].outputs.out as { text: string }).text).toBe('');
+  });
+
+  it('does not resurrect runtime for a node removed mid-run', async () => {
+    const id = store().addNode('test.async');
+    const running = store().runNode(id); // starts the async compute (now pending)
+    expect(releaseAsync).toBeTruthy();
+    store().removeNode(id);
+    releaseAsync!(); // compute resolves after the node is already gone
+    await running;
+    expect(store().nodes.some((n) => n.id === id)).toBe(false);
+    expect(store().runtime[id]).toBeUndefined();
   });
 });
