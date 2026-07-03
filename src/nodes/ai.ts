@@ -288,6 +288,14 @@ export const aiNodes: NodeDefinition[] = [
     model: 'black-forest-labs/flux-kontext-pro',
     ports: [IMAGE({ key: 'input_image' }), PROMPT({ label: 'Instruction' })],
   }),
+  makeReplicateNode({
+    type: 'icLight',
+    label: 'Relight (IC-Light)',
+    group: 'Edit',
+    description: 'Relight a subject from a text prompt (zsxkib/ic-light).',
+    model: 'zsxkib/ic-light',
+    ports: [IMAGE({ key: 'subject_image' }), PROMPT()],
+  }),
 
   // ---- Stylize ----
   makeReplicateNode({
