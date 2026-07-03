@@ -40,6 +40,7 @@ export function NodeView({ id, selected }: NodeProps) {
 
   const clickPort = useStore((s) => s.clickPort);
   const runNode = useStore((s) => s.runNode);
+  const cancelNode = useStore((s) => s.cancelNode);
   const bringUpToDate = useStore((s) => s.bringUpToDate);
   const removeNode = useStore((s) => s.removeNode);
   const openEditor = useStore((s) => s.openEditor);
@@ -186,16 +187,16 @@ export function NodeView({ id, selected }: NodeProps) {
           </button>
         )}
 
-        {!def.autoRun && (
-          <button
-            type="button"
-            className="wide-btn run-btn nodrag"
-            onClick={() => runNode(id)}
-            disabled={status === 'running'}
-          >
-            {status === 'running' ? 'Running…' : 'Run ▶'}
-          </button>
-        )}
+        {!def.autoRun &&
+          (status === 'running' ? (
+            <button type="button" className="wide-btn cancel-btn nodrag" onClick={() => cancelNode(id)}>
+              Cancel ✕
+            </button>
+          ) : (
+            <button type="button" className="wide-btn run-btn nodrag" onClick={() => runNode(id)}>
+              Run ▶
+            </button>
+          ))}
 
         {rt?.progress && <div className="node-progress">{rt.progress}</div>}
         {rt?.error && <div className="node-error-msg" title={rt.error}>{rt.error}</div>}

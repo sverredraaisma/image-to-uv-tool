@@ -44,6 +44,9 @@ function statusOf(runtime: Record<string, NodeRuntime>, id: string) {
 let autoRunPromise: Promise<void> | null = null;
 let autoRunPending = false;
 
+// Abort controllers for in-flight node runs, so long/hung runs can be cancelled.
+const runControllers = new Map<string, AbortController>();
+
 // ---------------------------------------------------------------------------
 // Store types
 // ---------------------------------------------------------------------------
@@ -122,6 +125,7 @@ export interface StoreState {
   // evaluation
   markOutOfDate: (id: string) => void;
   runNode: (id: string) => Promise<void>;
+  cancelNode: (id: string) => void;
   bringUpToDate: (id: string) => Promise<void>;
   processAutoRun: () => Promise<void>;
   _executeNode: (id: string) => Promise<void>;
@@ -222,6 +226,7 @@ export const useStore = create<StoreState>()(
       },
 
       removeNode: (id) => {
+        runControllers.get(id)?.abort(); // stop an in-flight run for this node
         const { edges, selectedNodeId, editorNodeId } = get();
         const affected = downstreamNodeIds(id, edges);
         set((s) => {
@@ -358,6 +363,11 @@ export const useStore = create<StoreState>()(
         // happen while this (possibly async) node is running.
         const startEpoch = get().epochs[id] ?? 0;
 
+        // Supersede any prior in-flight run and expose an abort signal.
+        runControllers.get(id)?.abort();
+        const controller = new AbortController();
+        runControllers.set(id, controller);
+
         set((s) => ({
           runtime: {
             ...s.runtime,
@@ -374,6 +384,7 @@ export const useStore = create<StoreState>()(
             apiKey: get().apiKey || null,
             openRouterKey: get().openRouterKey || null,
             proxyUrl: get().proxyUrl || null,
+            signal: controller.signal,
             onProgress: (message) =>
               set((st) => ({
                 runtime: {
@@ -409,6 +420,16 @@ export const useStore = create<StoreState>()(
           for (const d of downstreamNodeIds(id, get().edges)) get().markOutOfDate(d);
         } catch (err) {
           if (!get().nodes.some((n) => n.id === id)) return;
+          // A user-initiated cancel resets the node to out-of-date, not error.
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            set((st) => ({
+              runtime: {
+                ...st.runtime,
+                [id]: { ...(st.runtime[id] ?? defaultRuntime()), status: 'outOfDate', error: undefined, progress: undefined },
+              },
+            }));
+            return;
+          }
           const message = err instanceof Error ? err.message : String(err);
           set((st) => ({
             runtime: {
@@ -417,6 +438,8 @@ export const useStore = create<StoreState>()(
             },
           }));
           get().addToast('error', `${def.label}: ${message}`);
+        } finally {
+          if (runControllers.get(id) === controller) runControllers.delete(id);
         }
       },
 
@@ -470,6 +493,10 @@ export const useStore = create<StoreState>()(
           }
         }
         await get().processAutoRun();
+      },
+
+      cancelNode: (id) => {
+        runControllers.get(id)?.abort();
       },
 
       bringUpToDate: async (id) => {

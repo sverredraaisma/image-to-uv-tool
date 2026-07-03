@@ -72,7 +72,22 @@ const asyncNode: NodeDefinition = {
       releaseAsync = () => resolve({ out: { kind: 'text', text: 'done' } });
     }),
 };
-[constNode, passNode, manualNode, imageInNode, asyncNode].forEach(registerNode);
+// A manual node whose compute rejects when its abort signal fires.
+const abortableNode: NodeDefinition = {
+  type: 'test.abortable',
+  label: 'Abortable',
+  category: 'test',
+  autoRun: false,
+  inputs: [],
+  outputs: [{ id: 'out', label: 'out', type: 'text' }],
+  defaultConfig: () => ({}),
+  compute: ({ signal }) =>
+    new Promise((_resolve, reject) => {
+      if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
+      signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    }),
+};
+[constNode, passNode, manualNode, imageInNode, asyncNode, abortableNode].forEach(registerNode);
 
 const store = () => useStore.getState();
 
@@ -227,5 +242,17 @@ describe('node + edge removal', () => {
     await running;
     expect(store().nodes.some((n) => n.id === id)).toBe(false);
     expect(store().runtime[id]).toBeUndefined();
+  });
+});
+
+describe('cancellation', () => {
+  it('cancelNode aborts a running node and resets it to out of date', async () => {
+    const id = store().addNode('test.abortable');
+    const running = store().runNode(id);
+    expect(store().runtime[id].status).toBe('running');
+    store().cancelNode(id);
+    await running;
+    expect(store().runtime[id].status).toBe('outOfDate');
+    expect(store().runtime[id].error).toBeUndefined();
   });
 });
