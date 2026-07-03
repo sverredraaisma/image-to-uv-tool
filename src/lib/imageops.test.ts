@@ -7,6 +7,7 @@ import {
   crop,
   extractChannel,
   grayscale,
+  morphology,
   threshold,
   transform,
 } from './image';
@@ -98,6 +99,30 @@ describe('extractChannel', () => {
     const img = createImage(1, 1, [10, 20, 30, 40]);
     expect(px(extractChannel(img, 'r'), 0, 0)).toEqual([10, 10, 10, 255]);
     expect(px(extractChannel(img, 'a'), 0, 0)).toEqual([40, 40, 40, 255]);
+  });
+});
+
+describe('morphology', () => {
+  it('dilate grows a white pixel into its neighbourhood', () => {
+    const img = createImage(5, 5); // transparent black
+    set(img, 2, 2, [255, 255, 255, 255]);
+    const out = morphology(img, 1, 'dilate');
+    expect(px(out, 2, 2)).toEqual([255, 255, 255, 255]);
+    expect(px(out, 1, 1)).toEqual([255, 255, 255, 255]); // within radius 1
+    expect(px(out, 0, 0)).toEqual([0, 0, 0, 0]); // distance 2 untouched
+  });
+
+  it('erode shrinks a white block to its core', () => {
+    const img = createImage(5, 5);
+    for (let y = 1; y <= 3; y++) for (let x = 1; x <= 3; x++) set(img, x, y, [255, 255, 255, 255]);
+    const out = morphology(img, 1, 'erode');
+    expect(px(out, 2, 2)).toEqual([255, 255, 255, 255]); // core survives
+    expect(px(out, 1, 1)[0]).toBe(0); // edge eaten away
+  });
+
+  it('radius 0 is a no-op copy', () => {
+    const img = createImage(2, 2, [1, 2, 3, 4]);
+    expect([...morphology(img, 0, 'dilate').data]).toEqual([...img.data]);
   });
 });
 

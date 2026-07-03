@@ -439,3 +439,41 @@ function blurPass(img: RasterImage, r: number, horizontal: boolean): RasterImage
   }
   return out;
 }
+
+export type MorphOp = 'dilate' | 'erode';
+
+/**
+ * Greyscale morphology with a square structuring element (separable). `dilate`
+ * grows bright regions (per-channel local max); `erode` shrinks them (local
+ * min). On a white-on-black mask these grow / shrink the selection.
+ */
+export function morphology(img: RasterImage, radius: number, op: MorphOp): RasterImage {
+  const r = Math.max(0, Math.floor(radius));
+  if (r === 0) return cloneImage(img);
+  return morphPass(morphPass(img, r, op, true), r, op, false);
+}
+
+function morphPass(img: RasterImage, r: number, op: MorphOp, horizontal: boolean): RasterImage {
+  const { width: w, height: h } = img;
+  const out = createImage(w, h);
+  const lines = horizontal ? h : w;
+  const len = horizontal ? w : h;
+  const reduce = op === 'dilate' ? Math.max : Math.min;
+  for (let line = 0; line < lines; line++) {
+    for (let ch = 0; ch < 4; ch++) {
+      const idxAt = (k: number) => {
+        const x = horizontal ? k : line;
+        const y = horizontal ? line : k;
+        return (y * w + x) * 4 + ch;
+      };
+      for (let i = 0; i < len; i++) {
+        let acc = op === 'dilate' ? 0 : 255;
+        for (let k = i - r; k <= i + r; k++) {
+          acc = reduce(acc, img.data[idxAt(Math.max(0, Math.min(len - 1, k)))]);
+        }
+        out.data[idxAt(i)] = acc;
+      }
+    }
+  }
+  return out;
+}

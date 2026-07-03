@@ -14,6 +14,7 @@ import {
   grayscale,
   hexToRgba,
   invert,
+  morphology,
   outline,
   threshold,
   transform,
@@ -344,6 +345,26 @@ export const extractChannelNode = singleImageOp({
   op: (img, config) => extractChannel(img, str(config.channel, 'lum') as Channel),
 });
 
+export const dilateNode = singleImageOp({
+  type: 'dilate',
+  label: 'Dilate',
+  category: 'Mask',
+  description: 'Grow bright / white regions (greyscale dilation).',
+  configFields: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 50, step: 1 }],
+  defaultConfig: () => ({ radius: 2 }),
+  op: (img, config) => morphology(img, num(config.radius, 2), 'dilate'),
+});
+
+export const erodeNode = singleImageOp({
+  type: 'erode',
+  label: 'Erode',
+  category: 'Mask',
+  description: 'Shrink bright / white regions (greyscale erosion).',
+  configFields: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 50, step: 1 }],
+  defaultConfig: () => ({ radius: 2 }),
+  op: (img, config) => morphology(img, num(config.radius, 2), 'erode'),
+});
+
 export const areaPickerNode: NodeDefinition = {
   type: 'areaPicker',
   label: 'Area Picker',
@@ -410,6 +431,8 @@ export const localNodes: NodeDefinition[] = [
   cropNode,
   transformNode,
   extractChannelNode,
+  dilateNode,
+  erodeNode,
   areaPickerNode,
   heightmapStlNode,
 ];

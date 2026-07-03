@@ -87,6 +87,7 @@ settling with a stale result.
 | Crop | Transform | auto | Crop a rectangle from the image. |
 | Rotate / Flip | Transform | auto | Rotate by 90° steps or flip. |
 | Extract Channel | Mask | auto | Pull one channel (or luminance) out as a greyscale image. |
+| Dilate / Erode | Mask | auto | Grow / shrink bright (white) mask regions by a radius — pairs with the segmentation masks. |
 | Area Picker | Mask | auto | Click points on the image (large editor); a magic-wand flood-fill from those points (adjustable tolerance) produces a white mask. Points are saved. |
 | Heightmap → STL | Export | auto | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width. |
 | **Generate** (text→image) | AI (Replicate) | manual | Flux Schnell, SDXL, Recraft v3. |
