@@ -250,6 +250,17 @@ export const aiNodes: NodeDefinition[] = [
       },
     ],
   }),
+  makeReplicateNode({
+    type: 'sd35Large',
+    label: 'Stable Diffusion 3.5',
+    group: 'Generate',
+    description: 'Stable Diffusion 3.5 Large text-to-image (stability-ai/stable-diffusion-3.5-large).',
+    model: 'stability-ai/stable-diffusion-3.5-large',
+    ports: [
+      PROMPT(),
+      { id: 'negative_prompt', label: 'Negative prompt', type: 'text', key: 'negative_prompt', required: false },
+    ],
+  }),
 
   // ---- Edit (image + instruction → image) ----
   makeReplicateNode({
