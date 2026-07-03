@@ -7,6 +7,7 @@ import {
   applyMask,
   boxBlur,
   brightnessContrast,
+  colorKeyMask,
   combine,
   createImage,
   crop,
@@ -402,6 +403,27 @@ export const extractChannelNode = singleImageOp({
   op: (img, config) => extractChannel(img, str(config.channel, 'lum') as Channel),
 });
 
+export const chromaKeyNode: NodeDefinition = {
+  type: 'chromaKey',
+  label: 'Chroma Key',
+  category: 'Mask',
+  description: 'Make a mask of pixels near a target colour (within tolerance).',
+  autoRun: true,
+  inputs: [{ id: 'in', label: 'Image', type: 'image' }],
+  outputs: [{ id: 'out', label: 'Mask', type: 'mask' }],
+  configFields: [
+    { kind: 'color', key: 'color', label: 'Colour' },
+    { kind: 'number', key: 'tolerance', label: 'Tolerance', min: 0, max: 255, step: 1 },
+  ],
+  defaultConfig: () => ({ color: '#00ff00', tolerance: 40 }),
+  compute: ({ inputs, config }) => {
+    const img = asImage(inputs.in);
+    if (!img) return { out: undefined };
+    const [r, g, b] = hexToRgba(str(config.color, '#00ff00'));
+    return { out: colorKeyMask(img, [r, g, b], num(config.tolerance, 40)) };
+  },
+};
+
 export const maskCombineNode: NodeDefinition = {
   type: 'maskCombine',
   label: 'Combine Masks',
@@ -527,6 +549,7 @@ export const localNodes: NodeDefinition[] = [
   resizeNode,
   transformNode,
   extractChannelNode,
+  chromaKeyNode,
   maskCombineNode,
   dilateNode,
   erodeNode,

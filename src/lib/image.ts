@@ -615,3 +615,29 @@ export function hueSaturation(img: RasterImage, hueDegrees: number, satMultiplie
   }
   return out;
 }
+
+/**
+ * Chroma key: white where a pixel's colour is within `tolerance` (max per-
+ * channel RGB distance) of the target colour, black elsewhere. Opaque mask.
+ */
+export function colorKeyMask(
+  img: RasterImage,
+  color: [number, number, number],
+  tolerance: number,
+): RasterImage {
+  const out = createImage(img.width, img.height, [0, 0, 0, 255]);
+  for (let p = 0; p < img.width * img.height; p++) {
+    const i = p * 4;
+    const d = Math.max(
+      Math.abs(img.data[i] - color[0]),
+      Math.abs(img.data[i + 1] - color[1]),
+      Math.abs(img.data[i + 2] - color[2]),
+    );
+    if (d <= tolerance) {
+      out.data[i] = 255;
+      out.data[i + 1] = 255;
+      out.data[i + 2] = 255;
+    }
+  }
+  return out;
+}

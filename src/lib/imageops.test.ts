@@ -3,6 +3,7 @@ import {
   applyMask,
   boxBlur,
   brightnessContrast,
+  colorKeyMask,
   createImage,
   crop,
   extractChannel,
@@ -103,6 +104,17 @@ describe('extractChannel', () => {
     const img = createImage(1, 1, [10, 20, 30, 40]);
     expect(px(extractChannel(img, 'r'), 0, 0)).toEqual([10, 10, 10, 255]);
     expect(px(extractChannel(img, 'a'), 0, 0)).toEqual([40, 40, 40, 255]);
+  });
+});
+
+describe('colorKeyMask', () => {
+  it('whitens pixels within tolerance of the target colour', () => {
+    const img = createImage(2, 1, [0, 0, 0, 255]);
+    set(img, 0, 0, [0, 255, 0, 255]); // green
+    set(img, 1, 0, [255, 0, 0, 255]); // red
+    const mask = colorKeyMask(img, [0, 255, 0], 40);
+    expect(px(mask, 0, 0)).toEqual([255, 255, 255, 255]); // green matched
+    expect(px(mask, 1, 0)).toEqual([0, 0, 0, 255]); // red not matched
   });
 });
 
