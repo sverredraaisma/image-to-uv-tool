@@ -296,6 +296,14 @@ export const aiNodes: NodeDefinition[] = [
     model: 'zsxkib/ic-light',
     ports: [IMAGE({ key: 'subject_image' }), PROMPT()],
   }),
+  makeReplicateNode({
+    type: 'lamaRemove',
+    label: 'Remove Object (LaMa)',
+    group: 'Edit',
+    description: 'Erase a masked region and inpaint the background, no prompt (cjwbw/lama).',
+    model: 'cjwbw/lama',
+    ports: [IMAGE(), { id: 'mask', label: 'Mask', type: 'mask', key: 'mask', required: true }],
+  }),
 
   // ---- Stylize ----
   makeReplicateNode({
