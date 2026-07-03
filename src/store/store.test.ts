@@ -161,6 +161,15 @@ describe('bring up to date', () => {
     expect(store().runtime[c].status).toBe('upToDate');
     expect((store().runtime[c].outputs.out as { text: string }).text).toBe('M:5');
   });
+
+  it('does not re-run already up-to-date nodes (no needless token spend)', async () => {
+    const { a, c } = await buildChain();
+    await store().runNode(c); // now the whole chain is up to date
+    const before = { ...runCounts };
+    await store().bringUpToDate(a); // nothing stale -> should be a no-op
+    expect(runCounts).toEqual(before);
+    expect(store().runtime[c].status).toBe('upToDate');
+  });
 });
 
 describe('connection validation', () => {

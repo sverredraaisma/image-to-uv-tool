@@ -506,8 +506,12 @@ export const useStore = create<StoreState>()(
           get().addToast('error', 'Cannot run: cycle detected');
           return;
         }
+        // Run only out-of-date nodes (forcing out-of-date manual ones); an
+        // up-to-date node that re-runs would cascade needless recomputes — and
+        // spend tokens on manual AI descendants — for no change. If nothing is
+        // stale this is a no-op. Use Run ▶ to force a specific node.
         for (const n of order) {
-          if (targets.has(n) || statusOf(get().runtime, n) !== 'upToDate') {
+          if (statusOf(get().runtime, n) !== 'upToDate') {
             await get()._executeNode(n);
           }
         }
