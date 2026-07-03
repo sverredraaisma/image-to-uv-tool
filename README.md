@@ -85,6 +85,8 @@ settling with a stale result.
 | Levels | Adjust | auto | Remap tones with black/white points and midtone gamma. |
 | Gradient Map | Adjust | auto | Map luminance to a two-colour gradient. |
 | Edge Detect | Adjust | auto | Sobel edge detection (white edges on black — feeds ControlNet). |
+| Pixelate | Adjust | auto | Mosaic / blocky pixelation. |
+| Vignette | Adjust | auto | Darken towards the corners. |
 | Hue / Saturation | Adjust | auto | Shift hue and scale saturation. |
 | Posterize | Adjust | auto | Reduce each colour channel to a limited number of levels. |
 | Outline | Adjust | auto | Coloured outline of an adjustable thickness around non-transparent pixels. |

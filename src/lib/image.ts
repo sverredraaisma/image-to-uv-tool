@@ -669,6 +669,36 @@ export function colorKeyMask(
   return out;
 }
 
+/** Mosaic / pixelate: downscale by `blockSize` then nearest-upscale back. */
+export function pixelate(img: RasterImage, blockSize: number): RasterImage {
+  const b = Math.max(1, Math.floor(blockSize));
+  if (b <= 1) return cloneImage(img);
+  const smallW = Math.max(1, Math.ceil(img.width / b));
+  const smallH = Math.max(1, Math.ceil(img.height / b));
+  return resize(resize(img, smallW, smallH), img.width, img.height);
+}
+
+/** Vignette: darken towards the corners. `strength` 0 = none, 1 = corners→black. */
+export function vignette(img: RasterImage, strength: number): RasterImage {
+  const out = cloneImage(img);
+  const { width: w, height: h } = img;
+  const cx = (w - 1) / 2;
+  const cy = (h - 1) / 2;
+  const maxD = Math.hypot(cx, cy) || 1;
+  const s = Math.max(0, Math.min(1, strength));
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const d = Math.hypot(x - cx, y - cy) / maxD;
+      const factor = 1 - s * d * d;
+      const i = (y * w + x) * 4;
+      out.data[i] = out.data[i] * factor;
+      out.data[i + 1] = out.data[i + 1] * factor;
+      out.data[i + 2] = out.data[i + 2] * factor;
+    }
+  }
+  return out;
+}
+
 const SOBEL_X = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
 const SOBEL_Y = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
 

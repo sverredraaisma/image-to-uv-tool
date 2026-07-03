@@ -14,10 +14,12 @@ import {
   levels,
   maskCombine,
   morphology,
+  pixelate,
   posterize,
   sobel,
   threshold,
   transform,
+  vignette,
 } from './image';
 import type { RasterImage } from '../types';
 
@@ -129,6 +131,32 @@ describe('downscaleToMax', () => {
   it('leaves small images and maxDim<=0 unchanged', () => {
     expect(downscaleToMax(createImage(40, 30), 100).width).toBe(40);
     expect(downscaleToMax(createImage(200, 200), 0).width).toBe(200);
+  });
+});
+
+describe('pixelate', () => {
+  it('collapses each block to one colour (4px row, block 2)', () => {
+    const img = createImage(4, 1, [0, 0, 0, 255]);
+    set(img, 0, 0, [10, 0, 0, 255]);
+    set(img, 1, 0, [20, 0, 0, 255]);
+    set(img, 2, 0, [30, 0, 0, 255]);
+    set(img, 3, 0, [40, 0, 0, 255]);
+    const out = pixelate(img, 2);
+    expect([px(out, 0, 0)[0], px(out, 1, 0)[0], px(out, 2, 0)[0], px(out, 3, 0)[0]]).toEqual([10, 10, 30, 30]);
+  });
+  it('block size <= 1 is a no-op copy', () => {
+    const img = createImage(2, 2, [5, 6, 7, 8]);
+    expect([...pixelate(img, 1).data]).toEqual([...img.data]);
+  });
+});
+
+describe('vignette', () => {
+  it('strength 0 is unchanged; strength 1 blacks the corners but keeps the centre', () => {
+    const img = createImage(3, 3, [200, 200, 200, 255]);
+    expect(px(vignette(img, 0), 0, 0)).toEqual([200, 200, 200, 255]);
+    const v = vignette(img, 1);
+    expect(px(v, 1, 1)).toEqual([200, 200, 200, 255]); // centre untouched
+    expect(px(v, 0, 0)).toEqual([0, 0, 0, 255]); // corner darkened to black
   });
 });
 

@@ -22,10 +22,12 @@ import {
   maskCombine,
   morphology,
   outline,
+  pixelate,
   posterize,
   resize,
   sobel,
   threshold,
+  vignette,
   transform,
   type AlphaCleanupMode,
   type Channel,
@@ -309,6 +311,26 @@ export const edgeDetectNode = singleImageOp({
   op: (img) => sobel(img),
 });
 
+export const pixelateNode = singleImageOp({
+  type: 'pixelate',
+  label: 'Pixelate',
+  category: 'Adjust',
+  description: 'Mosaic / blocky pixelation.',
+  configFields: [{ kind: 'number', key: 'blockSize', label: 'Block size', min: 1, max: 128, step: 1 }],
+  defaultConfig: () => ({ blockSize: 8 }),
+  op: (img, config) => pixelate(img, num(config.blockSize, 8)),
+});
+
+export const vignetteNode = singleImageOp({
+  type: 'vignette',
+  label: 'Vignette',
+  category: 'Adjust',
+  description: 'Darken towards the corners.',
+  configFields: [{ kind: 'number', key: 'strength', label: 'Strength', min: 0, max: 1, step: 0.05 }],
+  defaultConfig: () => ({ strength: 0.5 }),
+  op: (img, config) => vignette(img, num(config.strength, 0.5)),
+});
+
 export const posterizeNode = singleImageOp({
   type: 'posterize',
   label: 'Posterize',
@@ -578,6 +600,8 @@ export const localNodes: NodeDefinition[] = [
   gradientMapNode,
   hueSaturationNode,
   edgeDetectNode,
+  pixelateNode,
+  vignetteNode,
   posterizeNode,
   outlineNode,
   alphaCleanupNode,
