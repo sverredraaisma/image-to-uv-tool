@@ -53,26 +53,32 @@ Histogram nodes; save-format version + migration hook.
 workflow links (`#g=`); PWA (favicon, manifest, offline service worker) + page
 metadata; MIT LICENSE.
 
-### Explicitly remaining (and why not done this session)
+### Higher-risk features — added since (branch `roadmap-rest`)
 
-These need a real browser to verify, a new dependency, live API access, or carry
-high regression risk to a green codebase — so they're called out rather than
-shipped unverified:
+- ✅ **1.2 Web Worker pool** — op-name-addressable heavy-op registry
+  (`heavyOps.ts`, byte-identical to the former inline ops), `imageOp.worker.ts`
+  - `imageWorkerPool.ts` (round-robin, copy-in/transfer-out, sync fallback),
+    wired via `platform.runImageOp`. Verified: registry parity + transfer
+    round-trip tests, and the real Vite dev server transforms the worker chain.
+- ✅ **1.3 parallel independent-branch execution** — the sweep runs each batch of
+  independent ready nodes with `Promise.all`.
+- ✅ **Phase 3** — AI result caching (deterministic/seeded runs, dedicated
+  IndexedDB store); multiple named projects (own IndexedDB store).
+- ✅ **Phase 4** — 3MF export (dependency-free STORED-zip writer); GitHub Pages
+  static-deploy workflow (+ configurable base, base-aware SW).
 
-- **1.2 Web Worker pool** — real value (CPU ops block the main thread) but safe
-  integration means making the node compute layer op-name-addressable, and it
-  can't be exercised in jsdom. Needs a browser perf-verification pass.
-- **1.2 lossless premultiply boundary** — a 2D canvas always re-premultiplies on
-  readback, so true losslessness needs a WebGL `readPixels` path (browser-only).
-- **1.3 full executor unification** — the concurrency _bugs_ are fixed (Phase 0)
-  and stop-on-failed-ancestor landed; collapsing the status/epoch/controller
-  triple-bookkeeping into one queue is a pure refactor with high regression risk
-  over 300+ tests — do it test-first in its own pass.
-- **Phase 3** — AI result caching (needs live API to validate the key/serialise),
-  multiple named projects (localStorage quota / IndexedDB storage decision),
-  batch/parameter-sweeps, cost tracking, model schema discovery.
-- **Phase 4** — 3MF export (needs a zip lib), static deploy + plugin API
-  (product decisions), curves/LUT/text-overlay/warp editors (custom-editor UI).
+### Still remaining (genuinely out of scope for this environment)
+
+- **1.2 lossless premultiply boundary** — a 2D canvas re-premultiplies on
+  readback; true losslessness needs a WebGL `readPixels` path (browser-only).
+- **1.3 full executor unification** — collapsing status/epoch/controller into one
+  queue is a pure refactor with high regression risk; bugs are already fixed.
+- **Cost tracking** — honest version needs Replicate's per-prediction `metrics`
+  plumbed through (can't validate without a live key).
+- **Model schema discovery** — needs the proxy to fetch a model's OpenAPI schema
+  (live API).
+- **Batch/parameter-sweeps**, **curves/LUT/text-overlay/warp custom editors**,
+  and a **plugin-loading API** (security surface) — larger UI/product work.
 
 ## Deferred — large infra (need dedicated effort; not safe to rush)
 
