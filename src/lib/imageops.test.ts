@@ -16,6 +16,7 @@ import {
   maskCombine,
   morphology,
   normalize,
+  opacity,
   pixelate,
   posterize,
   sharpen,
@@ -168,6 +169,14 @@ describe('vignette', () => {
     const v = vignette(img, 1);
     expect(px(v, 1, 1)).toEqual([200, 200, 200, 255]); // centre untouched
     expect(px(v, 0, 0)).toEqual([0, 0, 0, 255]); // corner darkened to black
+  });
+});
+
+describe('opacity', () => {
+  it('scales alpha and clamps the factor', () => {
+    expect(px(opacity(createImage(1, 1, [10, 20, 30, 200]), 0.5), 0, 0)).toEqual([10, 20, 30, 100]);
+    expect(px(opacity(createImage(1, 1, [10, 20, 30, 200]), 0), 0, 0)[3]).toBe(0);
+    expect(px(opacity(createImage(1, 1, [10, 20, 30, 200]), 1), 0, 0)[3]).toBe(200);
   });
 });
 

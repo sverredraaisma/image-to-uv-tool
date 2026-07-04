@@ -87,6 +87,7 @@ settling with a stale result.
 | Box Blur | Adjust | auto | Blur by an adjustable pixel radius. |
 | Sharpen | Adjust | auto | Unsharp-mask sharpening. |
 | Auto Contrast | Adjust | auto | Stretch each channel to the full 0–255 range. |
+| Opacity | Adjust | auto | Fade the image by scaling its alpha. |
 | Levels | Adjust | auto | Remap tones with black/white points and midtone gamma. |
 | Gradient Map | Adjust | auto | Map luminance to a two-colour gradient. |
 | Edge Detect | Adjust | auto | Sobel edge detection (white edges on black — feeds ControlNet). |

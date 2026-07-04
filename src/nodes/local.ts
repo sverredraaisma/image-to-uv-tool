@@ -23,6 +23,7 @@ import {
   maskCombine,
   morphology,
   normalize,
+  opacity,
   outline,
   pixelate,
   posterize,
@@ -306,6 +307,16 @@ export const normalizeNode = singleImageOp({
   category: 'Adjust',
   description: 'Stretch each channel to the full 0–255 range.',
   op: (img) => normalize(img),
+});
+
+export const opacityNode = singleImageOp({
+  type: 'opacity',
+  label: 'Opacity',
+  category: 'Adjust',
+  description: 'Fade the image by scaling its alpha.',
+  configFields: [{ kind: 'number', key: 'opacity', label: 'Opacity', min: 0, max: 1, step: 0.05 }],
+  defaultConfig: () => ({ opacity: 1 }),
+  op: (img, config) => opacity(img, num(config.opacity, 1)),
 });
 
 export const levelsNode = singleImageOp({
@@ -631,6 +642,7 @@ export const localNodes: NodeDefinition[] = [
   blurNode,
   sharpenNode,
   normalizeNode,
+  opacityNode,
   levelsNode,
   gradientMapNode,
   hueSaturationNode,

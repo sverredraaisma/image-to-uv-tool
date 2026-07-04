@@ -63,6 +63,14 @@ export function downscaleToMax(img: RasterImage, maxDim: number): RasterImage {
   return resize(img, Math.max(1, Math.round(img.width * scale)), Math.max(1, Math.round(img.height * scale)));
 }
 
+/** Scale the alpha channel by `factor` (0–1) to fade the image. */
+export function opacity(img: RasterImage, factor: number): RasterImage {
+  const f = Math.max(0, Math.min(1, factor));
+  const out = cloneImage(img);
+  for (let i = 3; i < out.data.length; i += 4) out.data[i] = out.data[i] * f;
+  return out;
+}
+
 export type InvertChannels = { r: boolean; g: boolean; b: boolean; a: boolean };
 
 /** Invert the selected RGBA channels. */
