@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { firstOutputText, firstOutputUrl, runModel } from './replicate';
+import { fetchModelSchema, firstOutputText, firstOutputUrl, runModel } from './replicate';
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
   return {
@@ -349,6 +349,54 @@ describe('runModel', () => {
         },
       ),
     ).rejects.toThrow(/timed out/i);
+  });
+
+  it('fetchModelSchema extracts sorted inputs, resolves enums and marks required (real shape)', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).endsWith('/models/owner/name')) {
+        return jsonResponse({
+          latest_version: {
+            openapi_schema: {
+              components: {
+                schemas: {
+                  Input: {
+                    required: ['prompt'],
+                    properties: {
+                      prompt: { type: 'string', description: 'The prompt', 'x-order': 1 },
+                      seed: { type: 'integer', description: 'Seed', 'x-order': 0 },
+                      aspect_ratio: {
+                        allOf: [{ $ref: '#/components/schemas/aspect_ratio' }],
+                        default: '1:1',
+                        'x-order': 2,
+                      },
+                    },
+                  },
+                  aspect_ratio: { type: 'string', enum: ['1:1', '16:9'] },
+                },
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    const fields = await fetchModelSchema('owner/name', {
+      apiKey: 'k',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(fields.map((f) => f.name)).toEqual(['seed', 'prompt', 'aspect_ratio']); // sorted by x-order
+    expect(fields.find((f) => f.name === 'prompt')?.required).toBe(true);
+    expect(fields.find((f) => f.name === 'seed')?.required).toBe(false);
+    expect(fields.find((f) => f.name === 'aspect_ratio')?.enumValues).toEqual(['1:1', '16:9']);
+  });
+
+  it('fetchModelSchema returns [] when the model has no input schema', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ latest_version: null }));
+    const fields = await fetchModelSchema('owner/name', {
+      apiKey: 'k',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(fields).toEqual([]);
   });
 
   it('cancels the remote prediction when the run is aborted', async () => {

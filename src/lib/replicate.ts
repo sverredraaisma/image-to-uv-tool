@@ -268,6 +268,80 @@ export function firstOutputUrl(output: unknown, preferredKey?: string): string |
   return null;
 }
 
+// --- Model input-schema discovery (read-only) ------------------------------
+
+export interface ModelInputField {
+  name: string;
+  type: string;
+  default?: unknown;
+  description?: string;
+  required: boolean;
+  enumValues?: (string | number)[];
+}
+
+interface OpenApiProp {
+  type?: string;
+  default?: unknown;
+  description?: string;
+  enum?: (string | number)[];
+  allOf?: { $ref?: string }[];
+  $ref?: string;
+  'x-order'?: number;
+}
+interface OpenApiObject {
+  type?: string;
+  enum?: (string | number)[];
+  properties?: Record<string, OpenApiProp>;
+  required?: string[];
+}
+interface ModelResponse {
+  latest_version?: {
+    openapi_schema?: { components?: { schemas?: Record<string, OpenApiObject> } };
+  } | null;
+}
+
+/**
+ * Fetch a model's declared inputs from its OpenAPI schema so input keys stop
+ * being guesswork. Read-only (a GET on the model), never runs a prediction.
+ */
+export async function fetchModelSchema(model: string, opts: ReplicateOptions): Promise<ModelInputField[]> {
+  if (!opts.apiKey) throw new Error('Missing Replicate API key');
+  const [slug] = model.split(':');
+  if (!slug || !slug.includes('/')) throw new Error(`Invalid model slug "${model}" (expected "owner/name")`);
+  const base = baseUrl(opts.proxyUrl);
+  const data = await request<ModelResponse>(`${base}/models/${slug}`, { method: 'GET' }, opts);
+  const schemas = data.latest_version?.openapi_schema?.components?.schemas;
+  const input = schemas?.Input;
+  if (!input?.properties) return [];
+  const required = new Set(input.required ?? []);
+
+  const resolve = (prop: OpenApiProp): { type: string; enumValues?: (string | number)[] } => {
+    if (prop.type) return { type: prop.type, enumValues: prop.enum };
+    const ref = prop.allOf?.[0]?.$ref ?? prop.$ref;
+    if (ref && schemas) {
+      const target = schemas[String(ref).split('/').pop() ?? ''];
+      if (target) return { type: target.type ?? 'enum', enumValues: target.enum };
+    }
+    return { type: 'unknown' };
+  };
+
+  return Object.entries(input.properties)
+    .map(([name, prop]) => {
+      const { type, enumValues } = resolve(prop);
+      return {
+        name,
+        type,
+        default: prop.default,
+        description: prop.description,
+        required: required.has(name),
+        enumValues,
+        _order: prop['x-order'] ?? 0,
+      };
+    })
+    .sort((a, b) => a._order - b._order)
+    .map(({ _order, ...field }) => field);
+}
+
 /**
  * Extract text from a model's output. Handles a bare string, an array of string
  * chunks (some models stream tokens), and objects with a text-ish field.

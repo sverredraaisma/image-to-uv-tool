@@ -876,3 +876,42 @@ textarea {
   flex: 1;
   text-align: left;
 }
+
+/* ---------------- Model schema discovery ---------------- */
+.model-schema {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.model-schema-note {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--muted, #9aa4b2);
+}
+.model-schema-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.model-schema-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.model-schema-key {
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+  color: var(--text);
+}
+.model-schema-type {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.model-schema-desc {
+  color: var(--muted, #9aa4b2);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

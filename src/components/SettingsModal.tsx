@@ -2,6 +2,7 @@ import { useStore } from '../store/store';
 import { getNodeDefSafe } from '../engine/registry';
 import { ConfigFields } from './ConfigFields';
 import { AreaPickerEditor } from './AreaPickerEditor';
+import { ModelSchemaHint } from './ModelSchemaHint';
 import { Modal } from './Modal';
 
 export function SettingsModal() {
@@ -14,6 +15,7 @@ export function SettingsModal() {
   if (!def) return null;
 
   const isAreaPicker = def.customEditor === 'areaPicker';
+  const isAi = def.category === 'AI (Replicate)';
 
   return (
     <Modal
@@ -25,12 +27,15 @@ export function SettingsModal() {
       {isAreaPicker ? (
         <AreaPickerEditor nodeId={editorNodeId} />
       ) : (
-        <ConfigFields
-          nodeId={editorNodeId}
-          fields={def.configFields ?? []}
-          config={node.config}
-          collapseAdvanced
-        />
+        <>
+          <ConfigFields
+            nodeId={editorNodeId}
+            fields={def.configFields ?? []}
+            config={node.config}
+            collapseAdvanced
+          />
+          {isAi && <ModelSchemaHint model={String(node.config.model ?? '')} />}
+        </>
       )}
     </Modal>
   );
