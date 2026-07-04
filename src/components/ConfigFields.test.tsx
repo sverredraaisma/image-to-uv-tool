@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConfigFields } from './ConfigFields';
 import { useStore } from '../store/store';
@@ -26,7 +26,10 @@ describe('ConfigFields number input', () => {
     const input = screen.getByLabelText('Brightness');
     await userEvent.clear(input);
     await userEvent.type(input, '-42');
-    expect(useStore.getState().nodes[0].config.brightness).toBe('-42');
+    // The input reflects the keystrokes immediately (local draft)…
+    expect(input).toHaveValue('-42');
+    // …and the store commit lands after the debounce settles.
+    await waitFor(() => expect(useStore.getState().nodes[0].config.brightness).toBe('-42'));
     expect(num(useStore.getState().nodes[0].config.brightness, 0)).toBe(-42);
   });
 
@@ -35,7 +38,7 @@ describe('ConfigFields number input', () => {
     render(<Harness id={id} />);
     const input = screen.getByLabelText('Contrast');
     await userEvent.clear(input);
-    expect(useStore.getState().nodes[0].config.contrast).toBe('');
+    await waitFor(() => expect(useStore.getState().nodes[0].config.contrast).toBe(''));
     expect(num(useStore.getState().nodes[0].config.contrast, 7)).toBe(7); // falls back to default
   });
 });

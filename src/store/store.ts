@@ -128,7 +128,9 @@ export interface StoreState {
   addNode: (type: string, position?: { x: number; y: number }) => string;
   duplicateNode: (id: string) => string;
   removeNode: (id: string) => void;
+  removeNodes: (ids: string[]) => void;
   setNodePosition: (id: string, position: { x: number; y: number }) => void;
+  setNodePositions: (updates: { id: string; position: { x: number; y: number } }[]) => void;
   updateNodeConfig: (id: string, patch: NodeConfig) => void;
   addConnection: (conn: ConnectionInput) => boolean;
   canConnect: (conn: ConnectionInput) => boolean;
@@ -289,6 +291,55 @@ export const useStore = create<StoreState>()(
         set((s) => ({
           nodes: s.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
         }));
+      },
+
+      // Persist a whole multi-selection drag in one snapshot so the other
+      // dragged nodes don't snap back on the next store sync, and one undo
+      // reverses the whole move.
+      setNodePositions: (updates) => {
+        const cur = get().nodes;
+        const moved = updates.filter((u) => {
+          const n = cur.find((m) => m.id === u.id);
+          return n && (n.position.x !== u.position.x || n.position.y !== u.position.y);
+        });
+        if (!moved.length) return;
+        get()._snapshot();
+        const byId = new Map(moved.map((u) => [u.id, u.position]));
+        set((s) => ({
+          nodes: s.nodes.map((n) => (byId.has(n.id) ? { ...n, position: byId.get(n.id)! } : n)),
+        }));
+      },
+
+      removeNodes: (ids) => {
+        const doomed = new Set(ids.filter((id) => get().nodes.some((n) => n.id === id)));
+        if (!doomed.size) return;
+        get()._snapshot();
+        const { edges, selectedNodeId, editorNodeId } = get();
+        const affected = new Set<string>();
+        for (const id of doomed) {
+          runControllers.get(id)?.abort();
+          for (const d of downstreamNodeIds(id, edges)) if (!doomed.has(d)) affected.add(d);
+        }
+        set((s) => {
+          const runtime = { ...s.runtime };
+          const epochs = { ...s.epochs };
+          for (const id of doomed) {
+            delete runtime[id];
+            delete epochs[id];
+          }
+          return {
+            nodes: s.nodes.filter((n) => !doomed.has(n.id)),
+            edges: s.edges.filter((e) => !doomed.has(e.source) && !doomed.has(e.target)),
+            runtime,
+            epochs,
+            selectedNodeId: selectedNodeId && doomed.has(selectedNodeId) ? null : s.selectedNodeId,
+            editorNodeId: editorNodeId && doomed.has(editorNodeId) ? null : s.editorNodeId,
+            pendingConnection:
+              s.pendingConnection && doomed.has(s.pendingConnection.nodeId) ? null : s.pendingConnection,
+          };
+        });
+        for (const d of affected) get().markOutOfDate(d);
+        void get().processAutoRun();
       },
 
       updateNodeConfig: (id, patch) => {

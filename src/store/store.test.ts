@@ -386,6 +386,37 @@ describe('node + edge removal', () => {
     expect((store().runtime[b].outputs.out as { text: string }).text).toBe('');
   });
 
+  it('removeNodes deletes a whole selection in one undo step', async () => {
+    const { a, b, c } = await buildChain();
+    const before = store().history.length;
+    store().removeNodes([a, b]);
+    expect(store().nodes.some((n) => n.id === a || n.id === b)).toBe(false);
+    expect(store().history.length).toBe(before + 1); // single snapshot, not one per node
+    store().undo();
+    expect(store().nodes.some((n) => n.id === a)).toBe(true);
+    expect(store().nodes.some((n) => n.id === b)).toBe(true);
+    void c;
+  });
+
+  it('setNodePositions moves a selection in one snapshot; a no-op move adds none', () => {
+    const a = store().addNode('test.const');
+    const b = store().addNode('test.const');
+    const pa = store().nodes.find((n) => n.id === a)!.position;
+    const pb = store().nodes.find((n) => n.id === b)!.position;
+    const before = store().history.length;
+    store().setNodePositions([
+      { id: a, position: { x: pa.x + 30, y: pa.y } },
+      { id: b, position: { x: pb.x + 30, y: pb.y } },
+    ]);
+    expect(store().history.length).toBe(before + 1);
+    expect(store().nodes.find((n) => n.id === a)!.position.x).toBe(pa.x + 30);
+    expect(store().nodes.find((n) => n.id === b)!.position.x).toBe(pb.x + 30);
+    // No-op move (same positions) must not create a history entry.
+    const after = store().history.length;
+    store().setNodePositions([{ id: a, position: { x: pa.x + 30, y: pa.y } }]);
+    expect(store().history.length).toBe(after);
+  });
+
   it('duplicateNode copies type + config with a new id and offset position', () => {
     const a = store().addNode('test.const');
     store().updateNodeConfig(a, { v: '9' });
