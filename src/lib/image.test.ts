@@ -121,6 +121,11 @@ describe('alphaCleanup', () => {
     const out = alphaCleanup(img, 128, 'black');
     expect(px(out, 0, 0)).toEqual([0, 0, 0, 255]);
   });
+  it('snaps faint pixels to opaque white', () => {
+    const img = solid(1, 1, [100, 100, 100, 10]);
+    const out = alphaCleanup(img, 128, 'white');
+    expect(px(out, 0, 0)).toEqual([255, 255, 255, 255]);
+  });
   it('leaves strong pixels untouched', () => {
     const img = solid(1, 1, [100, 100, 100, 200]);
     const out = alphaCleanup(img, 128, 'transparent');
