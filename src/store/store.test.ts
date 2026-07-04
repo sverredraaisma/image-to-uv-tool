@@ -87,7 +87,22 @@ const abortableNode: NodeDefinition = {
       signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
     }),
 };
-[constNode, passNode, manualNode, imageInNode, asyncNode, abortableNode].forEach(registerNode);
+// A manual node whose compute always throws.
+const throwingNode: NodeDefinition = {
+  type: 'test.throwing',
+  label: 'Boom',
+  category: 'test',
+  autoRun: false,
+  inputs: [],
+  outputs: [{ id: 'out', label: 'out', type: 'text' }],
+  defaultConfig: () => ({}),
+  compute: async () => {
+    throw new Error('kaboom');
+  },
+};
+[constNode, passNode, manualNode, imageInNode, asyncNode, abortableNode, throwingNode].forEach(
+  registerNode,
+);
 
 const store = () => useStore.getState();
 
@@ -414,5 +429,15 @@ describe('cancellation', () => {
     await running;
     expect(store().runtime[id].status).toBe('outOfDate');
     expect(store().runtime[id].error).toBeUndefined();
+  });
+});
+
+describe('compute errors', () => {
+  it('a throwing compute sets error status and toasts the label + message', async () => {
+    const id = store().addNode('test.throwing');
+    await store().runNode(id);
+    expect(store().runtime[id].status).toBe('error');
+    expect(store().runtime[id].error).toBe('kaboom');
+    expect(store().toasts.some((t) => t.type === 'error' && /Boom: kaboom/.test(t.message))).toBe(true);
   });
 });
