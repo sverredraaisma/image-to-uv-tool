@@ -865,3 +865,14 @@ textarea {
   color: var(--muted, #9aa4b2);
   margin-bottom: 2px;
 }
+
+/* ---------------- Projects menu ---------------- */
+.projects-menu .project-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.projects-menu .project-open {
+  flex: 1;
+  text-align: left;
+}

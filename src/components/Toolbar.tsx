@@ -3,6 +3,7 @@ import { useStore } from '../store/store';
 import { downloadText, graphFileName } from '../lib/download';
 import { encodeGraphToHash } from '../lib/shareLink';
 import { NodePicker } from './NodePicker';
+import { ProjectsMenu } from './ProjectsMenu';
 import type { SavedGraph } from '../types';
 
 function AddNodeMenu() {
@@ -135,6 +136,7 @@ export function Toolbar() {
           ↷
         </button>
         <AddNodeMenu />
+        <ProjectsMenu />
         <button type="button" className="btn" onClick={() => void onSave()}>
           Save
         </button>
