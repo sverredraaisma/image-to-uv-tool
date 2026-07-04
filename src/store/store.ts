@@ -20,6 +20,7 @@ import {
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
 import { sanitizeGraph } from '../engine/sanitize';
+import { reconcileRuntime } from '../engine/reconcile';
 import { findReadyAutoNode, gatherInputs } from '../engine/schedule';
 import { createSafeStorage } from './safeStorage';
 import '../nodes'; // side-effect: register built-in node definitions
@@ -47,6 +48,18 @@ let autoRunPending = false;
 
 // Abort controllers for in-flight node runs, so long/hung runs can be cancelled.
 const runControllers = new Map<string, AbortController>();
+
+/**
+ * Abort and forget every in-flight run. Called whenever the whole graph is
+ * swapped out (undo/redo/load/reset/clear). After this, a still-pending run is
+ * no longer the "current" controller for its node, so its (now stale) result is
+ * discarded at the commit guard in `_executeNode` instead of overwriting the
+ * freshly restored graph — this is what closes the epoch-reset hole (H1).
+ */
+function abortAllRuns(): void {
+  for (const c of runControllers.values()) c.abort();
+  runControllers.clear();
+}
 
 // ---------------------------------------------------------------------------
 // Store types
@@ -336,15 +349,21 @@ export const useStore = create<StoreState>()(
         const { history } = get();
         if (!history.length) return;
         const prev = history[history.length - 1];
-        set((s) => ({
-          nodes: prev.nodes,
-          edges: prev.edges,
-          history: s.history.slice(0, -1),
-          future: [{ nodes: s.nodes, edges: s.edges }, ...s.future].slice(0, HISTORY_LIMIT),
-          runtime: {},
-          epochs: {},
-          pendingConnection: null,
-        }));
+        abortAllRuns();
+        set((s) => {
+          const current = { nodes: s.nodes, edges: s.edges };
+          return {
+            nodes: prev.nodes,
+            edges: prev.edges,
+            history: s.history.slice(0, -1),
+            future: [current, ...s.future].slice(0, HISTORY_LIMIT),
+            // Keep results for nodes unchanged by the undo (don't wipe paid AI
+            // outputs on a mere position nudge, H5).
+            runtime: reconcileRuntime(s.runtime, current, prev),
+            epochs: {},
+            pendingConnection: null,
+          };
+        });
         void get().processAutoRun();
       },
 
@@ -352,15 +371,19 @@ export const useStore = create<StoreState>()(
         const { future } = get();
         if (!future.length) return;
         const next = future[0];
-        set((s) => ({
-          nodes: next.nodes,
-          edges: next.edges,
-          future: s.future.slice(1),
-          history: [...s.history.slice(-(HISTORY_LIMIT - 1)), { nodes: s.nodes, edges: s.edges }],
-          runtime: {},
-          epochs: {},
-          pendingConnection: null,
-        }));
+        abortAllRuns();
+        set((s) => {
+          const current = { nodes: s.nodes, edges: s.edges };
+          return {
+            nodes: next.nodes,
+            edges: next.edges,
+            future: s.future.slice(1),
+            history: [...s.history.slice(-(HISTORY_LIMIT - 1)), current],
+            runtime: reconcileRuntime(s.runtime, current, next),
+            epochs: {},
+            pendingConnection: null,
+          };
+        });
         void get().processAutoRun();
       },
 
@@ -433,6 +456,13 @@ export const useStore = create<StoreState>()(
         const controller = new AbortController();
         runControllers.set(id, controller);
 
+        // True only while THIS run still owns the node: a newer run of the same
+        // node, or a graph swap (undo/redo/load/reset) via abortAllRuns, replaces
+        // or clears the controller. A run that is no longer current must not
+        // write any result — that would clobber the newer run or resurrect a
+        // stale output against a restored graph (H1).
+        const isCurrent = () => runControllers.get(id) === controller;
+
         set((s) => ({
           runtime: {
             ...s.runtime,
@@ -463,6 +493,10 @@ export const useStore = create<StoreState>()(
           // Node deleted while running — drop the result, don't resurrect it.
           if (!get().nodes.some((n) => n.id === id)) return;
 
+          // Superseded by a newer run or a graph swap — that run/graph owns the
+          // node now, so silently drop this result (H1).
+          if (!isCurrent()) return;
+
           // Invalidated mid-run: discard the stale result and stay out of date so
           // the scheduler re-runs us with the fresh config/inputs.
           if ((get().epochs[id] ?? 0) !== startEpoch) {
@@ -485,6 +519,9 @@ export const useStore = create<StoreState>()(
           for (const d of downstreamNodeIds(id, get().edges)) get().markOutOfDate(d);
         } catch (err) {
           if (!get().nodes.some((n) => n.id === id)) return;
+          // Superseded by a newer run or a graph swap — don't stamp a status onto
+          // a node the newer run/graph now owns (fixes the abort-clobber race).
+          if (!isCurrent()) return;
           // A user-initiated cancel resets the node to out-of-date, not error.
           if (err instanceof DOMException && err.name === 'AbortError') {
             set((st) => ({
@@ -585,7 +622,8 @@ export const useStore = create<StoreState>()(
         void get().processAutoRun();
       },
 
-      reset: () =>
+      reset: () => {
+        abortAllRuns();
         set({
           nodes: [],
           edges: [],
@@ -598,7 +636,8 @@ export const useStore = create<StoreState>()(
           toasts: [],
           history: [],
           future: [],
-        }),
+        });
+      },
 
       exportGraph: () => {
         const { nodes, edges } = get();
@@ -607,6 +646,7 @@ export const useStore = create<StoreState>()(
 
       loadGraph: (graph) => {
         get()._snapshot();
+        abortAllRuns();
         const { nodes, edges } = sanitizeGraph(graph);
         set({
           nodes,
@@ -624,6 +664,7 @@ export const useStore = create<StoreState>()(
       clearGraph: () => {
         if (!get().nodes.length && !get().edges.length) return;
         get()._snapshot();
+        abortAllRuns();
         set({
           nodes: [],
           edges: [],

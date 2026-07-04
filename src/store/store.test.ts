@@ -441,3 +441,72 @@ describe('compute errors', () => {
     expect(store().toasts.some((t) => t.type === 'error' && /Boom: kaboom/.test(t.message))).toBe(true);
   });
 });
+
+describe('graph-swap safety (H1 / H5)', () => {
+  it('an in-flight run does not commit its stale result after an undo', async () => {
+    const m = store().addNode('test.async'); // snapshot: []
+    const running = store().runNode(m); // async compute pending, status running
+    expect(store().runtime[m].status).toBe('running');
+    store().addNode('test.const'); // snapshot: [m]
+    store().undo(); // restore [m]; aborts in-flight runs
+    releaseAsync!(); // the old run resolves only now, against the restored graph
+    await running;
+    // The stale 'done' output must NOT have been committed.
+    expect(store().runtime[m].status).toBe('outOfDate');
+    expect(store().runtime[m].outputs.out).toBeUndefined();
+  });
+
+  it('undo preserves computed results for nodes it did not change (no paid re-run)', async () => {
+    const { a, c } = await buildChain();
+    await store().runNode(c); // manual node now up to date ("M:5")
+    expect(store().runtime[c].status).toBe('upToDate');
+    const manualRuns = runCounts.manual;
+
+    // A pure position nudge, then undo it.
+    const pos = store().nodes.find((n) => n.id === a)!.position;
+    store().setNodePosition(a, { x: pos.x + 25, y: pos.y });
+    store().undo();
+    await store().processAutoRun();
+
+    // The manual result survived the undo and was not recomputed.
+    expect(store().runtime[c].status).toBe('upToDate');
+    expect((store().runtime[c].outputs.out as { text: string }).text).toBe('M:5');
+    expect(runCounts.manual).toBe(manualRuns);
+  });
+
+  it('undo invalidates the structurally-affected branch but keeps an unrelated result', async () => {
+    // Two independent chains, each ending in a (paid) manual node.
+    const a1 = store().addNode('test.const');
+    store().updateNodeConfig(a1, { v: '5' });
+    const b1 = store().addNode('test.pass');
+    const c1 = store().addNode('test.manual');
+    store().addConnection({ source: a1, sourceHandle: 'out', target: b1, targetHandle: 'in' });
+    store().addConnection({ source: b1, sourceHandle: 'out', target: c1, targetHandle: 'in' });
+
+    const a2 = store().addNode('test.const');
+    store().updateNodeConfig(a2, { v: '9' });
+    const b2 = store().addNode('test.pass');
+    const c2 = store().addNode('test.manual');
+    store().addConnection({ source: a2, sourceHandle: 'out', target: b2, targetHandle: 'in' });
+    store().addConnection({ source: b2, sourceHandle: 'out', target: c2, targetHandle: 'in' });
+
+    await store().processAutoRun();
+    await store().runNode(c1);
+    await store().runNode(c2);
+    expect(store().runtime[c1].status).toBe('upToDate');
+    expect(store().runtime[c2].status).toBe('upToDate');
+
+    // Structurally change chain 1, then undo it.
+    const ab1 = store().edges.find((e) => e.source === a1 && e.target === b1)!;
+    store().removeEdge(ab1.id);
+    await store().processAutoRun();
+    store().undo(); // restore a1 -> b1
+    await store().processAutoRun();
+
+    // chain 1's manual node was invalidated by the structural change...
+    expect(store().runtime[c1].status).toBe('outOfDate');
+    // ...but chain 2 (untouched) kept its result — a full wipe would lose it.
+    expect(store().runtime[c2].status).toBe('upToDate');
+    expect((store().runtime[c2].outputs.out as { text: string }).text).toBe('M:9');
+  });
+});
