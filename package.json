@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Node-based image/file generation tool. Bring-your-own-key Replicate integration, runs fully in the browser.",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "proxy": "node proxy/replicate-proxy.mjs",

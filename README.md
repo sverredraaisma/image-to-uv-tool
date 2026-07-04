@@ -7,6 +7,8 @@ Everything runs **entirely in the browser**; there is no backend. AI nodes call
 
 ## Quick start
 
+Requires Node **20.19+** or **22.12+** (Vite 8).
+
 ```bash
 npm install
 npm run dev        # start the dev server (Vite)
