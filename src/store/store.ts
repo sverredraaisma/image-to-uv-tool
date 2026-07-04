@@ -25,7 +25,7 @@ import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { CURRENT_GRAPH_VERSION, migrateSavedGraph } from '../engine/migrate';
 import { reconcileRuntime } from '../engine/reconcile';
 import { cloneFragment } from '../engine/clone';
-import { bypassOutputs, findReadyAutoNode, gatherInputs } from '../engine/schedule';
+import { bypassOutputs, findReadyAutoNodes, gatherInputs } from '../engine/schedule';
 import { platform } from '../lib/platform';
 import { isBlobRef } from '../lib/blobStore';
 import { createSafeStorage } from './safeStorage';
@@ -718,14 +718,16 @@ export const useStore = create<StoreState>()(
         const sweep = async () => {
           for (;;) {
             const { nodes, edges, runtime } = get();
-            const ready = findReadyAutoNode(
+            const ready = findReadyAutoNodes(
               nodes,
               edges,
               runtime,
               (n) => n.bypassed === true || (getNodeDefSafe(n.type)?.autoRun ?? false),
             );
-            if (!ready) break;
-            await get()._executeNode(ready);
+            if (!ready.length) break;
+            // Ready nodes are pairwise independent, so run them concurrently —
+            // independent branches (and async decodes) progress in parallel.
+            await Promise.all(ready.map((id) => get()._executeNode(id)));
           }
         };
         autoRunPromise = (async () => {

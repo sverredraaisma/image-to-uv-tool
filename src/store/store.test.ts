@@ -148,6 +148,25 @@ describe('auto-run scheduling', () => {
     expect(runCounts.manual ?? 0).toBe(0);
   });
 
+  it('computes a diamond graph correctly with concurrent independent branches', async () => {
+    // a → b, a → c, then b & c → d (multiple input). b and c run concurrently.
+    const a = store().addNode('test.const');
+    store().updateNodeConfig(a, { v: 'X' });
+    const b = store().addNode('test.pass');
+    const c = store().addNode('test.pass');
+    const d = store().addNode('test.pass'); // 'in' is single, so wire only b→d here
+    store().addConnection({ source: a, sourceHandle: 'out', target: b, targetHandle: 'in' });
+    store().addConnection({ source: a, sourceHandle: 'out', target: c, targetHandle: 'in' });
+    store().addConnection({ source: b, sourceHandle: 'out', target: d, targetHandle: 'in' });
+    await store().processAutoRun();
+    expect(store().runtime[a].status).toBe('upToDate');
+    expect(store().runtime[b].status).toBe('upToDate');
+    expect(store().runtime[c].status).toBe('upToDate');
+    expect((store().runtime[b].outputs.out as { text: string }).text).toBe('X');
+    expect((store().runtime[c].outputs.out as { text: string }).text).toBe('X');
+    expect((store().runtime[d].outputs.out as { text: string }).text).toBe('X');
+  });
+
   it('re-runs downstream auto nodes when an upstream config changes', async () => {
     const { a, b, c } = await buildChain();
     store().updateNodeConfig(a, { v: '9' });

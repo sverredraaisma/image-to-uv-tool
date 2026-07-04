@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bypassOutputs, findReadyAutoNode, gatherInputs } from './schedule';
+import { bypassOutputs, findReadyAutoNode, findReadyAutoNodes, gatherInputs } from './schedule';
 import type { DataValue, GraphEdge, NodeRuntime, PortSpec } from '../types';
 
 const edge = (source: string, sh: string, target: string, th: string): GraphEdge => ({
@@ -60,6 +60,30 @@ describe('findReadyAutoNode', () => {
     expect(
       findReadyAutoNode([{ id: 'b', type: 'manual', bypassed: true }], [], rt({ b: 'outOfDate' }), auto),
     ).toBe('b');
+  });
+
+  it('findReadyAutoNodes returns every independent ready node for concurrent run', () => {
+    // a and b are independent roots; c depends on both.
+    const nodes = [
+      { id: 'a', type: 'auto' },
+      { id: 'b', type: 'auto' },
+      { id: 'c', type: 'auto' },
+    ];
+    const edges = [edge('a', 'out', 'c', 'in'), edge('b', 'out', 'c', 'in')];
+    const both = findReadyAutoNodes(
+      nodes,
+      edges,
+      rt({ a: 'outOfDate', b: 'outOfDate', c: 'outOfDate' }),
+      auto,
+    );
+    expect(both.sort()).toEqual(['a', 'b']); // c not ready yet
+    const afterRoots = findReadyAutoNodes(
+      nodes,
+      edges,
+      rt({ a: 'upToDate', b: 'upToDate', c: 'outOfDate' }),
+      auto,
+    );
+    expect(afterRoots).toEqual(['c']);
   });
 
   it('waits until upstream nodes are up to date', () => {

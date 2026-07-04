@@ -39,13 +39,27 @@ export function findReadyAutoNode(
   runtime: Record<string, NodeRuntime>,
   isAuto: (node: { id: string; type: string; bypassed?: boolean }) => boolean,
 ): string | undefined {
+  return findReadyAutoNodes(nodes, edges, runtime, isAuto)[0];
+}
+
+/**
+ * All out-of-date auto-run nodes whose upstream are up to date. They are pairwise
+ * independent (none is upstream of another, or it wouldn't be ready), so the
+ * caller may run them concurrently.
+ */
+export function findReadyAutoNodes(
+  nodes: { id: string; type: string; bypassed?: boolean }[],
+  edges: GraphEdge[],
+  runtime: Record<string, NodeRuntime>,
+  isAuto: (node: { id: string; type: string; bypassed?: boolean }) => boolean,
+): string[] {
+  const ready: string[] = [];
   for (const n of nodes) {
     if (!isAuto(n)) continue;
     if (statusOf(runtime, n.id) !== 'outOfDate') continue;
-    const ready = upstreamNodeIds(n.id, edges).every((u) => statusOf(runtime, u) === 'upToDate');
-    if (ready) return n.id;
+    if (upstreamNodeIds(n.id, edges).every((u) => statusOf(runtime, u) === 'upToDate')) ready.push(n.id);
   }
-  return undefined;
+  return ready;
 }
 
 const kindForPort = (t: PortSpec['type']): DataValue['kind'] =>
