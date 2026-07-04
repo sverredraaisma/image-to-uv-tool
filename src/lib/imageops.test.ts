@@ -97,6 +97,20 @@ describe('crop', () => {
     expect(px(out, 0, 1)).toEqual([40, 0, 0, 255]); // D
   });
 
+  it('clips a negative origin instead of shifting the region', () => {
+    // Requesting x=-1,w=2 on the 2×2 grid intersects columns [0,1): column 0.
+    const out = crop(grid(), -1, 0, 2, 2);
+    expect([out.width, out.height]).toEqual([1, 2]);
+    expect(px(out, 0, 0)).toEqual([10, 0, 0, 255]); // A (col 0, row 0)
+    expect(px(out, 0, 1)).toEqual([30, 0, 0, 255]); // C (col 0, row 1)
+  });
+
+  it('returns a 1×1 transparent image when the rectangle misses the image', () => {
+    const out = crop(grid(), -10, -10, 5, 5);
+    expect([out.width, out.height]).toEqual([1, 1]);
+    expect(px(out, 0, 0)).toEqual([0, 0, 0, 0]);
+  });
+
   it('clamps an over-sized rectangle without reading past the buffer', () => {
     const out = crop(grid(), 1, 1, 100, 100); // grid is 2×2; only D remains
     expect([out.width, out.height]).toEqual([1, 1]);
@@ -269,6 +283,17 @@ describe('normalize', () => {
     expect([px(out, 0, 0)[0], px(out, 1, 0)[0], px(out, 2, 0)[0]]).toEqual([0, 127, 255]);
     expect(px(out, 1, 0)[1]).toBe(100); // constant green channel unchanged
   });
+
+  it('ignores fully-transparent pixels when computing the range', () => {
+    // A transparent outlier at R=255 must not widen the stretch of the opaque
+    // pixels (which span 50..150).
+    const img = createImage(3, 1, [50, 0, 0, 255]);
+    set(img, 1, 0, [150, 0, 0, 255]);
+    set(img, 2, 0, [255, 0, 0, 0]); // transparent outlier
+    const out = normalize(img);
+    expect(px(out, 0, 0)[0]).toBe(0); // min opaque (50) -> 0
+    expect(px(out, 1, 0)[0]).toBe(255); // max opaque (150) -> 255
+  });
 });
 
 describe('sharpen', () => {
@@ -381,6 +406,14 @@ describe('morphology', () => {
   it('radius 0 is a no-op copy', () => {
     const img = createImage(2, 2, [1, 2, 3, 4]);
     expect([...morphology(img, 0, 'dilate').data]).toEqual([...img.data]);
+  });
+
+  it('caps an absurd radius so it terminates and covers the image', () => {
+    const img = createImage(5, 5);
+    set(img, 2, 2, [255, 255, 255, 255]);
+    const out = morphology(img, 1e9, 'dilate'); // must not hang
+    expect(px(out, 0, 0)).toEqual([255, 255, 255, 255]); // whole image covered
+    expect(px(out, 4, 4)).toEqual([255, 255, 255, 255]);
   });
 });
 

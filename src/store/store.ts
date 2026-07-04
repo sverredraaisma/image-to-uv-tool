@@ -109,6 +109,7 @@ interface GraphSnapshot {
 }
 
 const HISTORY_LIMIT = 50;
+const MAX_TOASTS = 6;
 
 export interface StoreState {
   nodes: GraphNode[];
@@ -486,7 +487,10 @@ export const useStore = create<StoreState>()(
       openPreview: (value, title) => set({ preview: { value, title } }),
       closePreview: () => set({ preview: null }),
 
-      addToast: (type, message) => set((s) => ({ toasts: [...s.toasts, { id: genId('t'), type, message }] })),
+      addToast: (type, message) =>
+        // Keep only the most recent toasts so an error flood can't grow the
+        // array (and the DOM) without bound.
+        set((s) => ({ toasts: [...s.toasts, { id: genId('t'), type, message }].slice(-MAX_TOASTS) })),
       dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
       markOutOfDate: (id) =>
@@ -722,8 +726,10 @@ export const useStore = create<StoreState>()(
       },
 
       exportGraph: () => {
+        // Deep-clone so callers can't mutate live store state through the
+        // exported object (config objects are otherwise shared by reference).
         const { nodes, edges } = get();
-        return { version: 1, nodes, edges };
+        return { version: 1, nodes: structuredClone(nodes), edges: structuredClone(edges) };
       },
 
       loadGraph: (graph) => {

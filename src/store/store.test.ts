@@ -584,3 +584,20 @@ describe('graph-swap safety (H1 / H5)', () => {
     expect((store().runtime[c2].outputs.out as { text: string }).text).toBe('M:9');
   });
 });
+
+describe('robustness (§2.3)', () => {
+  it('caps the toast list so an error flood cannot grow unbounded', () => {
+    for (let i = 0; i < 12; i++) store().addToast('error', `e${i}`);
+    const toasts = store().toasts;
+    expect(toasts.length).toBeLessThanOrEqual(6);
+    expect(toasts[toasts.length - 1].message).toBe('e11'); // keeps the most recent
+  });
+
+  it('exportGraph returns a deep clone (mutating it does not affect the store)', () => {
+    const a = store().addNode('test.const');
+    store().updateNodeConfig(a, { v: 'orig' });
+    const saved = store().exportGraph();
+    (saved.nodes.find((n) => n.id === a)!.config as { v: string }).v = 'mutated';
+    expect(store().nodes.find((n) => n.id === a)!.config.v).toBe('orig');
+  });
+});

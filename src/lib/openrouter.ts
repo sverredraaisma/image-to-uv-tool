@@ -17,6 +17,10 @@ export interface OpenRouterOptions {
   fetchImpl?: typeof fetch;
   /** Override endpoint (tests / self-host). */
   url?: string;
+  /** Optional OpenRouter attribution title (defaults to the app name). */
+  title?: string;
+  /** Optional OpenRouter attribution referer (omitted unless set). */
+  referer?: string;
 }
 
 interface ChatResponse {
@@ -40,8 +44,10 @@ export async function chatCompletion(
       headers: {
         Authorization: `Bearer ${opts.apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/node-image-tool',
-        'X-Title': 'Node Image Tool',
+        // Optional OpenRouter attribution. Kept to the app's own name rather
+        // than a made-up GitHub repo; overridable by the caller.
+        'X-Title': opts.title ?? 'image-to-uv-tool',
+        ...(opts.referer ? { 'HTTP-Referer': opts.referer } : {}),
       },
       body: JSON.stringify({
         model,

@@ -3,6 +3,11 @@ import type { NodeDefinition, PortSpec } from '../types';
 const registry = new Map<string, NodeDefinition>();
 
 export function registerNode(def: NodeDefinition): void {
+  if (registry.has(def.type)) {
+    // Two definitions claiming the same type is a bug (or an unintended plugin
+    // clash); surface it instead of silently shadowing the earlier one.
+    console.warn(`registerNode: overwriting existing node type "${def.type}"`);
+  }
   registry.set(def.type, def);
 }
 

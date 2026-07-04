@@ -303,28 +303,22 @@ export function alphaCleanup(img: RasterImage, threshold: number, mode: AlphaCle
 
 /** Parse a #rrggbb or #rrggbbaa hex string to an RGBA tuple. */
 export function hexToRgba(hex: string, alpha = 255): [number, number, number, number] {
-  const h = hex.replace('#', '');
-  if (h.length === 8) {
-    return [
-      parseInt(h.slice(0, 2), 16),
-      parseInt(h.slice(2, 4), 16),
-      parseInt(h.slice(4, 6), 16),
-      parseInt(h.slice(6, 8), 16),
-    ];
+  const h = hex.replace(/^#/, '').trim();
+  const byte = (s: string) => {
+    const n = parseInt(s, 16);
+    return Number.isNaN(n) ? 0 : n;
+  };
+  // #rgb / #rgba shorthand (each nibble doubled).
+  if (h.length === 3) return [byte(h[0] + h[0]), byte(h[1] + h[1]), byte(h[2] + h[2]), alpha];
+  if (h.length === 4) {
+    return [byte(h[0] + h[0]), byte(h[1] + h[1]), byte(h[2] + h[2]), byte(h[3] + h[3])];
   }
-  const full =
-    h.length === 3
-      ? h
-          .split('')
-          .map((c) => c + c)
-          .join('')
-      : h;
-  return [
-    parseInt(full.slice(0, 2), 16),
-    parseInt(full.slice(2, 4), 16),
-    parseInt(full.slice(4, 6), 16),
-    alpha,
-  ];
+  if (h.length === 6) return [byte(h.slice(0, 2)), byte(h.slice(2, 4)), byte(h.slice(4, 6)), alpha];
+  if (h.length === 8) {
+    return [byte(h.slice(0, 2)), byte(h.slice(2, 4)), byte(h.slice(4, 6)), byte(h.slice(6, 8))];
+  }
+  // Unparseable length — fall back to opaque black rather than NaN channels.
+  return [0, 0, 0, alpha];
 }
 
 /** Desaturate to greyscale (per-pixel luminance), keeping alpha. */
@@ -369,14 +363,22 @@ export function threshold(img: RasterImage, level: number, invert = false): Rast
 
 /** Crop a rectangle (clamped to the image bounds). */
 export function crop(img: RasterImage, x: number, y: number, w: number, h: number): RasterImage {
-  const sx = Math.max(0, Math.min(img.width - 1, Math.floor(x)));
-  const sy = Math.max(0, Math.min(img.height - 1, Math.floor(y)));
-  const ow = Math.max(1, Math.min(Math.floor(w), img.width - sx));
-  const oh = Math.max(1, Math.min(Math.floor(h), img.height - sy));
+  // Intersect the requested rectangle with the image, so a negative origin
+  // clips (rather than silently shifting the region to 0) and an oversized
+  // rectangle is clamped to what's available.
+  const rx = Math.floor(x);
+  const ry = Math.floor(y);
+  const x0 = Math.max(0, rx);
+  const y0 = Math.max(0, ry);
+  const x1 = Math.min(img.width, rx + Math.max(0, Math.floor(w)));
+  const y1 = Math.min(img.height, ry + Math.max(0, Math.floor(h)));
+  const ow = x1 - x0;
+  const oh = y1 - y0;
+  if (ow <= 0 || oh <= 0) return createImage(1, 1); // no overlap → 1×1 transparent
   const out = createImage(ow, oh);
   for (let j = 0; j < oh; j++) {
     for (let i = 0; i < ow; i++) {
-      const si = ((sy + j) * img.width + (sx + i)) * 4;
+      const si = ((y0 + j) * img.width + (x0 + i)) * 4;
       const di = (j * ow + i) * 4;
       out.data[di] = img.data[si];
       out.data[di + 1] = img.data[si + 1];
@@ -525,6 +527,7 @@ export function normalize(img: RasterImage): RasterImage {
     let min = 255;
     let max = 0;
     for (let i = c; i < img.data.length; i += 4) {
+      if (img.data[i - c + 3] === 0) continue; // fully transparent pixels don't set the range
       const v = img.data[i];
       if (v < min) min = v;
       if (v > max) max = v;
@@ -585,7 +588,10 @@ export type MorphOp = 'dilate' | 'erode';
  * min). On a white-on-black mask these grow / shrink the selection.
  */
 export function morphology(img: RasterImage, radius: number, op: MorphOp): RasterImage {
-  const r = Math.max(0, Math.floor(radius));
+  // Cap the radius at the largest dimension: beyond that the whole image is
+  // already covered, and an unbounded radius (e.g. from an imported config) is
+  // O(w·h·r) and would lock the main thread.
+  const r = Math.min(Math.max(0, Math.floor(radius)), Math.max(img.width, img.height));
   if (r === 0) return cloneImage(img);
   return morphPass(morphPass(img, r, op, true), r, op, false);
 }

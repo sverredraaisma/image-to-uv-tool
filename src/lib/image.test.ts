@@ -30,6 +30,13 @@ describe('createImage / hexToRgba', () => {
     expect(hexToRgba('#00ff0080')).toEqual([0, 255, 0, 128]);
     expect(hexToRgba('#abc')).toEqual([170, 187, 204, 255]);
   });
+  it('parses #rgba shorthand and falls back for invalid hex', () => {
+    expect(hexToRgba('#f008')).toEqual([255, 0, 0, 136]); // #rgba -> RRGGBBAA
+    expect(hexToRgba('ff0000')).toEqual([255, 0, 0, 255]); // missing #
+    expect(hexToRgba('#zzzzzz')).toEqual([0, 0, 0, 255]); // non-hex -> black, not NaN
+    expect(hexToRgba('#12')).toEqual([0, 0, 0, 255]); // bad length -> black
+    expect([...hexToRgba('#zz')].some(Number.isNaN)).toBe(false);
+  });
 });
 
 describe('invert', () => {
