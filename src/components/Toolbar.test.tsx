@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Toolbar } from './Toolbar';
 import { useStore } from '../store/store';
@@ -39,5 +39,24 @@ describe('Toolbar', () => {
     await userEvent.type(screen.getByPlaceholderText('Search nodes…'), 'flux{Enter}');
     expect(useStore.getState().nodes).toHaveLength(1);
     expect(useStore.getState().nodes[0].type.toLowerCase()).toContain('flux');
+  });
+
+  it('loading a graph with an invalid node reports the dropped count', async () => {
+    const { container } = render(<Toolbar />);
+    const graph = {
+      version: 1,
+      nodes: [
+        { id: 'a', type: 'promptInput', position: { x: 0, y: 0 }, config: {} },
+        { type: 'bad' }, // no id -> dropped by sanitizeGraph
+      ],
+      edges: [],
+    };
+    const file = new File([JSON.stringify(graph)], 'g.json', { type: 'application/json' });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, file);
+    await waitFor(() => {
+      expect(useStore.getState().nodes).toHaveLength(1);
+    });
+    expect(useStore.getState().toasts.some((t) => /1 invalid dropped/.test(t.message))).toBe(true);
   });
 });

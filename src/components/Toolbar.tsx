@@ -106,8 +106,14 @@ export function Toolbar() {
         if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
           throw new Error('Missing nodes/edges');
         }
+        const requested = parsed.nodes.length;
         loadGraph(parsed);
-        addToast('success', `Loaded ${parsed.nodes.length} nodes`);
+        const loaded = useStore.getState().nodes.length;
+        const dropped = requested - loaded;
+        addToast(
+          'success',
+          dropped > 0 ? `Loaded ${loaded} nodes (${dropped} invalid dropped)` : `Loaded ${loaded} nodes`,
+        );
       } catch (err) {
         addToast('error', `Invalid graph file: ${err instanceof Error ? err.message : err}`);
       }
