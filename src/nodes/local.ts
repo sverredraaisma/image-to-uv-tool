@@ -555,8 +555,18 @@ export const resizeNode = singleImageOp({
   type: 'resize',
   label: 'Resize',
   category: 'Transform',
-  description: 'Resize to a target width/height (nearest or bilinear).',
+  description: 'Resize by a scale multiplier (keeps aspect) or to an exact width/height.',
   configFields: [
+    {
+      kind: 'select',
+      key: 'mode',
+      label: 'Mode',
+      options: [
+        { value: 'scale', label: 'Scale × (keep aspect)' },
+        { value: 'dimensions', label: 'Exact width × height' },
+      ],
+    },
+    { kind: 'number', key: 'scale', label: 'Scale ×', min: 0.01, step: 0.1 },
     { kind: 'number', key: 'width', label: 'Width', min: 1, step: 1 },
     { kind: 'number', key: 'height', label: 'Height', min: 1, step: 1 },
     {
@@ -569,12 +579,21 @@ export const resizeNode = singleImageOp({
       ],
     },
   ],
-  // Nodes created before this field default to nearest (unchanged behaviour);
-  // new nodes prefer the higher-quality bilinear path.
-  defaultConfig: () => ({ width: 256, height: 256, method: 'bilinear' }),
+  // Nodes created before these fields default to 'dimensions' + nearest, so
+  // existing graphs are unchanged; new nodes prefer scale + bilinear.
+  defaultConfig: () => ({ mode: 'scale', scale: 1, width: 256, height: 256, method: 'bilinear' }),
   op: (img, config) => {
-    const w = Math.max(1, num(config.width, img.width));
-    const h = Math.max(1, num(config.height, img.height));
+    let w: number;
+    let h: number;
+    if (str(config.mode, 'dimensions') === 'scale') {
+      // A single multiplier applied to both axes keeps the aspect ratio.
+      const s = Math.max(0.01, num(config.scale, 1));
+      w = Math.max(1, Math.round(img.width * s));
+      h = Math.max(1, Math.round(img.height * s));
+    } else {
+      w = Math.max(1, num(config.width, img.width));
+      h = Math.max(1, num(config.height, img.height));
+    }
     return str(config.method, 'nearest') === 'nearest' ? resize(img, w, h) : resizeBilinear(img, w, h);
   },
 });
