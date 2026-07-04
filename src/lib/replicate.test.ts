@@ -380,7 +380,7 @@ describe('runModel', () => {
       }
       throw new Error(`unexpected ${url}`);
     });
-    const fields = await fetchModelSchema('owner/name', {
+    const { fields, latestVersion } = await fetchModelSchema('owner/name', {
       apiKey: 'k',
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
@@ -388,15 +388,19 @@ describe('runModel', () => {
     expect(fields.find((f) => f.name === 'prompt')?.required).toBe(true);
     expect(fields.find((f) => f.name === 'seed')?.required).toBe(false);
     expect(fields.find((f) => f.name === 'aspect_ratio')?.enumValues).toEqual(['1:1', '16:9']);
+    void latestVersion;
   });
 
-  it('fetchModelSchema returns [] when the model has no input schema', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ latest_version: null }));
-    const fields = await fetchModelSchema('owner/name', {
+  it('fetchModelSchema returns the latest version id (for pinning) and empty fields when no schema', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ latest_version: { id: 'ver_abc123', openapi_schema: {} } }),
+    );
+    const schema = await fetchModelSchema('owner/name', {
       apiKey: 'k',
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
-    expect(fields).toEqual([]);
+    expect(schema.latestVersion).toBe('ver_abc123');
+    expect(schema.fields).toEqual([]);
   });
 
   it('cancels the remote prediction when the run is aborted', async () => {

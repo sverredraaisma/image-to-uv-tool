@@ -279,6 +279,12 @@ export interface ModelInputField {
   enumValues?: (string | number)[];
 }
 
+export interface ModelSchema {
+  /** Current latest version id (for pinning), or null for versionless models. */
+  latestVersion: string | null;
+  fields: ModelInputField[];
+}
+
 interface OpenApiProp {
   type?: string;
   default?: unknown;
@@ -296,23 +302,26 @@ interface OpenApiObject {
 }
 interface ModelResponse {
   latest_version?: {
+    id?: string;
     openapi_schema?: { components?: { schemas?: Record<string, OpenApiObject> } };
   } | null;
 }
 
 /**
- * Fetch a model's declared inputs from its OpenAPI schema so input keys stop
- * being guesswork. Read-only (a GET on the model), never runs a prediction.
+ * Fetch a model's latest version id + declared inputs from its OpenAPI schema,
+ * so input keys stop being guesswork and users can pin the floating "latest".
+ * Read-only (a GET on the model), never runs a prediction.
  */
-export async function fetchModelSchema(model: string, opts: ReplicateOptions): Promise<ModelInputField[]> {
+export async function fetchModelSchema(model: string, opts: ReplicateOptions): Promise<ModelSchema> {
   if (!opts.apiKey) throw new Error('Missing Replicate API key');
   const [slug] = model.split(':');
   if (!slug || !slug.includes('/')) throw new Error(`Invalid model slug "${model}" (expected "owner/name")`);
   const base = baseUrl(opts.proxyUrl);
   const data = await request<ModelResponse>(`${base}/models/${slug}`, { method: 'GET' }, opts);
+  const latestVersion = data.latest_version?.id ?? null;
   const schemas = data.latest_version?.openapi_schema?.components?.schemas;
   const input = schemas?.Input;
-  if (!input?.properties) return [];
+  if (!input?.properties) return { latestVersion, fields: [] };
   const required = new Set(input.required ?? []);
 
   const resolve = (prop: OpenApiProp): { type: string; enumValues?: (string | number)[] } => {
@@ -325,7 +334,7 @@ export async function fetchModelSchema(model: string, opts: ReplicateOptions): P
     return { type: 'unknown' };
   };
 
-  return Object.entries(input.properties)
+  const fields = Object.entries(input.properties)
     .map(([name, prop]) => {
       const { type, enumValues } = resolve(prop);
       return {
@@ -340,6 +349,7 @@ export async function fetchModelSchema(model: string, opts: ReplicateOptions): P
     })
     .sort((a, b) => a._order - b._order)
     .map(({ _order, ...field }) => field);
+  return { latestVersion, fields };
 }
 
 /**

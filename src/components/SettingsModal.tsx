@@ -34,7 +34,7 @@ export function SettingsModal() {
             config={node.config}
             collapseAdvanced
           />
-          {isAi && <ModelSchemaHint model={String(node.config.model ?? '')} />}
+          {isAi && <ModelSchemaHint nodeId={editorNodeId} model={String(node.config.model ?? '')} />}
         </>
       )}
     </Modal>

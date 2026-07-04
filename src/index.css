@@ -915,3 +915,11 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.model-schema-version {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
