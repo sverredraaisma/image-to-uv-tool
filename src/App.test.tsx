@@ -33,6 +33,16 @@ describe('App smoke test', () => {
     expect(within(canvas).getByText('Prompt Input')).toBeInTheDocument();
   });
 
+  it('renders an unknown node type as an error node instead of crashing', () => {
+    useStore.getState().loadGraph({
+      version: 1,
+      nodes: [{ id: 'x', type: 'no-such-node', position: { x: 0, y: 0 }, config: {} }],
+      edges: [],
+    });
+    render(<App />);
+    expect(screen.getByText('Unknown node')).toBeInTheDocument();
+  });
+
   it('shows an empty-state hint until the first node is added', async () => {
     render(<App />);
     expect(screen.getByText('Start building')).toBeInTheDocument();

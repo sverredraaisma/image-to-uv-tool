@@ -232,6 +232,18 @@ describe('persistence', () => {
     expect(store().nodes.some((n) => n.id === a)).toBe(true);
     expect(store().edges).toHaveLength(2);
   });
+
+  it('tolerates an unknown node type without throwing', async () => {
+    store().loadGraph({
+      version: 1,
+      nodes: [{ id: 'x', type: 'no-such-node', position: { x: 0, y: 0 }, config: {} }],
+      edges: [],
+    });
+    await store().processAutoRun(); // scheduler must skip it
+    await store().runNode('x'); // execute must no-op
+    await store().bringUpToDate('x');
+    expect(store().nodes.find((n) => n.id === 'x')).toBeTruthy();
+  });
 });
 
 describe('click-to-connect', () => {
