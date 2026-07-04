@@ -22,6 +22,7 @@ import {
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
+import { CURRENT_GRAPH_VERSION, migrateSavedGraph } from '../engine/migrate';
 import { reconcileRuntime } from '../engine/reconcile';
 import { cloneFragment } from '../engine/clone';
 import { bypassOutputs, findReadyAutoNode, gatherInputs } from '../engine/schedule';
@@ -848,7 +849,7 @@ export const useStore = create<StoreState>()(
       loadGraph: (graph) => {
         get()._snapshot();
         abortAllRuns();
-        const { nodes, edges } = sanitizeGraph(graph, SANITIZE_OPTIONS);
+        const { nodes, edges } = sanitizeGraph(migrateSavedGraph(graph), SANITIZE_OPTIONS);
         set({
           nodes,
           edges,
@@ -881,6 +882,14 @@ export const useStore = create<StoreState>()(
     }),
     {
       name: 'node-image-tool',
+      version: CURRENT_GRAPH_VERSION,
+      // Runs when the persisted schema version differs from the current one;
+      // normalise the graph shape before merge/sanitise validates it.
+      migrate: (persisted) => {
+        const p = (persisted ?? {}) as Record<string, unknown>;
+        const { nodes, edges } = migrateSavedGraph({ version: 0, nodes: p.nodes, edges: p.edges });
+        return { ...p, nodes, edges };
+      },
       storage: createJSONStorage(() =>
         createSafeStorage(localStorage, {
           debounceMs: 400,
