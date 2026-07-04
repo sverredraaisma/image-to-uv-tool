@@ -146,6 +146,10 @@ export function makeReplicateNode(spec: AiSpec): NodeDefinition {
       if (jobs.length) onProgress?.('Downloading results…');
       await Promise.all(jobs);
 
+      // A cancel during the downloads must not commit a half-populated result as
+      // success — surface it as an abort so the node resets to out-of-date.
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
       if (Object.values(result).every((v) => v == null)) {
         throw firstError ?? new Error('Model returned no usable output');
       }
