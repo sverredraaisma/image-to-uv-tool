@@ -19,6 +19,7 @@ import {
 } from '../engine/graph';
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
+import { sanitizeGraph } from '../engine/sanitize';
 import { findReadyAutoNode, gatherInputs } from '../engine/schedule';
 import { createSafeStorage } from './safeStorage';
 import '../nodes'; // side-effect: register built-in node definitions
@@ -606,9 +607,10 @@ export const useStore = create<StoreState>()(
 
       loadGraph: (graph) => {
         get()._snapshot();
+        const { nodes, edges } = sanitizeGraph(graph);
         set({
-          nodes: graph.nodes ?? [],
-          edges: graph.edges ?? [],
+          nodes,
+          edges,
           runtime: {},
           epochs: {},
           pendingConnection: null,
