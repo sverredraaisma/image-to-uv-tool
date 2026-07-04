@@ -3,6 +3,9 @@
 
 import type { Platform } from './platform';
 import type { RasterImage } from '../types';
+import { createBlobStore, indexedDbBackend } from './blobStore';
+
+const blobStore = createBlobStore(indexedDbBackend());
 
 function rasterToCanvas(img: RasterImage): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
@@ -81,4 +84,6 @@ export const browserPlatform: Platform = {
   encodePng: (img) => rasterToDataUrl(img),
   encodePngBlob,
   fetchImage,
+  putBlob: (dataUrl) => blobStore.put(dataUrl),
+  getBlob: (ref) => blobStore.get(ref),
 };

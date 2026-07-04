@@ -82,7 +82,7 @@ export function Toolbar() {
   const setApiKey = useStore((s) => s.setApiKey);
   const setOpenRouterKey = useStore((s) => s.setOpenRouterKey);
   const setProxyUrl = useStore((s) => s.setProxyUrl);
-  const exportGraph = useStore((s) => s.exportGraph);
+  const exportGraphInlined = useStore((s) => s.exportGraphInlined);
   const loadGraph = useStore((s) => s.loadGraph);
   const clearGraph = useStore((s) => s.clearGraph);
   const addToast = useStore((s) => s.addToast);
@@ -92,10 +92,15 @@ export function Toolbar() {
   const canRedo = useStore((s) => s.future.length > 0);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const onSave = () => {
-    const graph = exportGraph();
-    // timestamped so repeated saves don't collide in the downloads folder
-    downloadText(JSON.stringify(graph, null, 2), graphFileName(new Date()), 'application/json');
+  const onSave = async () => {
+    try {
+      // Inline blob-referenced images so the file is portable to another machine.
+      const graph = await exportGraphInlined();
+      // timestamped so repeated saves don't collide in the downloads folder
+      downloadText(JSON.stringify(graph, null, 2), graphFileName(new Date()), 'application/json');
+    } catch (err) {
+      addToast('error', `Save failed: ${err instanceof Error ? err.message : err}`);
+    }
   };
 
   const onLoadFile = (file: File) => {
@@ -162,7 +167,7 @@ export function Toolbar() {
           ↷
         </button>
         <AddNodeMenu />
-        <button type="button" className="btn" onClick={onSave}>
+        <button type="button" className="btn" onClick={() => void onSave()}>
           Save
         </button>
         <button type="button" className="btn" onClick={() => fileRef.current?.click()}>

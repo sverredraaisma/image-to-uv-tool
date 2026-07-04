@@ -49,6 +49,7 @@ import {
 } from '../lib/image';
 import { magicWandMask, type Point } from '../lib/magicWand';
 import { heightmapToStl } from '../lib/stl';
+import { isBlobRef } from '../lib/blobStore';
 import { asImage, bool, num, str } from './helpers';
 
 /**
@@ -93,9 +94,12 @@ export const imageInputNode: NodeDefinition = {
   inputs: [],
   outputs: [{ id: 'out', label: 'Image', type: 'image' }],
   configFields: [{ kind: 'number', key: 'maxSize', label: 'Max size (px, 0 = original)', min: 0, step: 64 }],
-  defaultConfig: () => ({ src: '', name: '', maxSize: 0 }),
+  defaultConfig: () => ({ src: '', srcRef: '', name: '', maxSize: 0 }),
   compute: async ({ config }) => {
-    const src = str(config.src);
+    // Prefer the inline data URL (legacy graphs); otherwise resolve the
+    // out-of-band blob reference kept in localStorage-friendly config.
+    let src = str(config.src);
+    if (!src && isBlobRef(config.srcRef)) src = (await platform.getBlob(config.srcRef)) ?? '';
     if (!src) return { out: undefined };
     const img = await platform.decodeImage(src);
     const maxSize = num(config.maxSize, 0);

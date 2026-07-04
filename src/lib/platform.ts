@@ -13,6 +13,10 @@ export interface Platform {
   encodePngBlob(img: RasterImage): Promise<Blob>;
   /** Fetch a remote image (e.g. a Replicate result) as a raster image. */
   fetchImage(src: string, signal?: AbortSignal): Promise<RasterImage>;
+  /** Persist an image data URL out-of-band, returning a content-hash reference. */
+  putBlob(dataUrl: string): Promise<string>;
+  /** Resolve a blob reference back to its data URL (null if unknown). */
+  getBlob(ref: string): Promise<string | null>;
 }
 
 const notReady = (): never => {
@@ -24,6 +28,8 @@ export const platform: Platform = {
   encodePng: notReady,
   encodePngBlob: notReady,
   fetchImage: notReady,
+  putBlob: notReady,
+  getBlob: notReady,
 };
 
 export function setPlatform(p: Partial<Platform>): void {

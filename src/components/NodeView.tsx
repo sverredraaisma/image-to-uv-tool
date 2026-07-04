@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/store';
+import { platform } from '../lib/platform';
 import { getNodeDefSafe } from '../engine/registry';
 import type { ConnectionSide } from '../store/store';
 import type { DataValue, PortSpec } from '../types';
@@ -46,6 +47,7 @@ export function NodeView({ id, selected }: NodeProps) {
   const openEditor = useStore((s) => s.openEditor);
   const openPreview = useStore((s) => s.openPreview);
   const updateNodeConfig = useStore((s) => s.updateNodeConfig);
+  const addToast = useStore((s) => s.addToast);
 
   if (!node || !def) {
     return (
@@ -168,8 +170,19 @@ export function NodeView({ id, selected }: NodeProps) {
                   const file = e.target.files?.[0];
                   if (!file) return;
                   const reader = new FileReader();
-                  reader.onload = () =>
-                    updateNodeConfig(id, { src: reader.result as string, name: file.name });
+                  reader.onload = async () => {
+                    const dataUrl = reader.result as string;
+                    // Offload the (large) bytes to the blob store and keep only a
+                    // short reference in the graph, so localStorage isn't the cap.
+                    // Fall back to inline bytes if the blob store is unavailable.
+                    try {
+                      const ref = await platform.putBlob(dataUrl);
+                      updateNodeConfig(id, { srcRef: ref, src: '', name: file.name });
+                    } catch {
+                      updateNodeConfig(id, { src: dataUrl, srcRef: '', name: file.name });
+                    }
+                  };
+                  reader.onerror = () => addToast('error', `Could not read ${file.name}`);
                   reader.readAsDataURL(file);
                 }}
               />

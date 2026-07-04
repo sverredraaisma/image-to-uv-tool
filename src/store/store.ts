@@ -24,6 +24,8 @@ import { getNodeDef, getNodeDefSafe } from '../engine/registry';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { reconcileRuntime } from '../engine/reconcile';
 import { bypassOutputs, findReadyAutoNode, gatherInputs } from '../engine/schedule';
+import { platform } from '../lib/platform';
+import { isBlobRef } from '../lib/blobStore';
 import { createSafeStorage } from './safeStorage';
 import '../nodes'; // side-effect: register built-in node definitions
 
@@ -179,6 +181,7 @@ export interface StoreState {
   init: () => void;
   reset: () => void;
   exportGraph: () => SavedGraph;
+  exportGraphInlined: () => Promise<SavedGraph>;
   loadGraph: (graph: SavedGraph) => void;
   clearGraph: () => void;
 }
@@ -751,6 +754,23 @@ export const useStore = create<StoreState>()(
         // exported object (config objects are otherwise shared by reference).
         const { nodes, edges } = get();
         return { version: 1, nodes: structuredClone(nodes), edges: structuredClone(edges) };
+      },
+
+      exportGraphInlined: async () => {
+        // Inline blob references back into config.src so a downloaded graph file
+        // is self-contained and portable to another machine (its IndexedDB
+        // wouldn't have our blobs). Import reads config.src via the legacy path.
+        const graph = get().exportGraph();
+        for (const node of graph.nodes) {
+          const ref = node.config.srcRef;
+          if (isBlobRef(ref) && !node.config.src) {
+            const src = await platform.getBlob(ref).catch(() => null);
+            if (src) {
+              node.config = { ...node.config, src, srcRef: '' };
+            }
+          }
+        }
+        return graph;
       },
 
       loadGraph: (graph) => {
