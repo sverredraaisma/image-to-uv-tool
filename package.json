@@ -2,6 +2,7 @@
   "name": "image-to-uv-tool",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "description": "Node-based image/file generation tool. Bring-your-own-key Replicate integration, runs fully in the browser.",
   "engines": {
