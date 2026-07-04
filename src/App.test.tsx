@@ -27,6 +27,7 @@ describe('App smoke test', () => {
   it('renders a node on the canvas after adding one', async () => {
     render(<App />);
     await userEvent.click(screen.getByText('+ Add node'));
+    await userEvent.click(screen.getByText('Input')); // drill into the category
     await userEvent.click(screen.getByText('Prompt Input'));
     // node title appears (there may be a menu label too, so scope to the canvas)
     const canvas = document.querySelector('.react-flow') as HTMLElement;
@@ -55,6 +56,7 @@ describe('App smoke test', () => {
     render(<App />);
     expect(screen.getByText('Start building')).toBeInTheDocument();
     await userEvent.click(screen.getByText('+ Add node'));
+    await userEvent.click(screen.getByText('Input')); // drill into the category
     await userEvent.click(screen.getByText('Prompt Input'));
     expect(screen.queryByText('Start building')).not.toBeInTheDocument();
   });

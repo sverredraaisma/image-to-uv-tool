@@ -245,6 +245,52 @@ textarea {
   background: var(--panel-2);
 }
 
+/* Multi-layered menu: category rows + back button */
+.menu-category {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 5px;
+  padding: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.menu-category:hover {
+  background: var(--panel-2);
+}
+.menu-category-meta {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted, #9aa4b2);
+  font-weight: 400;
+  font-size: 11px;
+}
+.menu-chevron {
+  color: var(--accent);
+  font-size: 14px;
+}
+.menu-back {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--muted, #9aa4b2);
+  border: none;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.menu-back:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
 /* ---------------- Nodes ---------------- */
 .react-flow__node-imageTool {
   background: transparent;

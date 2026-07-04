@@ -26,6 +26,7 @@ export const CATEGORY_ORDER = [
   'Adjust',
   'Transform',
   'Mask',
+  'UV',
   'Export',
   'AI (Replicate)',
   'AI (OpenRouter)',

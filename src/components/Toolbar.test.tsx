@@ -17,17 +17,23 @@ describe('Toolbar', () => {
     expect(useStore.getState().apiKey).toBe('r8_secret');
   });
 
-  it('opens the add-node menu with node categories', async () => {
+  it('opens the multi-layered add-node menu showing categories, then drills in', async () => {
     render(<Toolbar />);
     await userEvent.click(screen.getByText('+ Add node'));
+    // top level shows categories, not individual nodes
     expect(screen.getByText('Input')).toBeInTheDocument();
-    expect(screen.getByText('Image Input')).toBeInTheDocument();
     expect(screen.getByText('AI (Replicate)')).toBeInTheDocument();
+    expect(screen.queryByText('Image Input')).not.toBeInTheDocument();
+    // drill into a category to reveal its nodes
+    await userEvent.click(screen.getByText('Input'));
+    expect(screen.getByText('Image Input')).toBeInTheDocument();
+    expect(screen.getByText('‹ All categories')).toBeInTheDocument();
   });
 
-  it('adds a node to the store when picked from the menu', async () => {
+  it('adds a node to the store when picked from a drilled-in category', async () => {
     render(<Toolbar />);
     await userEvent.click(screen.getByText('+ Add node'));
+    await userEvent.click(screen.getByText('Input'));
     await userEvent.click(screen.getByText('Prompt Input'));
     expect(useStore.getState().nodes).toHaveLength(1);
     expect(useStore.getState().nodes[0].type).toBe('promptInput');
