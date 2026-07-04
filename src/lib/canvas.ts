@@ -47,7 +47,8 @@ async function decodeImage(src: string): Promise<RasterImage> {
   const canvas = document.createElement('canvas');
   canvas.width = image.naturalWidth || image.width;
   canvas.height = image.naturalHeight || image.height;
-  const ctx = canvas.getContext('2d');
+  // willReadFrequently: this context exists only to read pixels back out.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('2D canvas context unavailable');
   ctx.drawImage(image, 0, 0);
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;

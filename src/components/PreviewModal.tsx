@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../store/store';
-import { rasterToDataUrl, browserPlatform } from '../lib/canvas';
+import { browserPlatform } from '../lib/canvas';
 import { downloadBlob, downloadText, previewFileName } from '../lib/download';
 import { stlToAscii, stlToBinary } from '../lib/stl';
 import { Modal } from './Modal';
@@ -10,15 +10,31 @@ export function PreviewModal() {
   const close = useStore((s) => s.closePreview);
   const addToast = useStore((s) => s.addToast);
 
-  const imageUrl = useMemo(() => {
-    if (preview?.value.kind === 'image') {
-      try {
-        return rasterToDataUrl(preview.value);
-      } catch {
-        return null;
-      }
+  // Encode the preview image asynchronously to an object URL instead of a
+  // synchronous full-res toDataURL in render — that blocks the frame and holds
+  // ~1.33× the bytes as a base64 string. The URL is revoked on change/unmount.
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (preview?.value.kind !== 'image') {
+      setImageUrl(null);
+      return;
     }
-    return null;
+    let url: string | null = null;
+    let cancelled = false;
+    browserPlatform
+      .encodePngBlob(preview.value)
+      .then((blob) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setImageUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setImageUrl(null);
+      });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
   }, [preview]);
 
   if (!preview) return null;
