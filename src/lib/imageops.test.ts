@@ -119,6 +119,30 @@ describe('transform', () => {
     expect(px(out, 0, 0)).toEqual([20, 0, 0, 255]); // B
     expect(px(out, 1, 0)).toEqual([10, 0, 0, 255]); // A
   });
+  it('rotates 180°', () => {
+    // A B / C D  ->  D C / B A
+    const out = transform(grid(), 'rotate180');
+    expect(px(out, 0, 0)).toEqual([40, 0, 0, 255]); // D
+    expect(px(out, 1, 0)).toEqual([30, 0, 0, 255]); // C
+    expect(px(out, 0, 1)).toEqual([20, 0, 0, 255]); // B
+    expect(px(out, 1, 1)).toEqual([10, 0, 0, 255]); // A
+  });
+  it('rotates 270° clockwise', () => {
+    // A B / C D  ->  B D / A C
+    const out = transform(grid(), 'rotate270');
+    expect(px(out, 0, 0)).toEqual([20, 0, 0, 255]); // B
+    expect(px(out, 1, 0)).toEqual([40, 0, 0, 255]); // D
+    expect(px(out, 0, 1)).toEqual([10, 0, 0, 255]); // A
+    expect(px(out, 1, 1)).toEqual([30, 0, 0, 255]); // C
+  });
+  it('flips vertically', () => {
+    // A B / C D  ->  C D / A B
+    const out = transform(grid(), 'flipV');
+    expect(px(out, 0, 0)).toEqual([30, 0, 0, 255]); // C
+    expect(px(out, 1, 0)).toEqual([40, 0, 0, 255]); // D
+    expect(px(out, 0, 1)).toEqual([10, 0, 0, 255]); // A
+    expect(px(out, 1, 1)).toEqual([20, 0, 0, 255]); // B
+  });
 });
 
 describe('applyMask', () => {
