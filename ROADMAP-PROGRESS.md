@@ -41,13 +41,38 @@ Tracks execution of the plan in `CODEBASE-ANALYSIS.md` §6. Branch: `roadmap-pha
   (internal edges, single undo); accessibility pass (dialog focus-trap, live-region toasts).
 - ✅ **§5.3 AI** — first-class seed control on generation nodes.
 
-**Remaining (mostly UI-heavy / product-gated / risky refactor):**
+**Phase 2 (editor UX) — added since:** copy/paste, right-click context menu,
+drag-drop image import, viewport-aware placement, loadable example templates,
+required-port indicators. (Minimap + zoom-to-fit already shipped via React Flow
+Controls.)
 
-- **1.2 Web Worker pool** — env-specific, not unit-testable in jsdom.
-- **1.3 executor unification** — pure refactor (Phase 0 already fixed the bugs); high regression risk, do test-first.
-- **Phase 2** — context menu, drag-drop image import, viewport-aware placement, zoom-to-fit, keyboard connection flow.
-- **Phase 3** — AI result caching (now feasible on the blob store), A/B compare, curves/LUT/text/warp nodes, multiple projects + save-format migration.
-- **Phase 4** — seamless tiling, PBR export presets, 3MF, LICENSE (awaiting owner's choice), PWA/offline, static deploy, shareable links, plugin API.
+**Phase 3 (features) — added since:** Rotate (angle), White Balance, A/B Compare,
+Histogram nodes; save-format version + migration hook.
+
+**Phase 4 (productization) — added since:** Seamless Tile + OBJ export; shareable
+workflow links (`#g=`); PWA (favicon, manifest, offline service worker) + page
+metadata; MIT LICENSE.
+
+### Explicitly remaining (and why not done this session)
+
+These need a real browser to verify, a new dependency, live API access, or carry
+high regression risk to a green codebase — so they're called out rather than
+shipped unverified:
+
+- **1.2 Web Worker pool** — real value (CPU ops block the main thread) but safe
+  integration means making the node compute layer op-name-addressable, and it
+  can't be exercised in jsdom. Needs a browser perf-verification pass.
+- **1.2 lossless premultiply boundary** — a 2D canvas always re-premultiplies on
+  readback, so true losslessness needs a WebGL `readPixels` path (browser-only).
+- **1.3 full executor unification** — the concurrency _bugs_ are fixed (Phase 0)
+  and stop-on-failed-ancestor landed; collapsing the status/epoch/controller
+  triple-bookkeeping into one queue is a pure refactor with high regression risk
+  over 300+ tests — do it test-first in its own pass.
+- **Phase 3** — AI result caching (needs live API to validate the key/serialise),
+  multiple named projects (localStorage quota / IndexedDB storage decision),
+  batch/parameter-sweeps, cost tracking, model schema discovery.
+- **Phase 4** — 3MF export (needs a zip lib), static deploy + plugin API
+  (product decisions), curves/LUT/text-overlay/warp editors (custom-editor UI).
 
 ## Deferred — large infra (need dedicated effort; not safe to rush)
 
