@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildReplicateInput,
+  coerceScalar,
   pickOutput,
   resolveOutputs,
   type AiOutput,
@@ -13,6 +14,22 @@ import type { DataValue } from '../types';
 const enc = () => 'ENC';
 const img = createImage(1, 1, [1, 2, 3, 4]);
 const text = (t: string): DataValue => ({ kind: 'text', text: t });
+
+describe('coerceScalar', () => {
+  it('coerces number fields to numbers', () => {
+    expect(coerceScalar({ kind: 'number', key: 'k', label: 'K' }, '3.5')).toBe(3.5);
+  });
+  it('coerces boolean fields to booleans', () => {
+    expect(coerceScalar({ kind: 'boolean', key: 'k', label: 'K' }, 1)).toBe(true);
+    expect(coerceScalar({ kind: 'boolean', key: 'k', label: 'K' }, '')).toBe(false);
+  });
+  it('passes select/text/colour values through unchanged (e.g. "4:3" stays a string)', () => {
+    const sel = { kind: 'select' as const, key: 'aspect_ratio', label: 'Aspect', options: [] };
+    expect(coerceScalar(sel, '4:3')).toBe('4:3');
+    expect(coerceScalar({ kind: 'text', key: 'k', label: 'K' }, '16:9')).toBe('16:9');
+    expect(coerceScalar({ kind: 'color', key: 'k', label: 'K' }, '#ffffff')).toBe('#ffffff');
+  });
+});
 
 describe('buildReplicateInput', () => {
   const imagePort: AiPort = { id: 'image', label: 'Image', type: 'image', key: 'image', required: true };
