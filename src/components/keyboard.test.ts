@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { handleUndoRedoKey, type UndoRedoKeyEvent } from './keyboard';
+import { handleShortcut, type ShortcutEvent } from './keyboard';
 
-const ev = (over: Partial<UndoRedoKeyEvent>): UndoRedoKeyEvent => ({
+const ev = (over: Partial<ShortcutEvent>): ShortcutEvent => ({
   ctrlKey: false,
   metaKey: false,
   shiftKey: false,
@@ -9,32 +9,37 @@ const ev = (over: Partial<UndoRedoKeyEvent>): UndoRedoKeyEvent => ({
   target: null,
   ...over,
 });
+const actions = () => ({ undo: vi.fn(), redo: vi.fn(), duplicateSelected: vi.fn() });
 
-describe('handleUndoRedoKey', () => {
+describe('handleShortcut', () => {
   it('Ctrl+Z undoes; Cmd+Z too', () => {
-    const undo = vi.fn();
-    const redo = vi.fn();
-    expect(handleUndoRedoKey(ev({ ctrlKey: true }), { undo, redo })).toBe(true);
-    handleUndoRedoKey(ev({ metaKey: true }), { undo, redo });
-    expect(undo).toHaveBeenCalledTimes(2);
-    expect(redo).not.toHaveBeenCalled();
+    const a = actions();
+    expect(handleShortcut(ev({ ctrlKey: true }), a)).toBe(true);
+    handleShortcut(ev({ metaKey: true }), a);
+    expect(a.undo).toHaveBeenCalledTimes(2);
+    expect(a.redo).not.toHaveBeenCalled();
   });
 
   it('Ctrl+Shift+Z and Ctrl+Y redo', () => {
-    const undo = vi.fn();
-    const redo = vi.fn();
-    handleUndoRedoKey(ev({ ctrlKey: true, shiftKey: true, key: 'Z' }), { undo, redo });
-    handleUndoRedoKey(ev({ ctrlKey: true, key: 'y' }), { undo, redo });
-    expect(redo).toHaveBeenCalledTimes(2);
-    expect(undo).not.toHaveBeenCalled();
+    const a = actions();
+    handleShortcut(ev({ ctrlKey: true, shiftKey: true, key: 'Z' }), a);
+    handleShortcut(ev({ ctrlKey: true, key: 'y' }), a);
+    expect(a.redo).toHaveBeenCalledTimes(2);
+    expect(a.undo).not.toHaveBeenCalled();
+  });
+
+  it('Ctrl+D duplicates the selection', () => {
+    const a = actions();
+    expect(handleShortcut(ev({ ctrlKey: true, key: 'd' }), a)).toBe(true);
+    expect(a.duplicateSelected).toHaveBeenCalledTimes(1);
   });
 
   it('ignores plain keys and text fields', () => {
-    const undo = vi.fn();
-    const redo = vi.fn();
-    expect(handleUndoRedoKey(ev({ ctrlKey: false }), { undo, redo })).toBe(false);
-    expect(handleUndoRedoKey(ev({ ctrlKey: true, target: { tagName: 'INPUT' } }), { undo, redo })).toBe(false);
-    expect(handleUndoRedoKey(ev({ ctrlKey: true, target: { tagName: 'TEXTAREA' } }), { undo, redo })).toBe(false);
-    expect(undo).not.toHaveBeenCalled();
+    const a = actions();
+    expect(handleShortcut(ev({ ctrlKey: false }), a)).toBe(false);
+    expect(handleShortcut(ev({ ctrlKey: true, target: { tagName: 'INPUT' } }), a)).toBe(false);
+    expect(handleShortcut(ev({ ctrlKey: true, target: { tagName: 'TEXTAREA' } }), a)).toBe(false);
+    expect(a.undo).not.toHaveBeenCalled();
+    expect(a.duplicateSelected).not.toHaveBeenCalled();
   });
 });

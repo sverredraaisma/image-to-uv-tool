@@ -31,7 +31,8 @@ Then open the dev server URL. Paste your Replicate API key in the top-left field
   create a **cycle** (which would loop forever) — you'll get a toast either way.
 * **Move** nodes freely; **delete** a selected node/edge with `Delete`/`Backspace`
   or the ✕ button on a node. **Undo/redo** structural changes with the toolbar
-  ↶/↷ buttons or `Ctrl/Cmd+Z` / `Ctrl+Shift+Z`.
+  ↶/↷ buttons or `Ctrl/Cmd+Z` / `Ctrl+Shift+Z`. `Ctrl/Cmd+D` duplicates the
+  selected node.
 * Every input and output shows a **small preview**. Click it to open a large view
   with a **Download** button (PNG for images, `.stl` for meshes, `.txt` for text).
 

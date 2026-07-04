@@ -1,6 +1,6 @@
-// Pure keyboard mapping for undo/redo, so it's testable without a real DOM.
+// Pure keyboard mapping for editor shortcuts, so it's testable without a DOM.
 
-export interface UndoRedoKeyEvent {
+export interface ShortcutEvent {
   ctrlKey: boolean;
   metaKey: boolean;
   shiftKey: boolean;
@@ -8,14 +8,18 @@ export interface UndoRedoKeyEvent {
   target: { tagName?: string } | null;
 }
 
+export interface ShortcutActions {
+  undo: () => void;
+  redo: () => void;
+  duplicateSelected: () => void;
+}
+
 /**
- * Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y = redo. Ignored while a
- * text field is focused so it keeps native text undo. Returns true if handled.
+ * Ctrl/Cmd + Z = undo, +Shift+Z or +Y = redo, +D = duplicate selected node.
+ * Ignored while a text field is focused (keeps native shortcuts). Returns true
+ * if handled (so the caller can preventDefault).
  */
-export function handleUndoRedoKey(
-  e: UndoRedoKeyEvent,
-  actions: { undo: () => void; redo: () => void },
-): boolean {
+export function handleShortcut(e: ShortcutEvent, actions: ShortcutActions): boolean {
   if (!(e.ctrlKey || e.metaKey)) return false;
   const tag = e.target?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return false;
@@ -26,6 +30,10 @@ export function handleUndoRedoKey(
   }
   if ((key === 'z' && e.shiftKey) || key === 'y') {
     actions.redo();
+    return true;
+  }
+  if (key === 'd') {
+    actions.duplicateSelected();
     return true;
   }
   return false;
