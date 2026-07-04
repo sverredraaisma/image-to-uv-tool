@@ -32,6 +32,18 @@ function baseUrl(proxyUrl?: string | null): string {
   return p ? p.replace(/\/+$/, '') : DEFAULT_BASE;
 }
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function isAbort(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError';
+}
+
 function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
@@ -49,14 +61,27 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 async function request<T>(url: string, init: RequestInit, opts: ReplicateOptions): Promise<T> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const resp = await fetchImpl(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${opts.apiKey}`,
-      ...(init.headers ?? {}),
-    },
-    signal: opts.signal,
-  });
+  let resp: Response;
+  try {
+    resp = await fetchImpl(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        ...(init.headers ?? {}),
+      },
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (isAbort(err)) throw err; // preserve cancellation
+    // fetch rejects (rather than returning a response) on a network-level
+    // failure: CORS block, DNS, offline. Translate into an actionable hint.
+    const host = hostOf(url);
+    const hint =
+      host === 'api.replicate.com'
+        ? 'api.replicate.com blocks direct browser calls (CORS) — set a Proxy URL (see the README)'
+        : `could not reach ${host} — is your proxy running?`;
+    throw new Error(`Network request failed: ${hint}`);
+  }
   if (!resp.ok) {
     let detail = '';
     try {

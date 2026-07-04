@@ -52,6 +52,49 @@ describe('runModel', () => {
     await expect(runModel('owner/name', {}, { apiKey: '' })).rejects.toThrow(/api key/i);
   });
 
+  it('translates a direct CORS/network failure into a proxy hint', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/models/owner/name') && method(init) === 'GET') {
+        return jsonResponse({ latest_version: { id: 'v' } });
+      }
+      throw new TypeError('Failed to fetch'); // browser CORS/network rejection on POST
+    });
+    await expect(
+      runModel('owner/name', {}, {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+      }),
+    ).rejects.toThrow(/Proxy URL/);
+  });
+
+  it('points at the proxy host when a proxy is configured', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    await expect(
+      runModel('owner/name', {}, {
+        apiKey: 'k',
+        proxyUrl: 'http://localhost:8787/v1',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+      }),
+    ).rejects.toThrow(/localhost:8787/);
+  });
+
+  it('preserves cancellation (AbortError) rather than translating it', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new DOMException('Aborted', 'AbortError');
+    });
+    await expect(
+      runModel('owner/name', {}, {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+      }),
+    ).rejects.toThrow(/Abort/);
+  });
+
   it('resolves the latest version for a community model and runs it', async () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
