@@ -5,9 +5,23 @@ import { PreviewModal } from './components/PreviewModal';
 import { SettingsModal } from './components/SettingsModal';
 import { Toasts } from './components/Toasts';
 import { escapeTarget, handleShortcut, type ShortcutEvent } from './components/keyboard';
+import { decodeGraphFromHash } from './lib/shareLink';
 import { useStore } from './store/store';
 
 export default function App() {
+  // Load a shared workflow from the URL hash (#g=…) once on startup.
+  useEffect(() => {
+    const match = /[#&]g=([^&]+)/.exec(window.location.hash);
+    if (!match) return;
+    const graph = decodeGraphFromHash(match[1]);
+    if (graph) {
+      useStore.getState().loadGraph(graph);
+      useStore.getState().addToast('success', 'Loaded shared workflow from link');
+    }
+    // Clear the hash so a refresh doesn't reload / clobber the user's edits.
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = useStore.getState();

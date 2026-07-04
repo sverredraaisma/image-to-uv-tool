@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useStore } from '../store/store';
 import { downloadText, graphFileName } from '../lib/download';
+import { encodeGraphToHash } from '../lib/shareLink';
 import { NodePicker } from './NodePicker';
 import type { SavedGraph } from '../types';
 
@@ -37,6 +38,7 @@ export function Toolbar() {
   const setApiKey = useStore((s) => s.setApiKey);
   const setOpenRouterKey = useStore((s) => s.setOpenRouterKey);
   const setProxyUrl = useStore((s) => s.setProxyUrl);
+  const exportGraph = useStore((s) => s.exportGraph);
   const exportGraphInlined = useStore((s) => s.exportGraphInlined);
   const loadGraph = useStore((s) => s.loadGraph);
   const clearGraph = useStore((s) => s.clearGraph);
@@ -55,6 +57,17 @@ export function Toolbar() {
       downloadText(JSON.stringify(graph, null, 2), graphFileName(new Date()), 'application/json');
     } catch (err) {
       addToast('error', `Save failed: ${err instanceof Error ? err.message : err}`);
+    }
+  };
+
+  const onShare = async () => {
+    const hash = encodeGraphToHash(exportGraph());
+    const url = `${location.origin}${location.pathname}#g=${hash}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      addToast('success', 'Share link copied (workflow only — images are not included)');
+    } catch {
+      addToast('info', url); // clipboard blocked — show the link to copy manually
     }
   };
 
@@ -124,6 +137,14 @@ export function Toolbar() {
         <AddNodeMenu />
         <button type="button" className="btn" onClick={() => void onSave()}>
           Save
+        </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => void onShare()}
+          title="Copy a link to this workflow"
+        >
+          Share
         </button>
         <button type="button" className="btn" onClick={() => fileRef.current?.click()}>
           Load
