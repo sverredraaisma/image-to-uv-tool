@@ -471,6 +471,27 @@ describe('compute errors', () => {
     expect(store().runtime[id].error).toBe('kaboom');
     expect(store().toasts.some((t) => t.type === 'error' && /Boom: kaboom/.test(t.message))).toBe(true);
   });
+
+  it('runNode stops at a failed ancestor instead of running descendants blind', async () => {
+    const t = store().addNode('test.throwing'); // throws, outputs text 'out'
+    const p = store().addNode('test.pass'); // text 'in'
+    store().addConnection({ source: t, sourceHandle: 'out', target: p, targetHandle: 'in' });
+    await store().processAutoRun();
+    await store().runNode(p);
+    expect(store().runtime[t].status).toBe('error');
+    expect(runCounts.pass ?? 0).toBe(0); // descendant never ran on a missing input
+    expect(store().runtime[p].status).not.toBe('upToDate');
+  });
+
+  it('bringUpToDate does not run descendants past a failed node', async () => {
+    const t = store().addNode('test.throwing');
+    const p = store().addNode('test.pass');
+    store().addConnection({ source: t, sourceHandle: 'out', target: p, targetHandle: 'in' });
+    await store().runNode(t); // t errors
+    const passRuns = runCounts.pass ?? 0;
+    await store().bringUpToDate(t); // t re-runs and errors; p must stay blocked
+    expect(runCounts.pass ?? 0).toBe(passRuns);
+  });
 });
 
 describe('graph-swap safety (H1 / H5)', () => {

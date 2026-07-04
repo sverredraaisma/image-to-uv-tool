@@ -10,7 +10,14 @@ import type {
   NodeRuntime,
   SavedGraph,
 } from '../types';
-import { ancestors, descendants, downstreamNodeIds, topoSort, wouldCreateCycle } from '../engine/graph';
+import {
+  ancestors,
+  descendants,
+  downstreamNodeIds,
+  topoSort,
+  upstreamNodeIds,
+  wouldCreateCycle,
+} from '../engine/graph';
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
@@ -643,9 +650,17 @@ export const useStore = create<StoreState>()(
           get().addToast('error', 'Cannot run: cycle detected');
           return;
         }
+        // Stop at a failed ancestor: running a descendant with a missing input
+        // just produces silently-wrong output or a second toast.
+        const failed = new Set<string>();
         for (const n of order) {
+          if (upstreamNodeIds(n, edges).some((u) => failed.has(u))) {
+            failed.add(n);
+            continue;
+          }
           if (n === id || statusOf(get().runtime, n) !== 'upToDate') {
             await get()._executeNode(n);
+            if (statusOf(get().runtime, n) === 'error') failed.add(n);
           }
         }
         await get().processAutoRun();
@@ -671,9 +686,16 @@ export const useStore = create<StoreState>()(
         // up-to-date node that re-runs would cascade needless recomputes — and
         // spend tokens on manual AI descendants — for no change. If nothing is
         // stale this is a no-op. Use Run ▶ to force a specific node.
+        // Stop descending past a node that fails (missing-input cascade).
+        const failed = new Set<string>();
         for (const n of order) {
+          if (upstreamNodeIds(n, edges).some((u) => failed.has(u))) {
+            failed.add(n);
+            continue;
+          }
           if (statusOf(get().runtime, n) !== 'upToDate') {
             await get()._executeNode(n);
+            if (statusOf(get().runtime, n) === 'error') failed.add(n);
           }
         }
       },
