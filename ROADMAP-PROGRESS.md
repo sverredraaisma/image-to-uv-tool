@@ -66,6 +66,9 @@ metadata; MIT LICENSE.
   IndexedDB store); multiple named projects (own IndexedDB store).
 - ✅ **Phase 4** — 3MF export (dependency-free STORED-zip writer); GitHub Pages
   static-deploy workflow (+ configurable base, base-aware SW).
+- ✅ **§5.5 AI** — model input-schema discovery + version pinning
+  (`fetchModelSchema`, read-only), **verified against the live Replicate API**
+  (the client's 404 / latest-version paths were also confirmed to match prod).
 
 ### Still remaining (genuinely out of scope for this environment)
 
@@ -73,10 +76,8 @@ metadata; MIT LICENSE.
   readback; true losslessness needs a WebGL `readPixels` path (browser-only).
 - **1.3 full executor unification** — collapsing status/epoch/controller into one
   queue is a pure refactor with high regression risk; bugs are already fixed.
-- **Cost tracking** — honest version needs Replicate's per-prediction `metrics`
-  plumbed through (can't validate without a live key).
-- **Model schema discovery** — needs the proxy to fetch a model's OpenAPI schema
-  (live API).
+- **Cost tracking** — needs a _completed prediction's_ `metrics` to validate,
+  which requires actually running a model (out of scope this session).
 - **Batch/parameter-sweeps**, **curves/LUT/text-overlay/warp custom editors**,
   and a **plugin-loading API** (security surface) — larger UI/product work.
 
