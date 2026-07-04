@@ -122,7 +122,7 @@ settling with a stale result.
 | **Restore & upscale** | AI (Replicate) | manual | Real-ESRGAN, GFPGAN, CodeFormer, SUPIR, NAFNet (deblur), Colorize (DDColor), Clarity Upscaler. |
 | **Describe** (image→text) | AI (Replicate) | manual | Image Caption (BLIP), Moondream (VLM), LLaVA (VLM), CLIP Interrogator, OCR (text extract). |
 | **Custom** | AI (Replicate) | manual | Replicate (custom) — any model: set the slug, wire images/prompt, add anything else via JSON. |
-| **LLMs** | AI (OpenRouter) | manual | Llama 3.1 8B, Gemini Flash, GPT-4o mini, custom — a prompt plus optional wired text input → text. |
+| **LLMs** | AI (OpenRouter) | manual | Llama 3.1 8B, Gemini Flash, GPT-4o mini, Claude 3.5 Haiku, custom — a prompt plus optional wired text input → text. |
 
 AI models are grouped by capability in the **+ Add node** menu, which is
 sorted and has a live search filter.

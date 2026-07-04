@@ -74,6 +74,12 @@ export const llmNodes: NodeDefinition[] = [
     model: 'openai/gpt-4o-mini',
   }),
   makeLlmNode({
+    type: 'llmClaudeHaiku',
+    label: 'Claude 3.5 Haiku',
+    description: 'Anthropic Claude 3.5 Haiku via OpenRouter — strong, fast text.',
+    model: 'anthropic/claude-3.5-haiku',
+  }),
+  makeLlmNode({
     type: 'llmCustom',
     label: 'OpenRouter (custom)',
     description: 'Any OpenRouter model — set the slug and a prompt.',
