@@ -39,11 +39,19 @@ export interface AiSpec {
   outputKey?: string;
   /** Shorthand for a single output's type when `outputs` is omitted. */
   output?: 'image' | 'text';
+  /** Expose a first-class "seed" input (blank = random) for reproducibility. */
+  seed?: boolean;
 }
+
+/** A seed scalar: blank omits it (random), a number makes the run reproducible. */
+const SEED_SCALAR: AiScalar = {
+  field: { kind: 'number', key: 'seed', label: 'Seed (blank = random)', advanced: true },
+  default: '',
+};
 
 export function makeReplicateNode(spec: AiSpec): NodeDefinition {
   const inputs: PortSpec[] = spec.ports.map((p) => ({ id: p.id, label: p.label, type: p.type }));
-  const scalars = spec.scalars ?? [];
+  const scalars = [...(spec.scalars ?? []), ...(spec.seed ? [SEED_SCALAR] : [])];
   const outputPorts: AiOutput[] = spec.outputs ?? [
     { id: 'out', label: 'Output', type: spec.output === 'text' ? 'text' : 'image' },
   ];

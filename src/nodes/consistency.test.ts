@@ -22,6 +22,16 @@ describe('node registry consistency', () => {
     expect(defs.filter((d) => d.outputs.length === 0).map((d) => d.type)).toEqual([]);
   });
 
+  it('text→image generation nodes expose a first-class seed field with a random default', () => {
+    const generators = defs.filter((d) => d.group === 'Generate');
+    expect(generators.length).toBeGreaterThan(0);
+    for (const d of generators) {
+      const seedField = (d.configFields ?? []).find((f) => f.key === 'seed');
+      expect(seedField, `${d.type} missing seed field`).toBeTruthy();
+      expect(d.defaultConfig().seed).toBe(''); // blank = random
+    }
+  });
+
   it('port ids are unique within a node and typed validly', () => {
     const problems: string[] = [];
     for (const d of defs) {
