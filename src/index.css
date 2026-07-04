@@ -849,3 +849,19 @@ textarea {
 .context-menu .add-node-menu {
   position: static;
 }
+
+/* ---------------- Empty-state examples ---------------- */
+.canvas-empty-examples {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+.canvas-empty-examples-label {
+  width: 100%;
+  font-size: 11px;
+  color: var(--muted, #9aa4b2);
+  margin-bottom: 2px;
+}

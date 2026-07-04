@@ -18,6 +18,7 @@ import { useStore } from '../store/store';
 import { platform } from '../lib/platform';
 import { NodeView } from './NodeView';
 import { NodePicker } from './NodePicker';
+import { EXAMPLES } from './examples';
 
 const nodeTypes = { imageTool: NodeView };
 
@@ -47,6 +48,7 @@ function FlowCanvas() {
   const setSelection = useStore((s) => s.setSelection);
   const addNode = useStore((s) => s.addNode);
   const updateNodeConfig = useStore((s) => s.updateNodeConfig);
+  const loadGraph = useStore((s) => s.loadGraph);
   const addConnection = useStore((s) => s.addConnection);
   const canConnect = useStore((s) => s.canConnect);
   const cancelPending = useStore((s) => s.cancelPendingConnection);
@@ -149,6 +151,20 @@ function FlowCanvas() {
             <div className="canvas-empty-sub">
               Drag an image file onto the canvas, and paste your Replicate / OpenRouter key (top-left) for the
               AI nodes.
+            </div>
+            <div className="canvas-empty-examples">
+              <span className="canvas-empty-examples-label">Or load an example:</span>
+              {EXAMPLES.map((ex) => (
+                <button
+                  key={ex.name}
+                  type="button"
+                  className="btn"
+                  title={ex.description}
+                  onClick={() => loadGraph(ex.graph)}
+                >
+                  {ex.name}
+                </button>
+              ))}
             </div>
           </div>
         </div>
