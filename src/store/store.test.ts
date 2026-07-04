@@ -299,6 +299,24 @@ describe('undo / redo', () => {
     expect(store().history.length).toBe(before + 1);
   });
 
+  it('clearGraph empties the graph and undo restores it', async () => {
+    await buildChain();
+    const count = store().nodes.length;
+    const edges = store().edges.length;
+    store().clearGraph();
+    expect(store().nodes).toHaveLength(0);
+    expect(store().edges).toHaveLength(0);
+    store().undo();
+    expect(store().nodes).toHaveLength(count);
+    expect(store().edges).toHaveLength(edges);
+  });
+
+  it('clearGraph on an already-empty graph does not add history', () => {
+    const before = store().history.length;
+    store().clearGraph();
+    expect(store().history.length).toBe(before);
+  });
+
   it('a new action after undo clears the redo stack', () => {
     store().addNode('test.const');
     store().undo();
