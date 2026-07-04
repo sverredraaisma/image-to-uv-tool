@@ -659,6 +659,13 @@ export const useStore = create<StoreState>()(
         openRouterKey: s.openRouterKey,
         proxyUrl: s.proxyUrl,
       }),
+      // Sanitize the rehydrated graph the same way loadGraph does, so a
+      // corrupt/partially-written localStorage entry can't crash on startup.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<StoreState>;
+        const { nodes, edges } = sanitizeGraph({ nodes: p.nodes, edges: p.edges });
+        return { ...current, ...p, nodes, edges };
+      },
     },
   ),
 );

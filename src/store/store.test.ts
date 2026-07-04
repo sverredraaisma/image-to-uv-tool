@@ -222,6 +222,28 @@ describe('persistence', () => {
     expect(raw).not.toContain('outOfDate');
   });
 
+  it('sanitizes a corrupt persisted graph on rehydration', async () => {
+    localStorage.setItem(
+      'node-image-tool',
+      JSON.stringify({
+        version: 0,
+        state: {
+          nodes: [
+            { id: 'a', type: 'invert' }, // no position/config
+            { type: 'orphan' }, // no id -> dropped
+          ],
+          edges: [{ id: 'e', source: 'a', sourceHandle: 'out', target: 'ghost', targetHandle: 'in' }],
+          apiKey: 'k',
+        },
+      }),
+    );
+    await useStore.persist.rehydrate();
+    expect(store().nodes.map((n) => n.id)).toEqual(['a']);
+    expect(store().nodes[0].position).toEqual({ x: 0, y: 0 });
+    expect(store().edges).toHaveLength(0); // dangling edge dropped
+    expect(store().apiKey).toBe('k');
+  });
+
   it('exportGraph / loadGraph round-trips the graph', async () => {
     const { a } = await buildChain();
     const saved = store().exportGraph();
