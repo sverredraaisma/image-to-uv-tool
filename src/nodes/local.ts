@@ -20,6 +20,7 @@ import {
   hueSaturation,
   invert,
   levels,
+  linearGradient,
   maskCombine,
   morphology,
   normalize,
@@ -133,6 +134,41 @@ export const solidColorNode: NodeDefinition = {
       Math.max(1, num(config.width, 256)),
       Math.max(1, num(config.height, 256)),
       hexToRgba(str(config.color, '#ffffff'), 255),
+    ),
+  }),
+};
+
+export const gradientNode: NodeDefinition = {
+  type: 'gradient',
+  label: 'Gradient',
+  category: 'Input',
+  description: 'Generate a linear two-colour gradient.',
+  autoRun: true,
+  inputs: [],
+  outputs: [{ id: 'out', label: 'Image', type: 'image' }],
+  configFields: [
+    { kind: 'number', key: 'width', label: 'Width', min: 1, step: 1 },
+    { kind: 'number', key: 'height', label: 'Height', min: 1, step: 1 },
+    { kind: 'color', key: 'from', label: 'From' },
+    { kind: 'color', key: 'to', label: 'To' },
+    {
+      kind: 'select',
+      key: 'direction',
+      label: 'Direction',
+      options: [
+        { value: 'horizontal', label: 'Horizontal' },
+        { value: 'vertical', label: 'Vertical' },
+      ],
+    },
+  ],
+  defaultConfig: () => ({ width: 256, height: 256, from: '#000000', to: '#ffffff', direction: 'horizontal' }),
+  compute: ({ config }) => ({
+    out: linearGradient(
+      Math.max(1, num(config.width, 256)),
+      Math.max(1, num(config.height, 256)),
+      hexToRgba(str(config.from, '#000000'), 255),
+      hexToRgba(str(config.to, '#ffffff'), 255),
+      str(config.direction, 'horizontal') === 'horizontal',
     ),
   }),
 };
@@ -655,6 +691,7 @@ export const localNodes: NodeDefinition[] = [
   imageInputNode,
   promptInputNode,
   solidColorNode,
+  gradientNode,
   combineNode,
   applyMaskNode,
   flattenNode,

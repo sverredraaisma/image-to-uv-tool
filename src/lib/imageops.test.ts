@@ -13,6 +13,7 @@ import {
   grayscale,
   hueSaturation,
   levels,
+  linearGradient,
   maskCombine,
   morphology,
   normalize,
@@ -191,6 +192,17 @@ describe('tint', () => {
   it('multiplies channels by the colour (white→colour, grey scaled)', () => {
     expect(px(tint(createImage(1, 1, [255, 255, 255, 255]), [255, 0, 0]), 0, 0)).toEqual([255, 0, 0, 255]);
     expect(px(tint(createImage(1, 1, [200, 200, 200, 255]), [128, 128, 128]), 0, 0)).toEqual([100, 100, 100, 255]);
+  });
+});
+
+describe('linearGradient', () => {
+  it('interpolates between the two colours across the axis', () => {
+    const black: [number, number, number, number] = [0, 0, 0, 255];
+    const white: [number, number, number, number] = [255, 255, 255, 255];
+    const h = linearGradient(3, 1, black, white, true);
+    expect([px(h, 0, 0)[0], px(h, 1, 0)[0], px(h, 2, 0)[0]]).toEqual([0, 128, 255]);
+    const v = linearGradient(1, 3, black, white, false);
+    expect([px(v, 0, 0)[0], px(v, 0, 1)[0], px(v, 0, 2)[0]]).toEqual([0, 128, 255]);
   });
 });
 

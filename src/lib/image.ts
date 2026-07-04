@@ -63,6 +63,26 @@ export function downscaleToMax(img: RasterImage, maxDim: number): RasterImage {
   return resize(img, Math.max(1, Math.round(img.width * scale)), Math.max(1, Math.round(img.height * scale)));
 }
 
+/** Generate a linear two-colour gradient (RGBA interpolated). */
+export function linearGradient(
+  width: number,
+  height: number,
+  from: [number, number, number, number],
+  to: [number, number, number, number],
+  horizontal: boolean,
+): RasterImage {
+  const out = createImage(width, height);
+  const denom = Math.max(1, (horizontal ? width : height) - 1);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const t = (horizontal ? x : y) / denom;
+      const i = (y * width + x) * 4;
+      for (let c = 0; c < 4; c++) out.data[i + c] = from[c] + (to[c] - from[c]) * t;
+    }
+  }
+  return out;
+}
+
 /** Multiply each RGB channel by a colour (0–255 per channel). Alpha kept. */
 export function tint(img: RasterImage, color: [number, number, number]): RasterImage {
   const out = cloneImage(img);

@@ -78,6 +78,7 @@ settling with a stale result.
 | Image Input | Input | auto | Upload an image; it becomes an output. |
 | Prompt Input | Input | auto | A text prompt as an output. |
 | Solid Colour | Input | auto | Generate a solid colour image of a given size. |
+| Gradient | Input | auto | Generate a linear two-colour gradient. |
 | Combine | Compose | auto | Blend a base image **A** with a secondary image **B** (A over B, B over A, max, multiply, subtract, screen…). |
 | Apply Mask | Mask | auto | Use a mask's luminance as the image's alpha. |
 | Flatten | Compose | auto | Composite over a solid background colour (removes transparency). |
