@@ -89,12 +89,19 @@ describe('pad', () => {
 });
 
 describe('crop', () => {
-  it('extracts a sub-rectangle, clamped to bounds', () => {
+  it('extracts a sub-rectangle', () => {
     const out = crop(grid(), 1, 0, 1, 2);
     expect(out.width).toBe(1);
     expect(out.height).toBe(2);
     expect(px(out, 0, 0)).toEqual([20, 0, 0, 255]); // B
     expect(px(out, 0, 1)).toEqual([40, 0, 0, 255]); // D
+  });
+
+  it('clamps an over-sized rectangle without reading past the buffer', () => {
+    const out = crop(grid(), 1, 1, 100, 100); // grid is 2×2; only D remains
+    expect([out.width, out.height]).toEqual([1, 1]);
+    expect(px(out, 0, 0)).toEqual([40, 0, 0, 255]); // D (bottom-right)
+    expect([...out.data].some(Number.isNaN)).toBe(false);
   });
 });
 
