@@ -14,6 +14,10 @@ import http from 'node:http';
 import https from 'node:https';
 
 const PORT = Number(process.env.PORT) || 8787;
+// Bind to loopback by default so the proxy isn't an open Replicate relay for
+// anyone else on the LAN. Override with HOST=0.0.0.0 only if you deliberately
+// want to expose it.
+const HOST = process.env.HOST || '127.0.0.1';
 const UPSTREAM_HOST = 'api.replicate.com';
 
 const CORS_HEADERS = {
@@ -51,8 +55,8 @@ const server = http.createServer((req, res) => {
   req.pipe(upstream);
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`Replicate CORS proxy → https://${UPSTREAM_HOST}`);
-  console.log(`Listening on http://localhost:${PORT}`);
+  console.log(`Listening on http://${HOST}:${PORT} (bound to ${HOST})`);
   console.log(`Set the app's "Proxy URL" field to  http://localhost:${PORT}/v1`);
 });

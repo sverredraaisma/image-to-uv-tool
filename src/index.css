@@ -270,3 +270,27 @@ textarea { resize: vertical; }
   background: var(--panel); border-bottom: 1px solid var(--border); color: var(--text); fill: var(--text);
 }
 .react-flow__minimap { background: var(--panel); }
+
+/* ---------------- Error boundary ---------------- */
+.error-boundary {
+  position: fixed; inset: 0; z-index: 500; display: grid; place-items: center;
+  padding: 24px; background: var(--bg, #0d0f14);
+}
+.error-boundary-card {
+  max-width: 480px; padding: 24px 28px; border-radius: 12px;
+  border: 1px solid var(--error); background: var(--panel);
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
+}
+.error-boundary-card h1 { margin: 0 0 8px; font-size: 18px; }
+.error-boundary-card p { margin: 0 0 12px; color: var(--muted, #9aa4b2); font-size: 13px; }
+.error-boundary-detail {
+  margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; font-size: 12px;
+  background: rgba(0,0,0,.35); border: 1px solid var(--border-2);
+  white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto;
+}
+.error-boundary-actions { display: flex; gap: 10px; }
+.error-boundary-actions button {
+  padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  border: 1px solid var(--border-2); background: var(--panel); color: var(--text);
+}
+.error-boundary-actions button:hover { border-color: var(--accent); }

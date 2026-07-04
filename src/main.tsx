@@ -7,6 +7,7 @@ import { setPlatform } from './lib/platform';
 import { browserPlatform } from './lib/canvas';
 import { useStore } from './store/store';
 import App from './App';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Install the browser (canvas-based) image adapter, then let the store compute
 // any auto-run nodes restored from local storage.
@@ -15,6 +16,8 @@ useStore.getState().init();
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>,
 );
