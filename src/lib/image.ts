@@ -1068,3 +1068,129 @@ export function histogram(img: RasterImage, width = 256, height = 128): RasterIm
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Arbitrary-angle rotate, white balance, seamless tiling, A/B compare.
+// ---------------------------------------------------------------------------
+
+const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t);
+
+/** Rotate by an arbitrary angle (degrees), expanding the canvas to fit and
+ *  sampling bilinearly. Areas outside the source become transparent. */
+export function rotate(img: RasterImage, degrees: number): RasterImage {
+  const rad = (degrees * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const { width: w, height: h, data } = img;
+  const corners = [
+    [0, 0],
+    [w, 0],
+    [0, h],
+    [w, h],
+  ].map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
+  const xs = corners.map((c) => c[0]);
+  const ys = corners.map((c) => c[1]);
+  const nw = Math.max(1, Math.ceil(Math.max(...xs) - Math.min(...xs)));
+  const nh = Math.max(1, Math.ceil(Math.max(...ys) - Math.min(...ys)));
+  const out = createImage(nw, nh); // transparent
+  const cx = w / 2;
+  const cy = h / 2;
+  const ncx = nw / 2;
+  const ncy = nh / 2;
+  for (let y = 0; y < nh; y++) {
+    for (let x = 0; x < nw; x++) {
+      const dx = x + 0.5 - ncx;
+      const dy = y + 0.5 - ncy;
+      const sx = dx * cos + dy * sin + cx - 0.5; // inverse rotation
+      const sy = -dx * sin + dy * cos + cy - 0.5;
+      if (sx < 0 || sy < 0 || sx > w - 1 || sy > h - 1) continue;
+      const x0 = Math.floor(sx);
+      const y0 = Math.floor(sy);
+      const x1 = Math.min(w - 1, x0 + 1);
+      const y1 = Math.min(h - 1, y0 + 1);
+      const fx = sx - x0;
+      const fy = sy - y0;
+      const di = (y * nw + x) * 4;
+      for (let c = 0; c < 4; c++) {
+        const top = data[(y0 * w + x0) * 4 + c] * (1 - fx) + data[(y0 * w + x1) * 4 + c] * fx;
+        const bot = data[(y1 * w + x0) * 4 + c] * (1 - fx) + data[(y1 * w + x1) * 4 + c] * fx;
+        out.data[di + c] = top * (1 - fy) + bot * fy;
+      }
+    }
+  }
+  return out;
+}
+
+/** Shift colour temperature (warm/cool) and green/magenta tint, each -100..100. */
+export function whiteBalance(img: RasterImage, temperature: number, tint: number): RasterImage {
+  const rScale = 1 + temperature / 200;
+  const bScale = 1 - temperature / 200;
+  const gScale = 1 + tint / 200;
+  const out = cloneImage(img);
+  for (let i = 0; i < out.data.length; i += 4) {
+    out.data[i] = img.data[i] * rScale;
+    out.data[i + 1] = img.data[i + 1] * gScale;
+    out.data[i + 2] = img.data[i + 2] * bScale;
+  }
+  return out;
+}
+
+/**
+ * Make a texture tileable by cross-fading the borders toward the interior of a
+ * half-offset copy. Correct by construction at the edges: the wrapped-adjacent
+ * columns/rows come from adjacent source pixels, so the seams are continuous.
+ * `feather` (0..1) sets how wide the blend band is.
+ */
+export function seamlessTile(img: RasterImage, feather = 0.5): RasterImage {
+  const { width: w, height: h } = img;
+  const out = createImage(w, h);
+  const marginX = (w * clamp01(feather)) / 2;
+  const marginY = (h * clamp01(feather)) / 2;
+  const ox = w >> 1;
+  const oy = h >> 1;
+  for (let y = 0; y < h; y++) {
+    const wyRaw = Math.min(y, h - 1 - y);
+    const wy = marginY > 0 ? Math.max(0, 1 - wyRaw / marginY) : 0;
+    for (let x = 0; x < w; x++) {
+      const wxRaw = Math.min(x, w - 1 - x);
+      const wx = marginX > 0 ? Math.max(0, 1 - wxRaw / marginX) : 0;
+      const weight = Math.max(wx, wy);
+      const si = (y * w + x) * 4;
+      const oi = (((y + oy) % h) * w + ((x + ox) % w)) * 4;
+      const di = si;
+      for (let c = 0; c < 4; c++) {
+        out.data[di + c] = img.data[si + c] * (1 - weight) + img.data[oi + c] * weight;
+      }
+    }
+  }
+  return out;
+}
+
+/** Split-compare two images: left `split` fraction from A, the rest from B,
+ *  with a 1px divider. B is resized to A. Vertical split when `vertical`. */
+export function splitCompare(a: RasterImage, b: RasterImage, split: number, vertical = false): RasterImage {
+  const w = a.width;
+  const h = a.height;
+  const B = b.width === w && b.height === h ? b : resize(b, w, h);
+  const out = createImage(w, h);
+  const boundary = vertical ? Math.round(clamp01(split) * h) : Math.round(clamp01(split) * w);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const pos = vertical ? y : x;
+      const src = pos < boundary ? a : B;
+      const i = (y * w + x) * 4;
+      if (pos === boundary) {
+        out.data[i] = 255;
+        out.data[i + 1] = 255;
+        out.data[i + 2] = 255;
+        out.data[i + 3] = 255;
+      } else {
+        out.data[i] = src.data[i];
+        out.data[i + 1] = src.data[i + 1];
+        out.data[i + 2] = src.data[i + 2];
+        out.data[i + 3] = src.data[i + 3];
+      }
+    }
+  }
+  return out;
+}

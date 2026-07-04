@@ -35,13 +35,17 @@ import {
   removeColor,
   resize,
   resizeBilinear,
+  rotate,
+  seamlessTile,
   sharpen,
   sobel,
+  splitCompare,
   threshold,
   tint,
   valueNoise,
   vignette,
   transform,
+  whiteBalance,
   type AlphaCleanupMode,
   type Channel,
   type CombineMode,
@@ -544,6 +548,77 @@ export const resizeNode = singleImageOp({
   },
 });
 
+export const rotateAngleNode = singleImageOp({
+  type: 'rotateAngle',
+  label: 'Rotate (angle)',
+  category: 'Transform',
+  description: 'Rotate by an arbitrary angle — expands the canvas, bilinear sampled.',
+  configFields: [{ kind: 'number', key: 'degrees', label: 'Degrees', min: -360, max: 360, step: 1 }],
+  defaultConfig: () => ({ degrees: 45 }),
+  op: (img, config) => rotate(img, num(config.degrees, 45)),
+});
+
+export const whiteBalanceNode = singleImageOp({
+  type: 'whiteBalance',
+  label: 'White Balance',
+  category: 'Adjust',
+  description: 'Shift colour temperature (warm/cool) and green/magenta tint.',
+  configFields: [
+    { kind: 'number', key: 'temperature', label: 'Temperature', min: -100, max: 100, step: 1 },
+    { kind: 'number', key: 'tint', label: 'Tint', min: -100, max: 100, step: 1 },
+  ],
+  defaultConfig: () => ({ temperature: 0, tint: 0 }),
+  op: (img, config) => whiteBalance(img, num(config.temperature, 0), num(config.tint, 0)),
+});
+
+export const seamlessTileNode = singleImageOp({
+  type: 'seamlessTile',
+  label: 'Seamless Tile',
+  category: 'UV',
+  description: 'Blend the borders so the texture tiles without visible seams.',
+  configFields: [{ kind: 'number', key: 'feather', label: 'Feather', min: 0, max: 1, step: 0.05 }],
+  defaultConfig: () => ({ feather: 0.5 }),
+  op: (img, config) => seamlessTile(img, num(config.feather, 0.5)),
+});
+
+export const compareNode: NodeDefinition = {
+  type: 'compare',
+  label: 'A/B Compare',
+  category: 'Compose',
+  description: 'Split view: A on one side, B on the other, to compare two results.',
+  autoRun: true,
+  inputs: [
+    { id: 'a', label: 'A', type: 'image' },
+    { id: 'b', label: 'B', type: 'image' },
+  ],
+  outputs: [{ id: 'out', label: 'Image', type: 'image' }],
+  configFields: [
+    { kind: 'number', key: 'split', label: 'Split', min: 0, max: 1, step: 0.05 },
+    {
+      kind: 'select',
+      key: 'orientation',
+      label: 'Orientation',
+      options: [
+        { value: 'horizontal', label: 'Horizontal' },
+        { value: 'vertical', label: 'Vertical' },
+      ],
+    },
+  ],
+  defaultConfig: () => ({ split: 0.5, orientation: 'horizontal' }),
+  compute: ({ inputs, config }) => {
+    const a = asImage(inputs.a);
+    const b = asImage(inputs.b);
+    if (a && b) {
+      return {
+        out: splitCompare(a, b, num(config.split, 0.5), str(config.orientation, 'horizontal') === 'vertical'),
+      };
+    }
+    if (a) return { out: a };
+    if (b) return { out: b };
+    return { out: undefined };
+  },
+};
+
 export const padNode = singleImageOp({
   type: 'pad',
   label: 'Pad',
@@ -813,6 +888,7 @@ export const localNodes: NodeDefinition[] = [
   solidColorNode,
   gradientNode,
   combineNode,
+  compareNode,
   applyMaskNode,
   flattenNode,
   invertNode,
@@ -828,6 +904,7 @@ export const localNodes: NodeDefinition[] = [
   levelsNode,
   gradientMapNode,
   hueSaturationNode,
+  whiteBalanceNode,
   edgeDetectNode,
   pixelateNode,
   vignetteNode,
@@ -836,6 +913,7 @@ export const localNodes: NodeDefinition[] = [
   alphaCleanupNode,
   cropNode,
   resizeNode,
+  rotateAngleNode,
   padNode,
   transformNode,
   extractChannelNode,
@@ -848,5 +926,6 @@ export const localNodes: NodeDefinition[] = [
   noiseNode,
   normalMapNode,
   channelPackNode,
+  seamlessTileNode,
   heightmapStlNode,
 ];
