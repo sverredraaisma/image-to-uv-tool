@@ -62,3 +62,61 @@ describe('heightmapToStl', () => {
     expect(stlToAscii(stl)).toMatch(/ 12($|\s)/);
   });
 });
+
+// --- Mesh integrity: winding orientation & watertightness (guards H2) -------
+
+type Vec3 = [number, number, number];
+
+function triNormal(a: Vec3, b: Vec3, c: Vec3): Vec3 {
+  const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+  const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+}
+
+function meshTris(mesh: { tris: number[][] }): { a: Vec3; b: Vec3; c: Vec3 }[] {
+  return mesh.tris.map((t) => ({
+    a: [t[0], t[1], t[2]] as Vec3,
+    b: [t[3], t[4], t[5]] as Vec3,
+    c: [t[6], t[7], t[8]] as Vec3,
+  }));
+}
+
+describe('mesh orientation (H2 regression)', () => {
+  it('every facet of a convex box points outward from its centre', () => {
+    // A single included pixel is a convex box: an outward normal must have a
+    // positive dot with (facet centroid - box centre). A backward-wound wall
+    // (the pre-fix bug) fails this for the two Y-side faces.
+    const img = createImage(1, 1, [255, 255, 255, 255]);
+    const mesh = heightmapToMesh(img, { minWhite: -1, baseThickness: 3, depthRange: 7, width: 2 });
+    const zTop = 3 + 7; // baseThickness + depthRange
+    const centre: Vec3 = [1, 1, zTop / 2]; // box spans x,y in [0,2], z in [0,zTop]
+    for (const { a, b, c } of meshTris(mesh)) {
+      const n = triNormal(a, b, c);
+      const centroid: Vec3 = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
+      const outward: Vec3 = [centroid[0] - centre[0], centroid[1] - centre[1], centroid[2] - centre[2]];
+      const dot = n[0] * outward[0] + n[1] * outward[1] + n[2] * outward[2];
+      expect(dot).toBeGreaterThan(0);
+    }
+  });
+
+  it('produces a watertight mesh (every directed edge has an opposite twin)', () => {
+    // In a closed, consistently-wound triangle mesh each directed edge (u->v)
+    // is matched by exactly one opposite (v->u). A flipped facet breaks this.
+    const img = createImage(2, 2, [255, 255, 255, 255]);
+    const mesh = heightmapToMesh(img, { minWhite: -1, baseThickness: 1, depthRange: 10, width: 4 });
+    const key = (p: Vec3) => `${p[0]},${p[1]},${p[2]}`;
+    const edges = new Map<string, number>();
+    const bump = (u: Vec3, v: Vec3) => {
+      const f = `${key(u)}->${key(v)}`;
+      const r = `${key(v)}->${key(u)}`;
+      edges.set(f, (edges.get(f) ?? 0) + 1);
+      edges.set(r, (edges.get(r) ?? 0) - 1);
+    };
+    for (const { a, b, c } of meshTris(mesh)) {
+      bump(a, b);
+      bump(b, c);
+      bump(c, a);
+    }
+    for (const [, balance] of edges) expect(balance).toBe(0);
+  });
+});

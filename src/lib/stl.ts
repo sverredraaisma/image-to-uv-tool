@@ -110,7 +110,7 @@ function wall(
   z: number,
   neighbourHeight: number,
   neighbourIncluded: boolean,
-  _flip = false,
+  flip = false,
 ) {
   let zLow: number;
   if (neighbourIncluded) {
@@ -124,7 +124,11 @@ function wall(
   const b = [p2[0], p2[1], zLow];
   const c = [p2[0], p2[1], z];
   const d = [p1[0], p1[1], z];
-  addQuad(mesh, a, b, c, d);
+  // The two Y-side walls are traversed p1->p2 in the opposite screen sense to
+  // the X-side walls, so emitting a,b,c,d there yields an inward-facing normal.
+  // Reverse the winding for those faces so every wall points outward.
+  if (flip) addQuad(mesh, a, d, c, b);
+  else addQuad(mesh, a, b, c, d);
 }
 
 /** ASCII STL text (mainly for previews / debugging). */
