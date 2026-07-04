@@ -47,13 +47,17 @@ describe('node registry consistency', () => {
     expect(missing).toEqual([]);
   });
 
-  it('AI (Replicate) nodes declare a capability group and are manual-run', () => {
-    const bad: string[] = [];
-    for (const d of defs.filter((d) => d.category === 'AI (Replicate)')) {
-      if (!d.group) bad.push(`${d.type}: no group`);
-      if (d.autoRun) bad.push(`${d.type}: should be manual`);
-    }
-    expect(bad).toEqual([]);
+  it('every AI node (Replicate + OpenRouter) is manual-run', () => {
+    // Safety-critical: an auto-run AI node would spend API tokens on its own.
+    const auto = defs.filter((d) => d.category.startsWith('AI (') && d.autoRun).map((d) => d.type);
+    expect(auto).toEqual([]);
+  });
+
+  it('AI (Replicate) nodes declare a capability group', () => {
+    const ungrouped = defs
+      .filter((d) => d.category === 'AI (Replicate)' && !d.group)
+      .map((d) => d.type);
+    expect(ungrouped).toEqual([]);
   });
 
   it('AI model slugs are well-formed (owner/name, optional :version)', () => {
