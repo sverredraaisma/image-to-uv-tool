@@ -31,6 +31,7 @@ export function Canvas() {
   const removeNodes = useStore((s) => s.removeNodes);
   const removeEdge = useStore((s) => s.removeEdge);
   const selectNode = useStore((s) => s.selectNode);
+  const setSelection = useStore((s) => s.setSelection);
   const addConnection = useStore((s) => s.addConnection);
   const canConnect = useStore((s) => s.canConnect);
   const cancelPending = useStore((s) => s.cancelPendingConnection);
@@ -88,9 +89,6 @@ export function Canvas() {
     // undo step (not one per node).
     const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id);
     if (removed.length) removeNodes(removed);
-    for (const c of changes) {
-      if (c.type === 'select') selectNode(c.selected ? c.id : null);
-    }
   };
 
   const handleEdgesChange = (changes: EdgeChange[]) => {
@@ -116,6 +114,7 @@ export function Canvas() {
         edges={rfEdges}
         nodeTypes={nodeTypes}
         onNodesChange={handleNodesChange}
+        onSelectionChange={({ nodes }) => setSelection(nodes.map((n) => n.id))}
         onNodeDragStop={(_e, node, nodes) => {
           // `nodes` is every node moved in this drag (the whole selection);
           // persist them all so none snap back, falling back to the single node.

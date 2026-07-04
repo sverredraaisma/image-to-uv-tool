@@ -439,6 +439,28 @@ describe('node + edge removal', () => {
     expect(store().history.length).toBe(after);
   });
 
+  it('duplicateNodes copies a group with its internal edges in one undo step', async () => {
+    const a = store().addNode('test.const');
+    const b = store().addNode('test.pass');
+    store().addConnection({ source: a, sourceHandle: 'out', target: b, targetHandle: 'in' });
+    await store().processAutoRun();
+    const beforeNodes = store().nodes.length;
+    const beforeEdges = store().edges.length;
+    const beforeHistory = store().history.length;
+
+    const copies = store().duplicateNodes([a, b]);
+    expect(copies).toHaveLength(2);
+    expect(store().nodes.length).toBe(beforeNodes + 2);
+    // the internal a->b edge is duplicated among the copies
+    expect(store().edges.length).toBe(beforeEdges + 1);
+    const [ca, cb] = copies;
+    expect(store().edges.some((e) => e.source === ca && e.target === cb)).toBe(true);
+    // single undo step reverses the whole group duplicate
+    expect(store().history.length).toBe(beforeHistory + 1);
+    store().undo();
+    expect(store().nodes.length).toBe(beforeNodes);
+  });
+
   it('duplicateNode copies type + config with a new id and offset position', () => {
     const a = store().addNode('test.const');
     store().updateNodeConfig(a, { v: '9' });

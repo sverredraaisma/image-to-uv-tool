@@ -23,6 +23,7 @@ import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { reconcileRuntime } from '../engine/reconcile';
+import { cloneFragment } from '../engine/clone';
 import { bypassOutputs, findReadyAutoNode, gatherInputs } from '../engine/schedule';
 import { platform } from '../lib/platform';
 import { isBlobRef } from '../lib/blobStore';
@@ -126,6 +127,8 @@ export interface StoreState {
 
   pendingConnection: PendingConnection | null;
   selectedNodeId: string | null;
+  /** Full multi-selection from the canvas (for group duplicate / delete). */
+  selectedNodeIds: string[];
   editorNodeId: string | null;
   preview: PreviewState | null;
   toasts: Toast[];
@@ -142,6 +145,7 @@ export interface StoreState {
   // graph mutation
   addNode: (type: string, position?: { x: number; y: number }) => string;
   duplicateNode: (id: string) => string;
+  duplicateNodes: (ids: string[]) => string[];
   removeNode: (id: string) => void;
   removeNodes: (ids: string[]) => void;
   setNodePosition: (id: string, position: { x: number; y: number }) => void;
@@ -161,6 +165,7 @@ export interface StoreState {
 
   // selection / editor / preview
   selectNode: (id: string | null) => void;
+  setSelection: (ids: string[]) => void;
   openEditor: (id: string | null) => void;
   openPreview: (value: DataValue, title: string) => void;
   closePreview: () => void;
@@ -227,6 +232,7 @@ export const useStore = create<StoreState>()(
       proxyUrl: '',
       pendingConnection: null,
       selectedNodeId: null,
+      selectedNodeIds: [],
       editorNodeId: null,
       preview: null,
       toasts: [],
@@ -272,6 +278,26 @@ export const useStore = create<StoreState>()(
         return newId;
       },
 
+      // Duplicate a group of nodes together, preserving the edges among them
+      // (edges to nodes outside the group are dropped) as one undo step. Returns
+      // the new node ids so the caller can re-select the copies.
+      duplicateNodes: (ids) => {
+        const present = new Set(ids.filter((id) => get().nodes.some((n) => n.id === id)));
+        if (!present.size) return [];
+        get()._snapshot();
+        const { nodes: newNodes, edges: newEdges } = cloneFragment(get().nodes, get().edges, present, genId);
+        set((s) => ({
+          nodes: [...s.nodes, ...newNodes],
+          edges: [...s.edges, ...newEdges],
+          runtime: {
+            ...s.runtime,
+            ...Object.fromEntries(newNodes.map((n) => [n.id, defaultRuntime()])),
+          },
+        }));
+        void get().processAutoRun();
+        return newNodes.map((n) => n.id);
+      },
+
       removeNode: (id) => {
         if (!get().nodes.some((n) => n.id === id)) return;
         get()._snapshot();
@@ -289,6 +315,7 @@ export const useStore = create<StoreState>()(
             runtime,
             epochs,
             selectedNodeId: selectedNodeId === id ? null : s.selectedNodeId,
+            selectedNodeIds: s.selectedNodeIds.filter((s) => s !== id),
             editorNodeId: editorNodeId === id ? null : s.editorNodeId,
             pendingConnection: s.pendingConnection?.nodeId === id ? null : s.pendingConnection,
           };
@@ -346,6 +373,7 @@ export const useStore = create<StoreState>()(
             runtime,
             epochs,
             selectedNodeId: selectedNodeId && doomed.has(selectedNodeId) ? null : s.selectedNodeId,
+            selectedNodeIds: s.selectedNodeIds.filter((id) => !doomed.has(id)),
             editorNodeId: editorNodeId && doomed.has(editorNodeId) ? null : s.editorNodeId,
             pendingConnection:
               s.pendingConnection && doomed.has(s.pendingConnection.nodeId) ? null : s.pendingConnection,
@@ -499,7 +527,8 @@ export const useStore = create<StoreState>()(
 
       cancelPendingConnection: () => set({ pendingConnection: null }),
 
-      selectNode: (id) => set({ selectedNodeId: id }),
+      selectNode: (id) => set({ selectedNodeId: id, selectedNodeIds: id ? [id] : [] }),
+      setSelection: (ids) => set({ selectedNodeIds: ids, selectedNodeId: ids.length === 1 ? ids[0] : null }),
       openEditor: (id) => set({ editorNodeId: id }),
       openPreview: (value, title) => set({ preview: { value, title } }),
       closePreview: () => set({ preview: null }),
@@ -741,6 +770,7 @@ export const useStore = create<StoreState>()(
           epochs: {},
           pendingConnection: null,
           selectedNodeId: null,
+          selectedNodeIds: [],
           editorNodeId: null,
           preview: null,
           toasts: [],
@@ -784,6 +814,7 @@ export const useStore = create<StoreState>()(
           epochs: {},
           pendingConnection: null,
           selectedNodeId: null,
+          selectedNodeIds: [],
           editorNodeId: null,
           preview: null,
         });
@@ -801,6 +832,7 @@ export const useStore = create<StoreState>()(
           epochs: {},
           pendingConnection: null,
           selectedNodeId: null,
+          selectedNodeIds: [],
           editorNodeId: null,
         });
       },

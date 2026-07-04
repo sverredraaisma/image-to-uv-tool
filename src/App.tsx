@@ -27,7 +27,12 @@ export default function App() {
         undo: s.undo,
         redo: s.redo,
         duplicateSelected: () => {
-          if (s.selectedNodeId) s.duplicateNode(s.selectedNodeId);
+          const ids = s.selectedNodeIds.length
+            ? s.selectedNodeIds
+            : s.selectedNodeId
+              ? [s.selectedNodeId]
+              : [];
+          if (ids.length) s.duplicateNodes(ids);
         },
       });
       if (handled) e.preventDefault();

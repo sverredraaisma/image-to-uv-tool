@@ -25,6 +25,19 @@ Tracks execution of the plan in `CODEBASE-ANALYSIS.md` §6. Branch: `roadmap-pha
 
 **Test/type/build status:** 261 tests green, `tsc -b` clean, `vite build` clean, `eslint .` clean, `prettier --check` clean.
 
+### Post-merge continuation (branch `roadmap-rest`)
+
+- ✅ **Batch A** — crop negative-origin clip, hexToRgba `#rgba`/invalid, normalize
+  excludes transparent, morphology radius cap, registerNode collision warn,
+  bounded toasts, exportGraph deep-clone, OpenRouter attribution, defaultSleep
+  listener leak, aiFactory cancel-mid-download.
+- ✅ **1.1 IndexedDB blob store** — content-addressed store, platform seam,
+  imageInput `srcRef` (back-compat), portable inlined export. **(H4 / 5 MB wall)**
+- ✅ **§5.4 UV pipeline** — Normal Map, Channel Pack, Noise, bilinear Resize, OBJ export.
+- ✅ **§5.2 Node bypass/mute.**
+
+Remaining: worker pool (1.2), executor unification (1.3), most of Phase 2–4.
+
 ## Deferred — large infra (need dedicated effort; not safe to rush)
 
 These are the analysis's own "1–2 week" items. Concrete plans below so they can be picked up directly.
