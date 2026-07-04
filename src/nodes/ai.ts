@@ -27,6 +27,14 @@ export const aiNodes: NodeDefinition[] = [
     ],
   }),
   makeReplicateNode({
+    type: 'sdxlLightning',
+    label: 'SDXL Lightning',
+    group: 'Generate',
+    description: 'Near-instant 4-step text-to-image (bytedance/sdxl-lightning-4step).',
+    model: 'bytedance/sdxl-lightning-4step',
+    ports: [PROMPT()],
+  }),
+  makeReplicateNode({
     type: 'fluxDev',
     label: 'Flux Dev',
     group: 'Generate',

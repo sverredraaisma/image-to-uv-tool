@@ -113,7 +113,7 @@ settling with a stale result.
 | Remove Colour | Mask | auto | Make pixels near a colour transparent (local background key-out). |
 | Area Picker | Mask | auto | Click points on the image (large editor); a magic-wand flood-fill from those points (adjustable tolerance) produces a white mask. Points are saved. |
 | Heightmap → STL | Export | auto | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width. |
-| **Generate** (text→image) | AI (Replicate) | manual | Flux Schnell, Flux Dev, SDXL, SD 3.5, Recraft v3, Ideogram v2. |
+| **Generate** (text→image) | AI (Replicate) | manual | Flux Schnell, SDXL Lightning, Flux Dev, SDXL, SD 3.5, Recraft v3, Ideogram v2. |
 | **Edit** (image + prompt/mask) | AI (Replicate) | manual | Instruct Pix2Pix, Flux Kontext, Relight (IC-Light), SD Inpainting, Flux Fill, Remove Object (LaMa), Flux ControlNet (Canny). |
 | **Stylize** | AI (Replicate) | manual | AnimeGAN v2, Style Transfer (reference image + prompt), Face to Sticker. |
 | **Depth** | AI (Replicate) | manual | Depth Anything v2 (grey + colour outputs), Marigold. |
