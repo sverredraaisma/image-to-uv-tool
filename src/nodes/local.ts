@@ -25,6 +25,7 @@ import {
   normalize,
   opacity,
   outline,
+  pad,
   pixelate,
   posterize,
   resize,
@@ -454,6 +455,16 @@ export const resizeNode = singleImageOp({
     resize(img, Math.max(1, num(config.width, img.width)), Math.max(1, num(config.height, img.height))),
 });
 
+export const padNode = singleImageOp({
+  type: 'pad',
+  label: 'Pad',
+  category: 'Transform',
+  description: 'Extend the canvas with a transparent border (e.g. for outpainting).',
+  configFields: [{ kind: 'number', key: 'amount', label: 'Amount (px)', min: 0, step: 1 }],
+  defaultConfig: () => ({ amount: 32 }),
+  op: (img, config) => pad(img, num(config.amount, 32)),
+});
+
 export const transformNode = singleImageOp({
   type: 'transform',
   label: 'Rotate / Flip',
@@ -654,6 +665,7 @@ export const localNodes: NodeDefinition[] = [
   alphaCleanupNode,
   cropNode,
   resizeNode,
+  padNode,
   transformNode,
   extractChannelNode,
   chromaKeyNode,

@@ -354,6 +354,24 @@ export function crop(img: RasterImage, x: number, y: number, w: number, h: numbe
   return out;
 }
 
+/** Extend the canvas by `amount` px on every side with transparent padding. */
+export function pad(img: RasterImage, amount: number): RasterImage {
+  const a = Math.max(0, Math.floor(amount));
+  if (a === 0) return cloneImage(img);
+  const out = createImage(img.width + 2 * a, img.height + 2 * a); // transparent
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      const si = (y * img.width + x) * 4;
+      const di = ((y + a) * out.width + (x + a)) * 4;
+      out.data[di] = img.data[si];
+      out.data[di + 1] = img.data[si + 1];
+      out.data[di + 2] = img.data[si + 2];
+      out.data[di + 3] = img.data[si + 3];
+    }
+  }
+  return out;
+}
+
 export type TransformOp = 'rotate90' | 'rotate180' | 'rotate270' | 'flipH' | 'flipV';
 
 /** Rotate (multiples of 90°) or flip an image. */

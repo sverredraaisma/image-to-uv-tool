@@ -17,6 +17,7 @@ import {
   morphology,
   normalize,
   opacity,
+  pad,
   pixelate,
   posterize,
   sharpen,
@@ -68,6 +69,19 @@ describe('threshold', () => {
   it('invert flips the result', () => {
     const out = threshold(createImage(1, 1, [200, 200, 200, 255]), 128, true);
     expect(px(out, 0, 0)).toEqual([0, 0, 0, 255]);
+  });
+});
+
+describe('pad', () => {
+  it('adds a transparent border and centres the original', () => {
+    const out = pad(createImage(1, 1, [255, 0, 0, 255]), 1);
+    expect([out.width, out.height]).toEqual([3, 3]);
+    expect(px(out, 1, 1)).toEqual([255, 0, 0, 255]); // original at centre
+    expect(px(out, 0, 0)).toEqual([0, 0, 0, 0]); // transparent border
+  });
+  it('amount 0 is a no-op copy', () => {
+    const img = createImage(2, 2, [1, 2, 3, 4]);
+    expect([...pad(img, 0).data]).toEqual([...img.data]);
   });
 });
 

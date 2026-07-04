@@ -99,6 +99,7 @@ settling with a stale result.
 | Alpha Cleanup | Adjust | auto | Snap pixels below an alpha threshold to transparent / black / white. |
 | Crop | Transform | auto | Crop a rectangle from the image. |
 | Resize | Transform | auto | Resize to a target width/height (nearest-neighbour). |
+| Pad | Transform | auto | Extend the canvas with a transparent border (e.g. for outpainting). |
 | Rotate / Flip | Transform | auto | Rotate by 90° steps or flip. |
 | Extract Channel | Mask | auto | Pull one channel (or luminance) out as a greyscale image. |
 | Dilate / Erode | Mask | auto | Grow / shrink bright (white) mask regions by a radius — pairs with the segmentation masks. |
