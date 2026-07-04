@@ -69,6 +69,9 @@ metadata; MIT LICENSE.
 - ✅ **§5.5 AI** — model input-schema discovery + version pinning
   (`fetchModelSchema`, read-only), **verified against the live Replicate API**
   (the client's 404 / latest-version paths were also confirmed to match prod).
+- ✅ **Editor** — multi-layered node menu (drill category → nodes; search flattens).
+- ✅ **§5.3 Curves node** — pure `curveLut`/`applyCurve` + an SVG curve editor
+  (click/drag/remove points, live downscaled preview).
 
 ### Still remaining (genuinely out of scope for this environment)
 
@@ -78,8 +81,8 @@ metadata; MIT LICENSE.
   queue is a pure refactor with high regression risk; bugs are already fixed.
 - **Cost tracking** — needs a _completed prediction's_ `metrics` to validate,
   which requires actually running a model (out of scope this session).
-- **Batch/parameter-sweeps**, **curves/LUT/text-overlay/warp custom editors**,
-  and a **plugin-loading API** (security surface) — larger UI/product work.
+- **Batch/parameter-sweeps**, **text-overlay / perspective-warp editors**, and a
+  **plugin-loading API** (security surface) — larger UI/product work.
 
 ## Deferred — large infra (need dedicated effort; not safe to rush)
 
