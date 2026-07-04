@@ -288,6 +288,16 @@ describe('undo / redo', () => {
     expect(store().nodes).toHaveLength(0);
   });
 
+  it('moving a node to the same spot creates no history entry', () => {
+    const a = store().addNode('test.const');
+    const pos = { ...store().nodes[0].position };
+    const before = store().history.length;
+    store().setNodePosition(a, { ...pos });
+    expect(store().history.length).toBe(before);
+    store().setNodePosition(a, { x: pos.x + 10, y: pos.y });
+    expect(store().history.length).toBe(before + 1);
+  });
+
   it('a new action after undo clears the redo stack', () => {
     store().addNode('test.const');
     store().undo();

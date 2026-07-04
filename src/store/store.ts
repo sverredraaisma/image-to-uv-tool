@@ -269,6 +269,8 @@ export const useStore = create<StoreState>()(
       },
 
       setNodePosition: (id, position) => {
+        const cur = get().nodes.find((n) => n.id === id);
+        if (!cur || (cur.position.x === position.x && cur.position.y === position.y)) return;
         get()._snapshot();
         set((s) => ({
           nodes: s.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
