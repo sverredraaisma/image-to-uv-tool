@@ -838,8 +838,9 @@ export const heightmapStlNode: NodeDefinition = {
     { kind: 'number', key: 'baseThickness', label: 'Base thickness', min: 0, step: 0.1 },
     { kind: 'number', key: 'depthRange', label: 'Depth range', min: 0, step: 0.1 },
     { kind: 'number', key: 'width', label: 'Width (units)', min: 0.0001, step: 1 },
+    { kind: 'number', key: 'smooth', label: 'Smoothing (σ px, 0 = off)', min: 0, max: 10, step: 0.5 },
   ],
-  defaultConfig: () => ({ minWhite: 1, baseThickness: 0, depthRange: 10, width: 100 }),
+  defaultConfig: () => ({ minWhite: 1, baseThickness: 0, depthRange: 10, width: 100, smooth: 0 }),
   compute: async ({ inputs, config, onProgress }) => {
     const img = asImage(inputs.in);
     if (!img) return { out: undefined };
@@ -848,6 +849,7 @@ export const heightmapStlNode: NodeDefinition = {
       baseThickness: num(config.baseThickness, 0),
       depthRange: num(config.depthRange, 10),
       width: num(config.width, 100),
+      smooth: num(config.smooth, 0),
     };
     onProgress?.('Generating STL…');
     // Off the main thread when a worker is available; identical sync fallback.

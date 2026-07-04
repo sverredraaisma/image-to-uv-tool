@@ -160,6 +160,23 @@ describe('mesh orientation (H2 regression)', () => {
     expect(zs.has(2.5)).toBe(true); // corner of 1 white + 3 black pixels → 0.25·10
   });
 
+  it('the Gaussian smooth option softens (lowers) an isolated peak', () => {
+    const img = createImage(5, 5, [0, 0, 0, 255]);
+    img.data.set([255, 255, 255, 255], (2 * 5 + 2) * 4); // one central white pixel = a spike
+    const opts = { minWhite: -1, baseThickness: 0, depthRange: 100, width: 5 };
+    const sharp = heightmapToStl(img, opts);
+    const blurred = heightmapToStl(img, { ...opts, smooth: 1.5 });
+    const maxZ = (s: ReturnType<typeof heightmapToStl>) => Math.max(...s.triangles);
+    // The pre-blur spreads the spike across neighbours → a lower, gentler peak.
+    expect(maxZ(blurred)).toBeLessThan(maxZ(sharp));
+    // A uniform field is unchanged by the blur (sanity: no drift).
+    const flat = createImage(4, 4, [200, 200, 200, 255]);
+    expect(maxZ(heightmapToStl(flat, { ...opts, smooth: 2 }))).toBeCloseTo(
+      maxZ(heightmapToStl(flat, opts)),
+      3,
+    );
+  });
+
   it('a masked heightmap with an interior hole stays watertight', () => {
     // 3×3 with the centre pixel excluded → a hole the skirt must seal.
     const img = createImage(3, 3, [255, 255, 255, 255]);

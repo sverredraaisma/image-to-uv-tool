@@ -21,6 +21,9 @@ export interface HeightmapOptions {
   depthRange: number;
   /** Physical width of the whole image (X extent), in the STL's units. */
   width: number;
+  /** Gaussian blur radius (σ, in pixels) applied to the heights before meshing,
+   *  for a smoother surface. 0/undefined = off. The include mask is unaffected. */
+  smooth?: number;
 }
 
 type Tri = [number, number, number, number, number, number, number, number, number];
@@ -86,6 +89,56 @@ function emitQuad(
   emit(ax, ay, az, cx, cy, cz, dx, dy, dz);
 }
 
+/** Separable Gaussian kernel (normalised) for a given σ. */
+function gaussianKernel(sigma: number): Float32Array {
+  const r = Math.max(1, Math.ceil(sigma * 3));
+  const k = new Float32Array(2 * r + 1);
+  let sum = 0;
+  for (let i = -r; i <= r; i++) {
+    const v = Math.exp(-(i * i) / (2 * sigma * sigma));
+    k[i + r] = v;
+    sum += v;
+  }
+  for (let i = 0; i < k.length; i++) k[i] /= sum;
+  return k;
+}
+
+/**
+ * The per-pixel luminance (0..1) used as the surface height, optionally
+ * Gaussian-smoothed (`opts.smooth` = σ in px) to soften the faceted slopes.
+ * Clamped edges. The mask is computed from the raw image, not this field.
+ */
+function computeHeightField(img: RasterImage, opts: HeightmapOptions): Float32Array {
+  const { width: w, height: h, data } = img;
+  const src = new Float32Array(w * h);
+  for (let p = 0; p < w * h; p++) {
+    const i = p * 4;
+    src[p] = luminance(data[i], data[i + 1], data[i + 2]) / 255;
+  }
+  const sigma = opts.smooth ?? 0;
+  if (sigma <= 0) return src;
+
+  const k = gaussianKernel(sigma);
+  const r = (k.length - 1) / 2;
+  const tmp = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let t = -r; t <= r; t++) acc += src[y * w + Math.max(0, Math.min(w - 1, x + t))] * k[t + r];
+      tmp[y * w + x] = acc;
+    }
+  }
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let t = -r; t <= r; t++) acc += tmp[Math.max(0, Math.min(h - 1, y + t)) * w + x] * k[t + r];
+      out[y * w + x] = acc;
+    }
+  }
+  return out;
+}
+
 /**
  * Walk the heightmap as a triangulated grid (a "terrain" surface), calling
  * `emit` for each triangle. Each included pixel is one cell whose four *corner*
@@ -97,18 +150,21 @@ function emitQuad(
  * Allocation-free (no per-triangle JS arrays), so it can be run twice — count,
  * then fill a Float32Array directly — for large meshes without garbage.
  */
-function buildMesh(img: RasterImage, opts: HeightmapOptions, emit: EmitTri): void {
+function buildMesh(img: RasterImage, opts: HeightmapOptions, emit: EmitTri, heightField: Float32Array): void {
   const { width: w, height: h, data } = img;
   const ps = opts.width / w; // physical size of a pixel
 
-  const lum01 = (x: number, y: number): number => {
+  // Raw luminance decides the include mask (never blurred); the height field
+  // (optionally Gaussian-smoothed) decides the surface z.
+  const rawLum01 = (x: number, y: number): number => {
     const i = (y * w + x) * 4;
     return luminance(data[i], data[i + 1], data[i + 2]) / 255;
   };
+  const lum01 = (x: number, y: number): number => heightField[y * w + x];
   const included = (x: number, y: number): boolean => {
     if (x < 0 || y < 0 || x >= w || y >= h) return false;
     if (opts.minWhite < 0) return true;
-    return lum01(x, y) * 255 >= opts.minWhite;
+    return rawLum01(x, y) * 255 >= opts.minWhite;
   };
 
   // Height at a pixel *corner* = average of the included pixels touching it.
@@ -166,9 +222,13 @@ function buildMesh(img: RasterImage, opts: HeightmapOptions, emit: EmitTri): voi
 
 /** Collect the mesh triangles into arrays (used by tests / small previews). */
 export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh {
+  const field = computeHeightField(img, opts);
   const tris: Tri[] = [];
-  buildMesh(img, opts, (ax, ay, az, bx, by, bz, cx, cy, cz) =>
-    tris.push([ax, ay, az, bx, by, bz, cx, cy, cz]),
+  buildMesh(
+    img,
+    opts,
+    (ax, ay, az, bx, by, bz, cx, cy, cz) => tris.push([ax, ay, az, bx, by, bz, cx, cy, cz]),
+    field,
   );
   return { tris };
 }
@@ -273,11 +333,18 @@ export function heightmapToStl(img: RasterImage, opts: HeightmapOptions): StlVal
       `Heightmap too large (${pixels.toLocaleString()} px) — resize it below ~1000×1000 before generating an STL.`,
     );
   }
+  // Smooth the height field once (if requested); reused by both passes.
+  const field = computeHeightField(img, opts);
   // Pass 1: count triangles (no allocation; wall count varies with the terrain).
   let count = 0;
-  buildMesh(img, opts, () => {
-    count++;
-  });
+  buildMesh(
+    img,
+    opts,
+    () => {
+      count++;
+    },
+    field,
+  );
   if (count > MAX_STL_TRIANGLES) {
     throw new Error(
       `Mesh too detailed (${count.toLocaleString()} triangles) — raise "Min white" to include fewer pixels, or resize the heightmap smaller.`,
@@ -286,17 +353,22 @@ export function heightmapToStl(img: RasterImage, opts: HeightmapOptions): StlVal
   // Pass 2: fill the buffer directly.
   const triangles = new Float32Array(count * 9);
   let o = 0;
-  buildMesh(img, opts, (ax, ay, az, bx, by, bz, cx, cy, cz) => {
-    triangles[o] = ax;
-    triangles[o + 1] = ay;
-    triangles[o + 2] = az;
-    triangles[o + 3] = bx;
-    triangles[o + 4] = by;
-    triangles[o + 5] = bz;
-    triangles[o + 6] = cx;
-    triangles[o + 7] = cy;
-    triangles[o + 8] = cz;
-    o += 9;
-  });
+  buildMesh(
+    img,
+    opts,
+    (ax, ay, az, bx, by, bz, cx, cy, cz) => {
+      triangles[o] = ax;
+      triangles[o + 1] = ay;
+      triangles[o + 2] = az;
+      triangles[o + 3] = bx;
+      triangles[o + 4] = by;
+      triangles[o + 5] = bz;
+      triangles[o + 6] = cx;
+      triangles[o + 7] = cy;
+      triangles[o + 8] = cz;
+      o += 9;
+    },
+    field,
+  );
   return { kind: 'stl', triangleCount: count, triangles };
 }
