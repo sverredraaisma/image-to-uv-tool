@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildReplicateInput,
   coerceScalar,
+  MAX_AI_IMAGE_BYTES,
   pickOutput,
   resolveOutputs,
   type AiOutput,
@@ -101,6 +102,20 @@ describe('buildReplicateInput', () => {
   it('omits empty scalars', () => {
     const scalars: AiScalar[] = [{ field: { kind: 'number', key: 'scale', label: 'S' }, default: '' }];
     expect(buildReplicateInput([], scalars, { scale: '' }, {}, enc)).toEqual({});
+  });
+
+  it('rejects an encoded image that exceeds the size ceiling with an actionable error', () => {
+    const huge = 'data:image/png;base64,' + 'A'.repeat(Math.ceil((MAX_AI_IMAGE_BYTES + 1) / 0.75));
+    expect(() =>
+      buildReplicateInput([imagePort], [], { imageKey: 'image' }, { image: img }, () => huge),
+    ).toThrow(/too large|Resize/i);
+  });
+
+  it('accepts an image comfortably under the ceiling', () => {
+    const small = 'data:image/png;base64,' + 'A'.repeat(1000);
+    expect(buildReplicateInput([imagePort], [], { imageKey: 'image' }, { image: img }, () => small)).toEqual({
+      image: small,
+    });
   });
 });
 

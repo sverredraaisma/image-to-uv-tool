@@ -40,6 +40,21 @@ export function coerceScalar(field: ConfigField, value: unknown): unknown {
 }
 
 /**
+ * Safety ceiling on a single encoded image input. Replicate rejects oversized
+ * data-URI inputs (opaque 413/422), and stringifying a multi-MB payload janks
+ * the main thread. aiFactory downscales first (see MAX_AI_IMAGE_DIM); this is
+ * the backstop that turns a still-too-big input into an actionable error.
+ */
+export const MAX_AI_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** Approximate decoded byte size of a `data:...;base64,<b64>` (or bare) string. */
+function encodedBytes(encoded: string): number {
+  const comma = encoded.indexOf(',');
+  const b64 = comma >= 0 ? encoded.slice(comma + 1) : encoded;
+  return Math.floor(b64.length * 0.75);
+}
+
+/**
  * Build the Replicate `input` object from a node's ports, scalar fields and the
  * raw "Extra inputs (JSON)" field. Images are encoded via the injected
  * `encodeImage`. Throws if a required input is missing or the JSON is invalid.
@@ -58,7 +73,17 @@ export function buildReplicateInput(
     if (p.type === 'image' || p.type === 'mask') {
       const img = asImage(inputs[p.id]);
       if (p.required && !img) throw new Error(`Missing required input: ${p.label}`);
-      if (img) input[key] = encodeImage(img);
+      if (img) {
+        const encoded = encodeImage(img);
+        const bytes = encodedBytes(encoded);
+        if (bytes > MAX_AI_IMAGE_BYTES) {
+          throw new Error(
+            `Input "${p.label}" is too large to send (${Math.round(bytes / 1024 / 1024)} MB). ` +
+              `Add a Resize node before it to shrink the image.`,
+          );
+        }
+        input[key] = encoded;
+      }
     } else if (p.type === 'text') {
       // Prefer a non-empty wired value; otherwise fall back to the inline field
       // (an empty wire shouldn't shadow text typed on the node).

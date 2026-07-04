@@ -9,8 +9,17 @@
 
 import type { ComputeResult, ConfigField, NodeDefinition, PortSpec } from '../types';
 import { platform } from '../lib/platform';
+import { downscaleToMax } from '../lib/image';
 import { runModel } from '../lib/replicate';
 import { str } from './helpers';
+
+/**
+ * Longest-side cap applied to every image/mask before it is encoded for
+ * Replicate. Keeps real-camera photos from being sent at full resolution
+ * (opaque 413/422s, memory doubling, main-thread jank). Same-sized image+mask
+ * pairs stay aligned because the scale factor is identical.
+ */
+export const MAX_AI_IMAGE_DIM = 2048;
 import {
   buildReplicateInput,
   resolveOutputs,
@@ -108,7 +117,9 @@ export function makeReplicateNode(spec: AiSpec): NodeDefinition {
       const model = str(config.model, spec.model);
 
       onProgress?.('Encoding inputs…');
-      const input = buildReplicateInput(spec.ports, scalars, config, inp, platform.encodePng);
+      const encodeForModel = (img: Parameters<typeof platform.encodePng>[0]) =>
+        platform.encodePng(downscaleToMax(img, MAX_AI_IMAGE_DIM));
+      const input = buildReplicateInput(spec.ports, scalars, config, inp, encodeForModel);
 
       const modelOutput = await runModel(model, input, { apiKey, proxyUrl, signal, onProgress });
 
