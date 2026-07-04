@@ -1030,3 +1030,41 @@ export function resizeBilinear(img: RasterImage, width: number, height: number):
   }
   return out;
 }
+
+/**
+ * Render an RGB histogram (value distribution scope) as an image: 256 luminance
+ * bins across the width, each channel drawn as additive bars from the bottom.
+ * Fully-transparent pixels are ignored. Useful for inspecting tonal range.
+ */
+export function histogram(img: RasterImage, width = 256, height = 128): RasterImage {
+  const w = Math.max(16, Math.floor(width));
+  const h = Math.max(16, Math.floor(height));
+  const bins = 256;
+  const r = new Float64Array(bins);
+  const g = new Float64Array(bins);
+  const b = new Float64Array(bins);
+  for (let i = 0; i < img.data.length; i += 4) {
+    if (img.data[i + 3] === 0) continue;
+    r[img.data[i]]++;
+    g[img.data[i + 1]]++;
+    b[img.data[i + 2]]++;
+  }
+  let max = 1;
+  for (let i = 0; i < bins; i++) max = Math.max(max, r[i], g[i], b[i]);
+
+  const out = createImage(w, h, [20, 20, 24, 255]);
+  for (let x = 0; x < w; x++) {
+    const bin = Math.min(bins - 1, Math.floor((x / w) * bins));
+    const hr = Math.round((r[bin] / max) * h);
+    const hg = Math.round((g[bin] / max) * h);
+    const hb = Math.round((b[bin] / max) * h);
+    for (let row = 0; row < h; row++) {
+      const fromBottom = h - row;
+      const i = (row * w + x) * 4;
+      if (fromBottom <= hr) out.data[i] = Math.min(255, out.data[i] + 200);
+      if (fromBottom <= hg) out.data[i + 1] = Math.min(255, out.data[i + 1] + 200);
+      if (fromBottom <= hb) out.data[i + 2] = Math.min(255, out.data[i + 2] + 200);
+    }
+  }
+  return out;
+}

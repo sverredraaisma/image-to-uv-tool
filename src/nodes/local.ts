@@ -18,6 +18,7 @@ import {
   gradientMap,
   grayscale,
   hexToRgba,
+  histogram,
   hueSaturation,
   invert,
   levels,
@@ -352,6 +353,14 @@ export const normalizeNode = singleImageOp({
   category: 'Adjust',
   description: 'Stretch each channel to the full 0–255 range.',
   op: (img) => normalize(img),
+});
+
+export const histogramNode = singleImageOp({
+  type: 'histogram',
+  label: 'Histogram',
+  category: 'Adjust',
+  description: 'RGB value-distribution scope — inspect the tonal range.',
+  op: (img) => histogram(img),
 });
 
 export const opacityNode = singleImageOp({
@@ -813,6 +822,7 @@ export const localNodes: NodeDefinition[] = [
   blurNode,
   sharpenNode,
   normalizeNode,
+  histogramNode,
   opacityNode,
   tintNode,
   levelsNode,

@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { channelPack, createImage, linearGradient, normalMap, resizeBilinear, valueNoise } from './image';
+import {
+  channelPack,
+  createImage,
+  histogram,
+  linearGradient,
+  normalMap,
+  resizeBilinear,
+  valueNoise,
+} from './image';
 import type { RasterImage } from '../types';
 
 const px = (img: RasterImage, x: number, y: number) => {
@@ -76,6 +84,26 @@ describe('valueNoise', () => {
       expect(n.data[i]).toBeLessThanOrEqual(255);
       expect(n.data[i + 3]).toBe(255);
     }
+  });
+});
+
+describe('histogram', () => {
+  it('spikes at the value present in a solid image', () => {
+    const h = histogram(createImage(4, 4, [255, 0, 0, 255]));
+    expect([h.width, h.height]).toEqual([256, 128]);
+    // right edge = value-255 bin: full red bar reaching the bottom row
+    expect(px(h, 255, 127)[0]).toBeGreaterThan(150);
+    // left edge = value-0 bin: green+blue spike (G and B are 0 here), little red
+    expect(px(h, 0, 127)[1]).toBeGreaterThan(150);
+    expect(px(h, 0, 127)[2]).toBeGreaterThan(150);
+    expect([...h.data].some(Number.isNaN)).toBe(false);
+  });
+
+  it('ignores fully-transparent pixels', () => {
+    const img = createImage(2, 1, [255, 255, 255, 0]); // both transparent
+    const h = histogram(img);
+    // no opaque pixels -> only the background colour, no bars
+    expect(px(h, 128, 64)).toEqual([20, 20, 24, 255]);
   });
 });
 
