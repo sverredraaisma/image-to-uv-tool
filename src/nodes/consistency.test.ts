@@ -55,4 +55,16 @@ describe('node registry consistency', () => {
     }
     expect(bad).toEqual([]);
   });
+
+  it('AI model slugs are well-formed (owner/name, optional :version)', () => {
+    const bad: string[] = [];
+    for (const d of defs.filter((d) => d.category === 'AI (Replicate)')) {
+      const model = d.defaultConfig().model;
+      // the "custom" node ships with an empty, user-supplied slug
+      if (typeof model === 'string' && model !== '' && !/^[\w.-]+\/[\w.-]+(:[\da-f]+)?$/.test(model)) {
+        bad.push(`${d.type}: "${model}"`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
 });
