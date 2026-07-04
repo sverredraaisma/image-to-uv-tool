@@ -110,6 +110,7 @@ settling with a stale result.
 | Dilate / Erode | Mask | auto | Grow / shrink bright (white) mask regions by a radius — pairs with the segmentation masks. |
 | Combine Masks | Mask | auto | Boolean-combine two masks (AND / OR / A−B / XOR). |
 | Chroma Key | Mask | auto | Mask pixels near a target colour (within tolerance). |
+| Remove Colour | Mask | auto | Make pixels near a colour transparent (local background key-out). |
 | Area Picker | Mask | auto | Click points on the image (large editor); a magic-wand flood-fill from those points (adjustable tolerance) produces a white mask. Points are saved. |
 | Heightmap → STL | Export | auto | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width. |
 | **Generate** (text→image) | AI (Replicate) | manual | Flux Schnell, Flux Dev, SDXL, SD 3.5, Recraft v3, Ideogram v2. |

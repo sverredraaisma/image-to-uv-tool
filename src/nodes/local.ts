@@ -29,6 +29,7 @@ import {
   pad,
   pixelate,
   posterize,
+  removeColor,
   resize,
   sharpen,
   sobel,
@@ -582,6 +583,24 @@ export const chromaKeyNode: NodeDefinition = {
   },
 };
 
+export const removeColorNode = singleImageOp({
+  type: 'removeColor',
+  label: 'Remove Colour',
+  category: 'Mask',
+  description: 'Make pixels near a colour transparent (local background key-out).',
+  configFields: [
+    { kind: 'color', key: 'color', label: 'Colour' },
+    { kind: 'number', key: 'tolerance', label: 'Tolerance', min: 0, max: 255, step: 1 },
+  ],
+  defaultConfig: () => ({ color: '#ffffff', tolerance: 30 }),
+  op: (img, config) =>
+    removeColor(
+      img,
+      hexToRgba(str(config.color, '#ffffff')).slice(0, 3) as [number, number, number],
+      num(config.tolerance, 30),
+    ),
+});
+
 export const maskCombineNode: NodeDefinition = {
   type: 'maskCombine',
   label: 'Combine Masks',
@@ -719,6 +738,7 @@ export const localNodes: NodeDefinition[] = [
   transformNode,
   extractChannelNode,
   chromaKeyNode,
+  removeColorNode,
   maskCombineNode,
   dilateNode,
   erodeNode,

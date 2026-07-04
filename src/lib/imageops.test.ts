@@ -21,6 +21,7 @@ import {
   pad,
   pixelate,
   posterize,
+  removeColor,
   sharpen,
   sobel,
   threshold,
@@ -185,6 +186,15 @@ describe('vignette', () => {
     const v = vignette(img, 1);
     expect(px(v, 1, 1)).toEqual([200, 200, 200, 255]); // centre untouched
     expect(px(v, 0, 0)).toEqual([0, 0, 0, 255]); // corner darkened to black
+  });
+});
+
+describe('removeColor', () => {
+  it('makes near-colour pixels transparent, leaves others opaque', () => {
+    const white = px(removeColor(createImage(1, 1, [250, 250, 250, 255]), [255, 255, 255], 30), 0, 0);
+    expect(white[3]).toBe(0); // within tolerance -> transparent
+    const black = px(removeColor(createImage(1, 1, [0, 0, 0, 255]), [255, 255, 255], 30), 0, 0);
+    expect(black).toEqual([0, 0, 0, 255]); // far -> unchanged
   });
 });
 

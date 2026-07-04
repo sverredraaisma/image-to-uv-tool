@@ -758,6 +758,24 @@ export function colorKeyMask(
   return out;
 }
 
+/** Make pixels within `tolerance` of `color` transparent (local key-out). */
+export function removeColor(
+  img: RasterImage,
+  color: [number, number, number],
+  tolerance: number,
+): RasterImage {
+  const out = cloneImage(img);
+  for (let i = 0; i < out.data.length; i += 4) {
+    const d = Math.max(
+      Math.abs(img.data[i] - color[0]),
+      Math.abs(img.data[i + 1] - color[1]),
+      Math.abs(img.data[i + 2] - color[2]),
+    );
+    if (d <= tolerance) out.data[i + 3] = 0;
+  }
+  return out;
+}
+
 /** Composite over a solid background colour, making every pixel opaque. */
 export function flatten(img: RasterImage, bg: [number, number, number]): RasterImage {
   const out = cloneImage(img);
