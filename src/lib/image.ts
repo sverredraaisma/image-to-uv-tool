@@ -63,6 +63,17 @@ export function downscaleToMax(img: RasterImage, maxDim: number): RasterImage {
   return resize(img, Math.max(1, Math.round(img.width * scale)), Math.max(1, Math.round(img.height * scale)));
 }
 
+/** Multiply each RGB channel by a colour (0–255 per channel). Alpha kept. */
+export function tint(img: RasterImage, color: [number, number, number]): RasterImage {
+  const out = cloneImage(img);
+  for (let i = 0; i < out.data.length; i += 4) {
+    out.data[i] = (img.data[i] * color[0]) / 255;
+    out.data[i + 1] = (img.data[i + 1] * color[1]) / 255;
+    out.data[i + 2] = (img.data[i + 2] * color[2]) / 255;
+  }
+  return out;
+}
+
 /** Scale the alpha channel by `factor` (0–1) to fade the image. */
 export function opacity(img: RasterImage, factor: number): RasterImage {
   const f = Math.max(0, Math.min(1, factor));

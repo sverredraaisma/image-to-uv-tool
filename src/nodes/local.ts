@@ -32,6 +32,7 @@ import {
   sharpen,
   sobel,
   threshold,
+  tint,
   vignette,
   transform,
   type AlphaCleanupMode,
@@ -318,6 +319,17 @@ export const opacityNode = singleImageOp({
   configFields: [{ kind: 'number', key: 'opacity', label: 'Opacity', min: 0, max: 1, step: 0.05 }],
   defaultConfig: () => ({ opacity: 1 }),
   op: (img, config) => opacity(img, num(config.opacity, 1)),
+});
+
+export const tintNode = singleImageOp({
+  type: 'tint',
+  label: 'Tint',
+  category: 'Adjust',
+  description: 'Multiply the image by a colour.',
+  configFields: [{ kind: 'color', key: 'color', label: 'Colour' }],
+  defaultConfig: () => ({ color: '#ffffff' }),
+  op: (img, config) =>
+    tint(img, hexToRgba(str(config.color, '#ffffff')).slice(0, 3) as [number, number, number]),
 });
 
 export const levelsNode = singleImageOp({
@@ -654,6 +666,7 @@ export const localNodes: NodeDefinition[] = [
   sharpenNode,
   normalizeNode,
   opacityNode,
+  tintNode,
   levelsNode,
   gradientMapNode,
   hueSaturationNode,

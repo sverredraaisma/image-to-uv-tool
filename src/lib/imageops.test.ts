@@ -23,6 +23,7 @@ import {
   sharpen,
   sobel,
   threshold,
+  tint,
   transform,
   vignette,
 } from './image';
@@ -183,6 +184,13 @@ describe('vignette', () => {
     const v = vignette(img, 1);
     expect(px(v, 1, 1)).toEqual([200, 200, 200, 255]); // centre untouched
     expect(px(v, 0, 0)).toEqual([0, 0, 0, 255]); // corner darkened to black
+  });
+});
+
+describe('tint', () => {
+  it('multiplies channels by the colour (white→colour, grey scaled)', () => {
+    expect(px(tint(createImage(1, 1, [255, 255, 255, 255]), [255, 0, 0]), 0, 0)).toEqual([255, 0, 0, 255]);
+    expect(px(tint(createImage(1, 1, [200, 200, 200, 255]), [128, 128, 128]), 0, 0)).toEqual([100, 100, 100, 255]);
   });
 });
 
