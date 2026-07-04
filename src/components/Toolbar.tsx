@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useStore } from '../store/store';
 import { allNodeDefs } from '../engine/registry';
-import { downloadText } from '../lib/download';
+import { downloadText, graphFileName } from '../lib/download';
 import { buildNodeMenu } from './nodeMenu';
 import type { SavedGraph } from '../types';
 
@@ -94,7 +94,8 @@ export function Toolbar() {
 
   const onSave = () => {
     const graph = exportGraph();
-    downloadText(JSON.stringify(graph, null, 2), 'node-graph.json', 'application/json');
+    // timestamped so repeated saves don't collide in the downloads folder
+    downloadText(JSON.stringify(graph, null, 2), graphFileName(new Date()), 'application/json');
   };
 
   const onLoadFile = (file: File) => {
