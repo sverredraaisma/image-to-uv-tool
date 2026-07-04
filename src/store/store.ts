@@ -784,10 +784,21 @@ export const useStore = create<StoreState>()(
       }),
       // Sanitize the rehydrated graph the same way loadGraph does, so a
       // corrupt/partially-written localStorage entry can't crash on startup.
+      // Only the whitelisted persisted keys are merged (and settings validated
+      // as strings), so junk/legacy keys — runtime, toasts, a non-string
+      // apiKey — can't leak in from a hand-edited or old localStorage blob.
       merge: (persisted, current) => {
-        const p = (persisted ?? {}) as Partial<StoreState>;
+        const p = (persisted ?? {}) as Record<string, unknown>;
         const { nodes, edges } = sanitizeGraph({ nodes: p.nodes, edges: p.edges }, SANITIZE_OPTIONS);
-        return { ...current, ...p, nodes, edges };
+        const asString = (v: unknown) => (typeof v === 'string' ? v : '');
+        return {
+          ...current,
+          nodes,
+          edges,
+          apiKey: asString(p.apiKey),
+          openRouterKey: asString(p.openRouterKey),
+          proxyUrl: asString(p.proxyUrl),
+        };
       },
     },
   ),

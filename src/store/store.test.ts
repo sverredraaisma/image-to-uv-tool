@@ -259,6 +259,28 @@ describe('persistence', () => {
     expect(store().apiKey).toBe('k');
   });
 
+  it('ignores junk/legacy persisted keys and coerces non-string settings', async () => {
+    localStorage.setItem(
+      'node-image-tool',
+      JSON.stringify({
+        version: 0,
+        state: {
+          nodes: [{ id: 'a', type: 'invert', position: { x: 0, y: 0 }, config: {} }],
+          edges: [],
+          apiKey: 123, // wrong type -> coerced to ''
+          openRouterKey: 'ok',
+          runtime: { a: { status: 'upToDate', outputs: {} } }, // junk -> must not restore
+          toasts: [{ id: 't', type: 'error', message: 'stale' }], // junk -> must not restore
+        },
+      }),
+    );
+    await useStore.persist.rehydrate();
+    expect(store().apiKey).toBe(''); // non-string dropped
+    expect(store().openRouterKey).toBe('ok');
+    expect(store().runtime).toEqual({}); // persisted runtime not restored
+    expect(store().toasts).toEqual([]); // persisted toasts not restored
+  });
+
   it('exportGraph / loadGraph round-trips the graph', async () => {
     const { a } = await buildChain();
     const saved = store().exportGraph();
