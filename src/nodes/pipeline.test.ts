@@ -242,12 +242,18 @@ describe('LLM + image-to-text (with stubbed fetch)', () => {
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
         const u = String(url);
-        if (u.endsWith('/models/schananas/grounded_sam')) return jsonResponse({ latest_version: { id: 'v' } });
+        if (u.endsWith('/models/schananas/grounded_sam'))
+          return jsonResponse({ latest_version: { id: 'v' } });
         if (u.endsWith('/predictions') && (init?.method ?? 'GET') === 'POST') {
           return jsonResponse({
             id: 'p',
             status: 'succeeded',
-            output: ['https://x/annotated.jpg', 'https://x/neg.jpg', 'https://x/mask.jpg', 'https://x/inv.jpg'],
+            output: [
+              'https://x/annotated.jpg',
+              'https://x/neg.jpg',
+              'https://x/mask.jpg',
+              'https://x/inv.jpg',
+            ],
           });
         }
         throw new Error(`unexpected ${u}`);

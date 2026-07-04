@@ -50,9 +50,9 @@ describe('heightmapToStl', () => {
 
   it('rejects an over-large heightmap instead of freezing', () => {
     const img = createImage(400, 400, [255, 255, 255, 255]); // 160k > 90k limit
-    expect(() =>
-      heightmapToStl(img, { minWhite: -1, baseThickness: 0, depthRange: 10, width: 100 }),
-    ).toThrow(/too detailed/i);
+    expect(() => heightmapToStl(img, { minWhite: -1, baseThickness: 0, depthRange: 10, width: 100 })).toThrow(
+      /too detailed/i,
+    );
   });
 
   it('height scales with white value and base thickness', () => {
@@ -68,8 +68,12 @@ describe('heightmapToStl', () => {
 type Vec3 = [number, number, number];
 
 function triNormal(a: Vec3, b: Vec3, c: Vec3): Vec3 {
-  const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-  const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  const ux = b[0] - a[0],
+    uy = b[1] - a[1],
+    uz = b[2] - a[2];
+  const vx = c[0] - a[0],
+    vy = c[1] - a[1],
+    vz = c[2] - a[2];
   return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
 }
 

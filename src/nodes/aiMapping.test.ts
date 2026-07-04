@@ -95,7 +95,9 @@ describe('buildReplicateInput', () => {
   });
 
   it('merges Extra inputs JSON and rejects invalid JSON', () => {
-    expect(buildReplicateInput([], [], { extraInputs: '{"guidance":3.5}' }, {}, enc)).toEqual({ guidance: 3.5 });
+    expect(buildReplicateInput([], [], { extraInputs: '{"guidance":3.5}' }, {}, enc)).toEqual({
+      guidance: 3.5,
+    });
     expect(() => buildReplicateInput([], [], { extraInputs: '{bad' }, {}, enc)).toThrow(/JSON/);
   });
 
@@ -148,7 +150,9 @@ describe('resolveOutputs', () => {
   });
 
   it('resolves text outputs', () => {
-    expect(resolveOutputs([out({ type: 'text' })], 'a caption', true)).toEqual({ out: { text: 'a caption' } });
+    expect(resolveOutputs([out({ type: 'text' })], 'a caption', true)).toEqual({
+      out: { text: 'a caption' },
+    });
   });
 
   it('maps missing outputs to undefined', () => {

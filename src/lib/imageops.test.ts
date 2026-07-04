@@ -202,7 +202,9 @@ describe('pixelate', () => {
     set(img, 2, 0, [30, 0, 0, 255]);
     set(img, 3, 0, [40, 0, 0, 255]);
     const out = pixelate(img, 2);
-    expect([px(out, 0, 0)[0], px(out, 1, 0)[0], px(out, 2, 0)[0], px(out, 3, 0)[0]]).toEqual([10, 10, 30, 30]);
+    expect([px(out, 0, 0)[0], px(out, 1, 0)[0], px(out, 2, 0)[0], px(out, 3, 0)[0]]).toEqual([
+      10, 10, 30, 30,
+    ]);
   });
   it('block size <= 1 is a no-op copy', () => {
     const img = createImage(2, 2, [5, 6, 7, 8]);
@@ -232,7 +234,9 @@ describe('removeColor', () => {
 describe('tint', () => {
   it('multiplies channels by the colour (white→colour, grey scaled)', () => {
     expect(px(tint(createImage(1, 1, [255, 255, 255, 255]), [255, 0, 0]), 0, 0)).toEqual([255, 0, 0, 255]);
-    expect(px(tint(createImage(1, 1, [200, 200, 200, 255]), [128, 128, 128]), 0, 0)).toEqual([100, 100, 100, 255]);
+    expect(px(tint(createImage(1, 1, [200, 200, 200, 255]), [128, 128, 128]), 0, 0)).toEqual([
+      100, 100, 100, 255,
+    ]);
   });
 });
 

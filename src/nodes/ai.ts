@@ -61,7 +61,13 @@ export const aiNodes: NodeDefinition[] = [
     model: 'stability-ai/sdxl',
     ports: [
       PROMPT(),
-      { id: 'negative_prompt', label: 'Negative prompt', type: 'text', key: 'negative_prompt', required: false },
+      {
+        id: 'negative_prompt',
+        label: 'Negative prompt',
+        type: 'text',
+        key: 'negative_prompt',
+        required: false,
+      },
     ],
   }),
   makeReplicateNode({
@@ -113,7 +119,13 @@ export const aiNodes: NodeDefinition[] = [
     model: 'stability-ai/stable-diffusion-3.5-large',
     ports: [
       PROMPT(),
-      { id: 'negative_prompt', label: 'Negative prompt', type: 'text', key: 'negative_prompt', required: false },
+      {
+        id: 'negative_prompt',
+        label: 'Negative prompt',
+        type: 'text',
+        key: 'negative_prompt',
+        required: false,
+      },
     ],
   }),
 
@@ -132,17 +144,14 @@ export const aiNodes: NodeDefinition[] = [
     group: 'Edit',
     description: 'Fill a masked region from a prompt (stability-ai/stable-diffusion-inpainting).',
     model: 'stability-ai/stable-diffusion-inpainting',
-    ports: [
-      IMAGE(),
-      { id: 'mask', label: 'Mask', type: 'mask', key: 'mask', required: false },
-      PROMPT(),
-    ],
+    ports: [IMAGE(), { id: 'mask', label: 'Mask', type: 'mask', key: 'mask', required: false }, PROMPT()],
   }),
   makeReplicateNode({
     type: 'fluxFill',
     label: 'Flux Fill',
     group: 'Edit',
-    description: 'High-quality inpaint/outpaint from image + mask + prompt (black-forest-labs/flux-fill-dev).',
+    description:
+      'High-quality inpaint/outpaint from image + mask + prompt (black-forest-labs/flux-fill-dev).',
     model: 'black-forest-labs/flux-fill-dev',
     ports: [
       IMAGE(),
@@ -154,7 +163,8 @@ export const aiNodes: NodeDefinition[] = [
     type: 'fluxCanny',
     label: 'Flux ControlNet (Canny)',
     group: 'Edit',
-    description: 'Structure-guided generation from a control image + prompt (black-forest-labs/flux-canny-dev).',
+    description:
+      'Structure-guided generation from a control image + prompt (black-forest-labs/flux-canny-dev).',
     model: 'black-forest-labs/flux-canny-dev',
     ports: [IMAGE({ key: 'control_image', label: 'Control image' }), PROMPT()],
   }),
@@ -386,7 +396,10 @@ export const aiNodes: NodeDefinition[] = [
     model: 'philz1337x/clarity-upscaler',
     ports: [IMAGE(), PROMPT({ required: false })],
     scalars: [
-      { field: { kind: 'number', key: 'scale_factor', label: 'Scale factor', min: 1, max: 4, step: 1 }, default: 2 },
+      {
+        field: { kind: 'number', key: 'scale_factor', label: 'Scale factor', min: 1, max: 4, step: 1 },
+        default: 2,
+      },
     ],
   }),
   makeReplicateNode({
@@ -429,10 +442,7 @@ export const aiNodes: NodeDefinition[] = [
       'Lightweight image captioning / VQA (salesforce/blip). Leave the question empty to caption, or ask a question.',
     model: 'salesforce/blip',
     output: 'text',
-    ports: [
-      IMAGE(),
-      { id: 'prompt', label: 'Question', type: 'text', key: 'question', required: false },
-    ],
+    ports: [IMAGE(), { id: 'prompt', label: 'Question', type: 'text', key: 'question', required: false }],
   }),
   makeReplicateNode({
     type: 'moondream',
@@ -441,10 +451,7 @@ export const aiNodes: NodeDefinition[] = [
     description: 'Small vision-language model — ask a question about the image (lucataco/moondream2).',
     model: 'lucataco/moondream2',
     output: 'text',
-    ports: [
-      IMAGE(),
-      { id: 'prompt', label: 'Question', type: 'text', key: 'prompt', required: false },
-    ],
+    ports: [IMAGE(), { id: 'prompt', label: 'Question', type: 'text', key: 'prompt', required: false }],
   }),
   makeReplicateNode({
     type: 'llava',

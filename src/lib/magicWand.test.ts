@@ -23,7 +23,14 @@ describe('selectRegion', () => {
     expect([...sel]).toEqual([1, 1, 1, 1]);
   });
   it('multiple seeds union their selections', () => {
-    const sel = selectRegion(halfImage(), [{ x: 0, y: 0 }, { x: 3, y: 0 }], 10);
+    const sel = selectRegion(
+      halfImage(),
+      [
+        { x: 0, y: 0 },
+        { x: 3, y: 0 },
+      ],
+      10,
+    );
     expect([...sel]).toEqual([1, 1, 1, 1]);
   });
   it('ignores out-of-bounds seeds', () => {

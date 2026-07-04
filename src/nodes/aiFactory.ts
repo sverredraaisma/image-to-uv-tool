@@ -20,13 +20,7 @@ import { str } from './helpers';
  * pairs stay aligned because the scale factor is identical.
  */
 export const MAX_AI_IMAGE_DIM = 2048;
-import {
-  buildReplicateInput,
-  resolveOutputs,
-  type AiOutput,
-  type AiPort,
-  type AiScalar,
-} from './aiMapping';
+import { buildReplicateInput, resolveOutputs, type AiOutput, type AiPort, type AiScalar } from './aiMapping';
 
 export interface AiSpec {
   type: string;
@@ -50,8 +44,9 @@ export interface AiSpec {
 export function makeReplicateNode(spec: AiSpec): NodeDefinition {
   const inputs: PortSpec[] = spec.ports.map((p) => ({ id: p.id, label: p.label, type: p.type }));
   const scalars = spec.scalars ?? [];
-  const outputPorts: AiOutput[] =
-    spec.outputs ?? [{ id: 'out', label: 'Output', type: spec.output === 'text' ? 'text' : 'image' }];
+  const outputPorts: AiOutput[] = spec.outputs ?? [
+    { id: 'out', label: 'Output', type: spec.output === 'text' ? 'text' : 'image' },
+  ];
   const singleDefaultOutput = !spec.outputs;
 
   const configFields: ConfigField[] = [

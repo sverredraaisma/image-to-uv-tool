@@ -283,11 +283,7 @@ export type AlphaCleanupMode = 'transparent' | 'black' | 'white';
  * Pixels whose alpha is below `threshold` are replaced: made fully
  * transparent, or snapped to opaque black / white.
  */
-export function alphaCleanup(
-  img: RasterImage,
-  threshold: number,
-  mode: AlphaCleanupMode,
-): RasterImage {
+export function alphaCleanup(img: RasterImage, threshold: number, mode: AlphaCleanupMode): RasterImage {
   const out = cloneImage(img);
   for (let i = 0; i < out.data.length; i += 4) {
     if (out.data[i + 3] < threshold) {
@@ -316,7 +312,13 @@ export function hexToRgba(hex: string, alpha = 255): [number, number, number, nu
       parseInt(h.slice(6, 8), 16),
     ];
   }
-  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const full =
+    h.length === 3
+      ? h
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : h;
   return [
     parseInt(full.slice(0, 2), 16),
     parseInt(full.slice(2, 4), 16),
@@ -338,11 +340,7 @@ export function grayscale(img: RasterImage): RasterImage {
 }
 
 /** Brightness and contrast, both in [-100, 100]. Alpha is unchanged. */
-export function brightnessContrast(
-  img: RasterImage,
-  brightness: number,
-  contrast: number,
-): RasterImage {
+export function brightnessContrast(img: RasterImage, brightness: number, contrast: number): RasterImage {
   const out = cloneImage(img);
   const bAdd = brightness * 2.55;
   const c = contrast * 2.55;
@@ -623,12 +621,7 @@ export type MaskOp = 'and' | 'or' | 'subtract' | 'xor';
  * Boolean-combine two masks. A pixel is "on" where luminance >= threshold;
  * result is a white(on)/black(off) opaque mask. `b` is resized to match `a`.
  */
-export function maskCombine(
-  a: RasterImage,
-  b: RasterImage,
-  op: MaskOp,
-  threshold = 128,
-): RasterImage {
+export function maskCombine(a: RasterImage, b: RasterImage, op: MaskOp, threshold = 128): RasterImage {
   const bb = resize(b, a.width, a.height);
   const out = createImage(a.width, a.height, [0, 0, 0, 255]);
   for (let p = 0; p < a.width * a.height; p++) {
@@ -719,12 +712,7 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
  * Levels adjustment: remap each RGB channel so `blackPoint` maps to 0 and
  * `whitePoint` maps to 255, with a midtone `gamma` (>1 brightens). Alpha kept.
  */
-export function levels(
-  img: RasterImage,
-  blackPoint: number,
-  whitePoint: number,
-  gamma: number,
-): RasterImage {
+export function levels(img: RasterImage, blackPoint: number, whitePoint: number, gamma: number): RasterImage {
   const out = cloneImage(img);
   const range = Math.max(1, whitePoint - blackPoint);
   const invGamma = 1 / Math.max(0.01, gamma);

@@ -30,8 +30,14 @@ describe('reconcileRuntime', () => {
   });
 
   it('invalidates a node whose config changed and everything downstream of it', () => {
-    const current: GraphSnapshot = { nodes: [node('a', { v: 1 }), node('b'), node('c')], edges: [edge('a', 'b'), edge('b', 'c')] };
-    const target: GraphSnapshot = { nodes: [node('a', { v: 2 }), node('b'), node('c')], edges: [edge('a', 'b'), edge('b', 'c')] };
+    const current: GraphSnapshot = {
+      nodes: [node('a', { v: 1 }), node('b'), node('c')],
+      edges: [edge('a', 'b'), edge('b', 'c')],
+    };
+    const target: GraphSnapshot = {
+      nodes: [node('a', { v: 2 }), node('b'), node('c')],
+      edges: [edge('a', 'b'), edge('b', 'c')],
+    };
     const prev = { a: upToDate('A'), b: upToDate('B'), c: upToDate('C') };
     const out = reconcileRuntime(prev, current, target);
     expect(out.a.status).toBe('outOfDate');

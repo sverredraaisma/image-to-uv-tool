@@ -5,8 +5,7 @@
 import type { DataValue, GraphEdge, NodeRuntime, PortSpec } from '../types';
 import { upstreamNodeIds } from './graph';
 
-const statusOf = (runtime: Record<string, NodeRuntime>, id: string) =>
-  runtime[id]?.status ?? 'outOfDate';
+const statusOf = (runtime: Record<string, NodeRuntime>, id: string) => runtime[id]?.status ?? 'outOfDate';
 
 /**
  * Resolve a node's input values from the current edges + upstream outputs.

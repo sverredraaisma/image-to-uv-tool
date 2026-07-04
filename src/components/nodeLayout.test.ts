@@ -20,15 +20,15 @@ describe('nodeWidth', () => {
   });
 
   it('widens for multiline text fields', () => {
-    const w = nodeWidth(
-      def({ configFields: [{ label: 'Prompt', kind: 'text', multiline: true }] }),
-    );
+    const w = nodeWidth(def({ configFields: [{ label: 'Prompt', kind: 'text', multiline: true }] }));
     expect(w).toBeGreaterThanOrEqual(250);
   });
 
   it('ignores advanced fields and caps at the maximum', () => {
     const compact = nodeWidth(
-      def({ configFields: [{ label: 'A very long advanced field label here', kind: 'text', advanced: true }] }),
+      def({
+        configFields: [{ label: 'A very long advanced field label here', kind: 'text', advanced: true }],
+      }),
     );
     expect(compact).toBe(214);
     const huge = nodeWidth(def({ outputs: [{ label: 'x'.repeat(200) }] }));

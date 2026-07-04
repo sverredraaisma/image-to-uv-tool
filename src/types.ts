@@ -74,12 +74,7 @@ export interface BooleanField extends ConfigFieldBase {
 export interface ColorField extends ConfigFieldBase {
   kind: 'color';
 }
-export type ConfigField =
-  | NumberField
-  | TextFieldSpec
-  | SelectField
-  | BooleanField
-  | ColorField;
+export type ConfigField = NumberField | TextFieldSpec | SelectField | BooleanField | ColorField;
 
 export type NodeConfig = Record<string, unknown>;
 

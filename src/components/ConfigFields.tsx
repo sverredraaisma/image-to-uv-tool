@@ -123,7 +123,12 @@ export function ConfigFields({
           />
         )}
         {field.kind === 'text' && !field.multiline && (
-          <DebouncedTextControl kind="text" value={String(value ?? '')} placeholder={field.placeholder} onCommit={set} />
+          <DebouncedTextControl
+            kind="text"
+            value={String(value ?? '')}
+            placeholder={field.placeholder}
+            onCommit={set}
+          />
         )}
         {field.kind === 'text' && field.multiline && (
           <DebouncedTextControl

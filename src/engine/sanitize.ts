@@ -35,7 +35,12 @@ export function sanitizeGraph(
   const nodes: GraphNode[] = [];
   const seenNodeIds = new Set<string>();
   for (const item of Array.isArray(obj.nodes) ? obj.nodes : []) {
-    const n = item as { id?: unknown; type?: unknown; position?: { x?: unknown; y?: unknown }; config?: unknown };
+    const n = item as {
+      id?: unknown;
+      type?: unknown;
+      position?: { x?: unknown; y?: unknown };
+      config?: unknown;
+    };
     if (typeof n.id !== 'string' || typeof n.type !== 'string') continue;
     if (seenNodeIds.has(n.id)) continue; // collapse duplicate ids
     seenNodeIds.add(n.id);

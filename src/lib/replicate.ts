@@ -142,9 +142,7 @@ async function resolveLatestVersion(
     model = await request<ModelInfo>(`${base}/models/${slug}`, { method: 'GET' }, opts);
   } catch (err) {
     if (err instanceof Error && /error 404/.test(err.message)) {
-      throw new Error(
-        `Model "${slug}" not found on Replicate — check the model slug in the node's settings`,
-      );
+      throw new Error(`Model "${slug}" not found on Replicate — check the model slug in the node's settings`);
     }
     throw err;
   }
@@ -236,8 +234,7 @@ export async function runModel(
   }
 }
 
-const isUrlLike = (s: unknown): s is string =>
-  typeof s === 'string' && /^(https?:|data:)/.test(s);
+const isUrlLike = (s: unknown): s is string => typeof s === 'string' && /^(https?:|data:)/.test(s);
 
 /**
  * Extract a usable image URL from a model's output. Handles a bare URL string,

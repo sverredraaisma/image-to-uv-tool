@@ -88,9 +88,7 @@ export const imageInputNode: NodeDefinition = {
   autoRun: true,
   inputs: [],
   outputs: [{ id: 'out', label: 'Image', type: 'image' }],
-  configFields: [
-    { kind: 'number', key: 'maxSize', label: 'Max size (px, 0 = original)', min: 0, step: 64 },
-  ],
+  configFields: [{ kind: 'number', key: 'maxSize', label: 'Max size (px, 0 = original)', min: 0, step: 64 }],
   defaultConfig: () => ({ src: '', name: '', maxSize: 0 }),
   compute: async ({ config }) => {
     const src = str(config.src);
@@ -446,7 +444,12 @@ export const outlineNode = singleImageOp({
   ],
   defaultConfig: () => ({ thickness: 4, color: '#000000', alphaThreshold: 0 }),
   op: (img, config) =>
-    outline(img, num(config.thickness, 4), hexToRgba(str(config.color, '#000000'), 255), num(config.alphaThreshold, 0)),
+    outline(
+      img,
+      num(config.thickness, 4),
+      hexToRgba(str(config.color, '#000000'), 255),
+      num(config.alphaThreshold, 0),
+    ),
 });
 
 export const alphaCleanupNode = singleImageOp({
@@ -487,7 +490,13 @@ export const cropNode = singleImageOp({
   ],
   defaultConfig: () => ({ x: 0, y: 0, width: 256, height: 256 }),
   op: (img, config) =>
-    crop(img, num(config.x, 0), num(config.y, 0), num(config.width, img.width), num(config.height, img.height)),
+    crop(
+      img,
+      num(config.x, 0),
+      num(config.y, 0),
+      num(config.width, img.width),
+      num(config.height, img.height),
+    ),
 });
 
 export const resizeNode = singleImageOp({

@@ -20,7 +20,11 @@ describe('gatherInputs', () => {
     s1: { status: 'upToDate', outputs: { out: txt('one') } },
     s2: { status: 'upToDate', outputs: { out: txt('two') } },
   };
-  const edges = [edge('s1', 'out', 'n', 'in'), edge('s1', 'out', 'n', 'many'), edge('s2', 'out', 'n', 'many')];
+  const edges = [
+    edge('s1', 'out', 'n', 'in'),
+    edge('s1', 'out', 'n', 'many'),
+    edge('s2', 'out', 'n', 'many'),
+  ];
 
   it('takes the first value for a single input and an array for a multiple input', () => {
     const inputs = gatherInputs(ports, edges, runtime, 'n');
@@ -47,11 +51,16 @@ describe('findReadyAutoNode', () => {
 
   it('skips up-to-date and manual nodes', () => {
     expect(findReadyAutoNode([{ id: 'a', type: 'auto' }], [], rt({ a: 'upToDate' }), auto)).toBeUndefined();
-    expect(findReadyAutoNode([{ id: 'b', type: 'manual' }], [], rt({ b: 'outOfDate' }), auto)).toBeUndefined();
+    expect(
+      findReadyAutoNode([{ id: 'b', type: 'manual' }], [], rt({ b: 'outOfDate' }), auto),
+    ).toBeUndefined();
   });
 
   it('waits until upstream nodes are up to date', () => {
-    const nodes = [{ id: 'a', type: 'auto' }, { id: 'c', type: 'auto' }];
+    const nodes = [
+      { id: 'a', type: 'auto' },
+      { id: 'c', type: 'auto' },
+    ];
     const edges = [edge('a', 'out', 'c', 'in')];
     // a still out of date -> c not ready, and a itself is returned first
     expect(findReadyAutoNode(nodes, edges, rt({ a: 'outOfDate', c: 'outOfDate' }), auto)).toBe('a');

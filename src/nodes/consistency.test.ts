@@ -54,9 +54,7 @@ describe('node registry consistency', () => {
   });
 
   it('AI (Replicate) nodes declare a capability group', () => {
-    const ungrouped = defs
-      .filter((d) => d.category === 'AI (Replicate)' && !d.group)
-      .map((d) => d.type);
+    const ungrouped = defs.filter((d) => d.category === 'AI (Replicate)' && !d.group).map((d) => d.type);
     expect(ungrouped).toEqual([]);
   });
 

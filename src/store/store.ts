@@ -10,13 +10,7 @@ import type {
   NodeRuntime,
   SavedGraph,
 } from '../types';
-import {
-  ancestors,
-  descendants,
-  downstreamNodeIds,
-  topoSort,
-  wouldCreateCycle,
-} from '../engine/graph';
+import { ancestors, descendants, downstreamNodeIds, topoSort, wouldCreateCycle } from '../engine/graph';
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
@@ -186,11 +180,7 @@ interface ConnectionCheck {
 }
 
 /** Pure validation shared by `addConnection` and `canConnect`. */
-function checkConnection(
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  conn: ConnectionInput,
-): ConnectionCheck {
+function checkConnection(nodes: GraphNode[], edges: GraphEdge[], conn: ConnectionInput): ConnectionCheck {
   const { source, sourceHandle, target, targetHandle } = conn;
   if (!source || !target || !sourceHandle || !targetHandle) return { ok: false };
   const srcNode = nodes.find((n) => n.id === source);
@@ -354,9 +344,7 @@ export const useStore = create<StoreState>()(
 
       updateNodeConfig: (id, patch) => {
         set((s) => ({
-          nodes: s.nodes.map((n) =>
-            n.id === id ? { ...n, config: { ...n.config, ...patch } } : n,
-          ),
+          nodes: s.nodes.map((n) => (n.id === id ? { ...n, config: { ...n.config, ...patch } } : n)),
         }));
         get().markOutOfDate(id);
         void get().processAutoRun();
@@ -471,8 +459,10 @@ export const useStore = create<StoreState>()(
           set({ pendingConnection: { nodeId, portId, side } });
           return;
         }
-        const out = side === 'output' ? { nodeId, portId } : { nodeId: pending.nodeId, portId: pending.portId };
-        const inp = side === 'input' ? { nodeId, portId } : { nodeId: pending.nodeId, portId: pending.portId };
+        const out =
+          side === 'output' ? { nodeId, portId } : { nodeId: pending.nodeId, portId: pending.portId };
+        const inp =
+          side === 'input' ? { nodeId, portId } : { nodeId: pending.nodeId, portId: pending.portId };
         get().addConnection({
           source: out.nodeId,
           sourceHandle: out.portId,
@@ -489,8 +479,7 @@ export const useStore = create<StoreState>()(
       openPreview: (value, title) => set({ preview: { value, title } }),
       closePreview: () => set({ preview: null }),
 
-      addToast: (type, message) =>
-        set((s) => ({ toasts: [...s.toasts, { id: genId('t'), type, message }] })),
+      addToast: (type, message) => set((s) => ({ toasts: [...s.toasts, { id: genId('t'), type, message }] })),
       dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
       markOutOfDate: (id) =>
@@ -588,7 +577,12 @@ export const useStore = create<StoreState>()(
             set((st) => ({
               runtime: {
                 ...st.runtime,
-                [id]: { ...(st.runtime[id] ?? defaultRuntime()), status: 'outOfDate', error: undefined, progress: undefined },
+                [id]: {
+                  ...(st.runtime[id] ?? defaultRuntime()),
+                  status: 'outOfDate',
+                  error: undefined,
+                  progress: undefined,
+                },
               },
             }));
             return;
@@ -597,7 +591,12 @@ export const useStore = create<StoreState>()(
           set((st) => ({
             runtime: {
               ...st.runtime,
-              [id]: { ...(st.runtime[id] ?? defaultRuntime()), status: 'error', error: message, progress: undefined },
+              [id]: {
+                ...(st.runtime[id] ?? defaultRuntime()),
+                status: 'error',
+                error: message,
+                progress: undefined,
+              },
             },
           }));
           get().addToast('error', `${def.label}: ${message}`);

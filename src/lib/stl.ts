@@ -25,12 +25,22 @@ export interface HeightmapOptions {
 type Tri = [number, number, number, number, number, number, number, number, number];
 
 function normal(
-  ax: number, ay: number, az: number,
-  bx: number, by: number, bz: number,
-  cx: number, cy: number, cz: number,
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+  cx: number,
+  cy: number,
+  cz: number,
 ): [number, number, number] {
-  const ux = bx - ax, uy = by - ay, uz = bz - az;
-  const vx = cx - ax, vy = cy - ay, vz = cz - az;
+  const ux = bx - ax,
+    uy = by - ay,
+    uz = bz - az;
+  const vx = cx - ax,
+    vy = cy - ay,
+    vz = cz - az;
   const nx = uy * vz - uz * vy;
   const ny = uz * vx - ux * vz;
   const nz = ux * vy - uy * vx;
@@ -74,8 +84,10 @@ export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh 
       if (!included(x, y)) continue;
       const z = heightAt(x, y);
       // Flip Y so the image appears upright (image row 0 -> max Y).
-      const x0 = x * ps, x1 = (x + 1) * ps;
-      const y0 = (h - y) * ps, y1 = (h - y - 1) * ps;
+      const x0 = x * ps,
+        x1 = (x + 1) * ps;
+      const y0 = (h - y) * ps,
+        y1 = (h - y - 1) * ps;
 
       // Top (normal +Z): CCW when viewed from above.
       addQuad(mesh, [x0, y1, z], [x1, y1, z], [x1, y0, z], [x0, y0, z]);
@@ -85,13 +97,43 @@ export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh 
       // Walls. For an included neighbour we only emit the exposed step from the
       // taller side; for an excluded neighbour we emit a full wall down to 0.
       // Left edge (x0)
-      wall(mesh, [x0, y0, 0], [x0, y1, 0], z, included(x - 1, y) ? heightAt(x - 1, y) : 0, included(x - 1, y));
+      wall(
+        mesh,
+        [x0, y0, 0],
+        [x0, y1, 0],
+        z,
+        included(x - 1, y) ? heightAt(x - 1, y) : 0,
+        included(x - 1, y),
+      );
       // Right edge (x1)
-      wall(mesh, [x1, y1, 0], [x1, y0, 0], z, included(x + 1, y) ? heightAt(x + 1, y) : 0, included(x + 1, y));
+      wall(
+        mesh,
+        [x1, y1, 0],
+        [x1, y0, 0],
+        z,
+        included(x + 1, y) ? heightAt(x + 1, y) : 0,
+        included(x + 1, y),
+      );
       // Top edge in image space (y0 side, towards y-1)
-      wall(mesh, [x0, y0, 0], [x1, y0, 0], z, included(x, y - 1) ? heightAt(x, y - 1) : 0, included(x, y - 1), true);
+      wall(
+        mesh,
+        [x0, y0, 0],
+        [x1, y0, 0],
+        z,
+        included(x, y - 1) ? heightAt(x, y - 1) : 0,
+        included(x, y - 1),
+        true,
+      );
       // Bottom edge in image space (y1 side, towards y+1)
-      wall(mesh, [x1, y1, 0], [x0, y1, 0], z, included(x, y + 1) ? heightAt(x, y + 1) : 0, included(x, y + 1), true);
+      wall(
+        mesh,
+        [x1, y1, 0],
+        [x0, y1, 0],
+        z,
+        included(x, y + 1) ? heightAt(x, y + 1) : 0,
+        included(x, y + 1),
+        true,
+      );
     }
   }
   return mesh;
@@ -139,7 +181,15 @@ export function stlToAscii(stl: StlValue, name = 'heightmap', maxTriangles = Inf
   for (let i = 0; i < count; i++) {
     const b = i * 9;
     const [n0, n1, n2] = normal(
-      t[b], t[b + 1], t[b + 2], t[b + 3], t[b + 4], t[b + 5], t[b + 6], t[b + 7], t[b + 8],
+      t[b],
+      t[b + 1],
+      t[b + 2],
+      t[b + 3],
+      t[b + 4],
+      t[b + 5],
+      t[b + 6],
+      t[b + 7],
+      t[b + 8],
     );
     lines.push(`  facet normal ${n0} ${n1} ${n2}`);
     lines.push('    outer loop');
@@ -167,7 +217,15 @@ export function stlToBinary(stl: StlValue): Uint8Array<ArrayBuffer> {
   for (let i = 0; i < n; i++) {
     const b = i * 9;
     const [nx, ny, nz] = normal(
-      t[b], t[b + 1], t[b + 2], t[b + 3], t[b + 4], t[b + 5], t[b + 6], t[b + 7], t[b + 8],
+      t[b],
+      t[b + 1],
+      t[b + 2],
+      t[b + 3],
+      t[b + 4],
+      t[b + 5],
+      t[b + 6],
+      t[b + 7],
+      t[b + 8],
     );
     view.setFloat32(off, nx, true);
     view.setFloat32(off + 4, ny, true);

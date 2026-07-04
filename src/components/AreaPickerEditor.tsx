@@ -46,11 +46,7 @@ export function AreaPickerEditor({ nodeId }: { nodeId: string }) {
             onChange={(e) => updateNodeConfig(nodeId, { tolerance: Number(e.target.value) })}
           />
         </label>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => updateNodeConfig(nodeId, { points: [] })}
-        >
+        <button type="button" className="btn" onClick={() => updateNodeConfig(nodeId, { points: [] })}>
           Clear points ({points.length})
         </button>
         {points.length > 0 && (

@@ -53,11 +53,7 @@ export function hasPath(from: string, to: string, edges: GraphEdge[]): boolean {
  * Would adding an edge source -> target introduce a cycle? A cycle appears if
  * `target` can already reach `source` (or it's a self-loop).
  */
-export function wouldCreateCycle(
-  source: string,
-  target: string,
-  edges: GraphEdge[],
-): boolean {
+export function wouldCreateCycle(source: string, target: string, edges: GraphEdge[]): boolean {
   if (source === target) return true;
   return hasPath(target, source, edges);
 }

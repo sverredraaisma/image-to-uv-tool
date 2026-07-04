@@ -24,7 +24,13 @@ function makeLlmNode(spec: LlmSpec): NodeDefinition {
     outputs: [{ id: 'out', label: 'Text', type: 'text' }],
     configFields: [
       { kind: 'text', key: 'model', label: 'Model', advanced: true },
-      { kind: 'text', key: 'prompt', label: 'Prompt', multiline: true, placeholder: 'Instruction; wired text is appended' },
+      {
+        kind: 'text',
+        key: 'prompt',
+        label: 'Prompt',
+        multiline: true,
+        placeholder: 'Instruction; wired text is appended',
+      },
       { kind: 'text', key: 'system', label: 'System prompt', multiline: true, advanced: true },
       { kind: 'number', key: 'temperature', label: 'Temperature', min: 0, max: 2, step: 0.1, advanced: true },
       { kind: 'number', key: 'maxTokens', label: 'Max tokens', min: 1, step: 1, advanced: true },

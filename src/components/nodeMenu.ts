@@ -73,9 +73,7 @@ export function buildNodeMenu(nodes: MenuNode[], query = ''): MenuCategory[] {
       GROUP_ORDER,
     ).map((group) => ({
       group,
-      items: catItems
-        .filter((n) => (n.group ?? '') === group)
-        .sort((a, b) => a.label.localeCompare(b.label)),
+      items: catItems.filter((n) => (n.group ?? '') === group).sort((a, b) => a.label.localeCompare(b.label)),
     }));
     return { category, groups };
   });

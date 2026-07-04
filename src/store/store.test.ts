@@ -100,9 +100,7 @@ const throwingNode: NodeDefinition = {
     throw new Error('kaboom');
   },
 };
-[constNode, passNode, manualNode, imageInNode, asyncNode, abortableNode, throwingNode].forEach(
-  registerNode,
-);
+[constNode, passNode, manualNode, imageInNode, asyncNode, abortableNode, throwingNode].forEach(registerNode);
 
 const store = () => useStore.getState();
 
@@ -204,7 +202,9 @@ describe('connection validation', () => {
     const p1 = store().addNode('test.pass');
     const p2 = store().addNode('test.pass');
     await store().processAutoRun();
-    expect(store().addConnection({ source: p1, sourceHandle: 'out', target: p2, targetHandle: 'in' })).toBe(true);
+    expect(store().addConnection({ source: p1, sourceHandle: 'out', target: p2, targetHandle: 'in' })).toBe(
+      true,
+    );
     const ok = store().addConnection({ source: p2, sourceHandle: 'out', target: p1, targetHandle: 'in' });
     expect(ok).toBe(false);
     expect(store().toasts.some((t) => /cycle/i.test(t.message))).toBe(true);

@@ -23,8 +23,8 @@ export function nodeWidth(def: NodeLayoutInfo): number {
   const longestField = fields.reduce((m, f) => Math.max(m, f.label.length), 0);
   const hasMultiline = fields.some((f) => f.kind === 'text' && f.multiline);
 
-  const portW = longestPort * CHAR + 46 /* preview */ + 46 /* handle + gaps */;
-  const fieldW = longestField * CHAR + 132 /* control + padding */;
+  const portW = longestPort * CHAR + 46 /* preview */ + 46; /* handle + gaps */
+  const fieldW = longestField * CHAR + 132; /* control + padding */
   const width = Math.max(MIN, portW, fieldW, hasMultiline ? 250 : 0);
   return Math.round(Math.min(MAX, width));
 }

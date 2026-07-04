@@ -14,4 +14,3 @@ if (!('DOMMatrixReadOnly' in globalThis)) {
     constructor() {}
   } as unknown as typeof DOMMatrixReadOnly;
 }
-

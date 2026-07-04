@@ -21,11 +21,7 @@ function colorDist(data: Uint8ClampedArray, i: number, j: number): number {
  * Flood-fill from each seed over pixels within `tolerance` of that seed's
  * colour (4-connected). Returns a boolean selection mask (length w*h).
  */
-export function selectRegion(
-  img: RasterImage,
-  seeds: Point[],
-  tolerance: number,
-): Uint8Array {
+export function selectRegion(img: RasterImage, seeds: Point[], tolerance: number): Uint8Array {
   const { width: w, height: h, data } = img;
   const selected = new Uint8Array(w * h);
   for (const seed of seeds) {
@@ -54,11 +50,7 @@ export function selectRegion(
 }
 
 /** Produce an opaque black/white mask image from a magic-wand selection. */
-export function magicWandMask(
-  img: RasterImage,
-  seeds: Point[],
-  tolerance: number,
-): RasterImage {
+export function magicWandMask(img: RasterImage, seeds: Point[], tolerance: number): RasterImage {
   const selected = selectRegion(img, seeds, tolerance);
   const out = createImage(img.width, img.height, [0, 0, 0, 255]);
   for (let p = 0; p < selected.length; p++) {

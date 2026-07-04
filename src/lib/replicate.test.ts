@@ -60,11 +60,15 @@ describe('runModel', () => {
       throw new TypeError('Failed to fetch'); // browser CORS/network rejection on POST
     });
     await expect(
-      runModel('owner/name', {}, {
-        apiKey: 'k',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        sleepImpl: noSleep,
-      }),
+      runModel(
+        'owner/name',
+        {},
+        {
+          apiKey: 'k',
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          sleepImpl: noSleep,
+        },
+      ),
     ).rejects.toThrow(/Proxy URL/);
   });
 
@@ -73,12 +77,16 @@ describe('runModel', () => {
       throw new TypeError('Failed to fetch');
     });
     await expect(
-      runModel('owner/name', {}, {
-        apiKey: 'k',
-        proxyUrl: 'http://localhost:8787/v1',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        sleepImpl: noSleep,
-      }),
+      runModel(
+        'owner/name',
+        {},
+        {
+          apiKey: 'k',
+          proxyUrl: 'http://localhost:8787/v1',
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          sleepImpl: noSleep,
+        },
+      ),
     ).rejects.toThrow(/localhost:8787/);
   });
 
@@ -87,11 +95,15 @@ describe('runModel', () => {
       throw new DOMException('Aborted', 'AbortError');
     });
     await expect(
-      runModel('owner/name', {}, {
-        apiKey: 'k',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        sleepImpl: noSleep,
-      }),
+      runModel(
+        'owner/name',
+        {},
+        {
+          apiKey: 'k',
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          sleepImpl: noSleep,
+        },
+      ),
     ).rejects.toThrow(/Abort/);
   });
 
@@ -106,11 +118,15 @@ describe('runModel', () => {
       }
       throw new Error(`unexpected ${method(init)} ${u}`);
     });
-    const out = await runModel('owner/name', { image: 'data:...' }, {
-      apiKey: 'k',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      sleepImpl: noSleep,
-    });
+    const out = await runModel(
+      'owner/name',
+      { image: 'data:...' },
+      {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+      },
+    );
     expect(out).toBe('http://img/out.png');
     const postCall = fetchImpl.mock.calls.find((c) => method(c[1]) === 'POST')!;
     expect(String(postCall[1]?.body)).toContain('"version":"ver1"');
@@ -127,11 +143,15 @@ describe('runModel', () => {
       }
       throw new Error(`unexpected ${method(init)} ${u}`);
     });
-    const out = await runModel('meta/sam-2', {}, {
-      apiKey: 'k',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      sleepImpl: noSleep,
-    });
+    const out = await runModel(
+      'meta/sam-2',
+      {},
+      {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+      },
+    );
     expect(out).toBe('http://img/x.png');
   });
 
@@ -144,11 +164,15 @@ describe('runModel', () => {
       }
       throw new Error(`unexpected ${method(init)} ${u}`);
     });
-    const out = await runModel('owner/name:ver9', {}, {
-      apiKey: 'k',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      sleepImpl: noSleep,
-    });
+    const out = await runModel(
+      'owner/name:ver9',
+      {},
+      {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+      },
+    );
     expect(out).toBe('http://img/v.png');
     // never GET-ed the model to resolve a version
     expect(fetchImpl.mock.calls.some((c) => /\/models\/owner\/name$/.test(String(c[0])))).toBe(false);
@@ -176,11 +200,15 @@ describe('runModel', () => {
       }
       throw new Error(`unexpected ${method(init)} ${u}`);
     });
-    const out = await runModel('a/b', {}, {
-      apiKey: 'k',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      sleepImpl: noSleep,
-    });
+    const out = await runModel(
+      'a/b',
+      {},
+      {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+      },
+    );
     expect(out).toBe('http://x.png');
     expect(polls).toBeGreaterThanOrEqual(2);
   });
@@ -188,11 +216,15 @@ describe('runModel', () => {
   it('gives a friendly error when the model does not exist (404)', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ detail: 'not found' }, false, 404));
     await expect(
-      runModel('owner/missing', {}, {
-        apiKey: 'k',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        sleepImpl: noSleep,
-      }),
+      runModel(
+        'owner/missing',
+        {},
+        {
+          apiKey: 'k',
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          sleepImpl: noSleep,
+        },
+      ),
     ).rejects.toThrow(/not found/i);
   });
 
@@ -206,11 +238,15 @@ describe('runModel', () => {
       throw new Error('unexpected');
     });
     await expect(
-      runModel('a/b', {}, {
-        apiKey: 'k',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        sleepImpl: noSleep,
-      }),
+      runModel(
+        'a/b',
+        {},
+        {
+          apiKey: 'k',
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          sleepImpl: noSleep,
+        },
+      ),
     ).rejects.toThrow(/boom/);
   });
 
@@ -224,11 +260,15 @@ describe('runModel', () => {
       throw new Error('unexpected');
     });
     await expect(
-      runModel('a/b', {}, {
-        apiKey: 'k',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        sleepImpl: noSleep,
-      }),
+      runModel(
+        'a/b',
+        {},
+        {
+          apiKey: 'k',
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          sleepImpl: noSleep,
+        },
+      ),
     ).rejects.toThrow(/401/);
   });
 
@@ -236,8 +276,10 @@ describe('runModel', () => {
     let polls = 0;
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.endsWith('/models/a/b') && method(init) === 'GET') return jsonResponse({ latest_version: { id: 'v' } });
-      if (u.endsWith('/predictions') && method(init) === 'POST') return jsonResponse({ id: 'p', status: 'processing' });
+      if (u.endsWith('/models/a/b') && method(init) === 'GET')
+        return jsonResponse({ latest_version: { id: 'v' } });
+      if (u.endsWith('/predictions') && method(init) === 'POST')
+        return jsonResponse({ id: 'p', status: 'processing' });
       if (u.includes('/predictions/p') && method(init) === 'GET') {
         polls += 1;
         if (polls === 1) return jsonResponse({ detail: 'rate limited' }, false, 429); // transient
@@ -245,11 +287,15 @@ describe('runModel', () => {
       }
       throw new Error(`unexpected ${method(init)} ${u}`);
     });
-    const out = await runModel('a/b', {}, {
-      apiKey: 'k',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      sleepImpl: noSleep,
-    });
+    const out = await runModel(
+      'a/b',
+      {},
+      {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+      },
+    );
     expect(out).toBe('http://x.png');
     expect(polls).toBe(2); // one 429, then success
   });
@@ -257,37 +303,51 @@ describe('runModel', () => {
   it('gives up on a transient failure once retries are exhausted', async () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.endsWith('/models/a/b') && method(init) === 'GET') return jsonResponse({ latest_version: { id: 'v' } });
-      if (u.endsWith('/predictions') && method(init) === 'POST') return jsonResponse({ id: 'p', status: 'processing' });
-      if (u.includes('/predictions/p') && method(init) === 'GET') return jsonResponse({ detail: 'boom' }, false, 503);
+      if (u.endsWith('/models/a/b') && method(init) === 'GET')
+        return jsonResponse({ latest_version: { id: 'v' } });
+      if (u.endsWith('/predictions') && method(init) === 'POST')
+        return jsonResponse({ id: 'p', status: 'processing' });
+      if (u.includes('/predictions/p') && method(init) === 'GET')
+        return jsonResponse({ detail: 'boom' }, false, 503);
       throw new Error(`unexpected ${method(init)} ${u}`);
     });
     await expect(
-      runModel('a/b', {}, {
-        apiKey: 'k',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        sleepImpl: noSleep,
-        maxPollRetries: 2,
-      }),
+      runModel(
+        'a/b',
+        {},
+        {
+          apiKey: 'k',
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          sleepImpl: noSleep,
+          maxPollRetries: 2,
+        },
+      ),
     ).rejects.toThrow(/503/);
   });
 
   it('times out a prediction stuck in starting', async () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.endsWith('/models/a/b') && method(init) === 'GET') return jsonResponse({ latest_version: { id: 'v' } });
-      if (u.endsWith('/predictions') && method(init) === 'POST') return jsonResponse({ id: 'p', status: 'starting' });
-      if (u.includes('/predictions/p') && method(init) === 'GET') return jsonResponse({ id: 'p', status: 'starting' });
+      if (u.endsWith('/models/a/b') && method(init) === 'GET')
+        return jsonResponse({ latest_version: { id: 'v' } });
+      if (u.endsWith('/predictions') && method(init) === 'POST')
+        return jsonResponse({ id: 'p', status: 'starting' });
+      if (u.includes('/predictions/p') && method(init) === 'GET')
+        return jsonResponse({ id: 'p', status: 'starting' });
       throw new Error(`unexpected ${method(init)} ${u}`);
     });
     await expect(
-      runModel('a/b', {}, {
-        apiKey: 'k',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        sleepImpl: noSleep,
-        pollIntervalMs: 1000,
-        maxDurationMs: 4000,
-      }),
+      runModel(
+        'a/b',
+        {},
+        {
+          apiKey: 'k',
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          sleepImpl: noSleep,
+          pollIntervalMs: 1000,
+          maxDurationMs: 4000,
+        },
+      ),
     ).rejects.toThrow(/timed out/i);
   });
 
@@ -297,10 +357,13 @@ describe('runModel', () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       calls.push(`${method(init)} ${url}`);
       const u = String(url);
-      if (u.endsWith('/models/a/b') && method(init) === 'GET') return jsonResponse({ latest_version: { id: 'v' } });
-      if (u.endsWith('/predictions') && method(init) === 'POST') return jsonResponse({ id: 'p', status: 'processing' });
+      if (u.endsWith('/models/a/b') && method(init) === 'GET')
+        return jsonResponse({ latest_version: { id: 'v' } });
+      if (u.endsWith('/predictions') && method(init) === 'POST')
+        return jsonResponse({ id: 'p', status: 'processing' });
       if (u.endsWith('/predictions/p/cancel') && method(init) === 'POST') return jsonResponse({});
-      if (u.includes('/predictions/p') && method(init) === 'GET') return jsonResponse({ id: 'p', status: 'processing' });
+      if (u.includes('/predictions/p') && method(init) === 'GET')
+        return jsonResponse({ id: 'p', status: 'processing' });
       throw new Error(`unexpected ${method(init)} ${u}`);
     });
     // Abort during the first poll sleep, then reject like a real aborted sleep.
@@ -311,12 +374,16 @@ describe('runModel', () => {
         else resolve();
       });
     await expect(
-      runModel('a/b', {}, {
-        apiKey: 'k',
-        signal: controller.signal,
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        sleepImpl,
-      }),
+      runModel(
+        'a/b',
+        {},
+        {
+          apiKey: 'k',
+          signal: controller.signal,
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          sleepImpl,
+        },
+      ),
     ).rejects.toThrow(/Abort/);
     expect(calls).toContain('POST https://api.replicate.com/v1/predictions/p/cancel');
   });

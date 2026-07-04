@@ -76,13 +76,11 @@ export function NodeView({ id, selected }: NodeProps) {
       <Handle type="target" position={Position.Left} id={port.id} className="rf-handle" />
       <ValuePreview
         value={inputValues[port.id]}
-        onClick={() => inputValues[port.id] && openPreview(inputValues[port.id]!, `${def.label} · ${port.label}`)}
+        onClick={() =>
+          inputValues[port.id] && openPreview(inputValues[port.id]!, `${def.label} · ${port.label}`)
+        }
       />
-      <span
-        className="port-label"
-        onClick={() => clickPort(id, port.id, 'input')}
-        title="Click to connect"
-      >
+      <span className="port-label" onClick={() => clickPort(id, port.id, 'input')} title="Click to connect">
         {port.label}
       </span>
     </div>
@@ -167,9 +165,7 @@ export function NodeView({ id, selected }: NodeProps) {
           </div>
         )}
 
-        {inlineFields.length > 0 && (
-          <ConfigFields nodeId={id} fields={inlineFields} config={node.config} />
-        )}
+        {inlineFields.length > 0 && <ConfigFields nodeId={id} fields={inlineFields} config={node.config} />}
 
         {def.customEditor && (
           <button type="button" className="wide-btn nodrag" onClick={() => openEditor(id)}>
@@ -189,7 +185,11 @@ export function NodeView({ id, selected }: NodeProps) {
           ))}
 
         {rt?.progress && <div className="node-progress">{rt.progress}</div>}
-        {rt?.error && <div className="node-error-msg" title={rt.error}>{rt.error}</div>}
+        {rt?.error && (
+          <div className="node-error-msg" title={rt.error}>
+            {rt.error}
+          </div>
+        )}
       </div>
 
       <div className="node-ports">

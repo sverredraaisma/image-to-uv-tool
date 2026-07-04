@@ -17,14 +17,15 @@ describe('chatCompletion', () => {
   });
 
   it('returns the assistant message content', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      jsonResponse({ choices: [{ message: { content: 'hello there' } }] }),
-    );
-    const out = await chatCompletion(
-      'meta-llama/llama-3.1-8b-instruct',
-      [{ role: 'user', content: 'hi' }],
-      { apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch, temperature: 0.5, maxTokens: 100 },
-    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'hello there' } }] }));
+    const out = await chatCompletion('meta-llama/llama-3.1-8b-instruct', [{ role: 'user', content: 'hi' }], {
+      apiKey: 'k',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      temperature: 0.5,
+      maxTokens: 100,
+    });
     expect(out).toBe('hello there');
     const [url, init] = fetchImpl.mock.calls[0];
     expect(String(url)).toContain('openrouter.ai');

@@ -20,9 +20,6 @@ export function allNodeDefs(): NodeDefinition[] {
   return [...registry.values()];
 }
 
-export function findPort(
-  ports: PortSpec[],
-  id: string,
-): PortSpec | undefined {
+export function findPort(ports: PortSpec[], id: string): PortSpec | undefined {
   return ports.find((p) => p.id === id);
 }
