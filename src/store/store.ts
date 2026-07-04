@@ -636,14 +636,17 @@ export const useStore = create<StoreState>()(
     {
       name: 'node-image-tool',
       storage: createJSONStorage(() =>
-        createSafeStorage(localStorage, () => {
-          try {
-            useStore
-              .getState()
-              .addToast('error', 'Local storage is full — large images may not persist across reloads.');
-          } catch {
-            /* store not ready */
-          }
+        createSafeStorage(localStorage, {
+          debounceMs: 400,
+          onError: () => {
+            try {
+              useStore
+                .getState()
+                .addToast('error', 'Local storage is full — large images may not persist across reloads.');
+            } catch {
+              /* store not ready */
+            }
+          },
         }),
       ),
       // Persist the graph + settings, but never the (regenerable) runtime.

@@ -212,6 +212,7 @@ describe('persistence', () => {
   it('persists graph + settings but never runtime outputs', async () => {
     await buildChain();
     store().setApiKey('secret-key');
+    await new Promise((r) => setTimeout(r, 450)); // persist writes are debounced
     const raw = localStorage.getItem('node-image-tool');
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw as string);
