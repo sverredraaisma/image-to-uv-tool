@@ -172,10 +172,14 @@ function combineTwo(a: RasterImage, b: RasterImage, mode: CombineMode): RasterIm
     }
     return out;
   }
+  // Arithmetic blend modes act on RGB only; alpha is composited by coverage
+  // (union) so subtract/difference of two opaque images doesn't collapse to a
+  // fully transparent (invisible) result.
   for (let i = 0; i < n; i += 4) {
-    for (let c = 0; c < 4; c++) {
+    for (let c = 0; c < 3; c++) {
       out.data[i + c] = combineChannel(a.data[i + c], b.data[i + c], mode);
     }
+    out.data[i + 3] = Math.max(a.data[i + 3], b.data[i + 3]);
   }
   return out;
 }
@@ -475,10 +479,45 @@ export function extractChannel(img: RasterImage, channel: Channel): RasterImage 
 }
 
 /** Separable box blur of the given pixel radius. */
+/** Premultiply RGB by alpha (so transparent pixels contribute no colour). */
+function premultiply(img: RasterImage): RasterImage {
+  const out = createImage(img.width, img.height);
+  const d = img.data;
+  const o = out.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3];
+    o[i] = (d[i] * a) / 255;
+    o[i + 1] = (d[i + 1] * a) / 255;
+    o[i + 2] = (d[i + 2] * a) / 255;
+    o[i + 3] = a;
+  }
+  return out;
+}
+
+/** Inverse of premultiply; fully-transparent pixels get RGB 0. */
+function unpremultiply(img: RasterImage): RasterImage {
+  const out = createImage(img.width, img.height);
+  const d = img.data;
+  const o = out.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3];
+    if (a > 0) {
+      o[i] = (d[i] * 255) / a;
+      o[i + 1] = (d[i + 1] * 255) / a;
+      o[i + 2] = (d[i + 2] * 255) / a;
+    }
+    o[i + 3] = a;
+  }
+  return out;
+}
+
 export function boxBlur(img: RasterImage, radius: number): RasterImage {
   const r = Math.max(0, Math.floor(radius));
   if (r === 0) return cloneImage(img);
-  return blurPass(blurPass(img, r, true), r, false);
+  // Blur in premultiplied space so the (hidden) RGB of transparent pixels can't
+  // bleed into visible neighbours and produce dark halos at sprite edges.
+  const blurred = blurPass(blurPass(premultiply(img), r, true), r, false);
+  return unpremultiply(blurred);
 }
 
 /** Auto-contrast: stretch each RGB channel so its min→0 and max→255. Alpha kept. */

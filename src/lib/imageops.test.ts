@@ -393,4 +393,23 @@ describe('boxBlur', () => {
     expect(out).not.toBe(img);
     expect([...out.data]).toEqual([...img.data]);
   });
+  it('averages values across a non-uniform row', () => {
+    // [0,60,120] blurred r=1 (clamped edges): centre = (0+60+120)/3 = 60.
+    const img = createImage(3, 1, [0, 0, 0, 255]);
+    set(img, 1, 0, [60, 60, 60, 255]);
+    set(img, 2, 0, [120, 120, 120, 255]);
+    expect(px(boxBlur(img, 1), 1, 0)[0]).toBe(60);
+  });
+  it('does not bleed transparent pixels’ hidden RGB into visible neighbours', () => {
+    // Two opaque white pixels beside a transparent-black pixel. A straight-alpha
+    // blur would darken the visible edge toward the hidden black (halo); the
+    // premultiplied blur keeps the colour pure and only feathers alpha.
+    const img = createImage(3, 1, [0, 0, 0, 0]); // px2 transparent black
+    set(img, 0, 0, [255, 255, 255, 255]);
+    set(img, 1, 0, [255, 255, 255, 255]);
+    const [r, g, b, a] = px(boxBlur(img, 1), 1, 0);
+    expect([r, g, b]).toEqual([255, 255, 255]); // colour unpolluted
+    expect(a).toBeGreaterThan(0);
+    expect(a).toBeLessThan(255); // alpha feathered toward the transparent side
+  });
 });

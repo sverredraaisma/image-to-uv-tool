@@ -71,17 +71,17 @@ describe('combine', () => {
     const out = combine([solid(1, 1, [100, 200, 0, 255]), solid(1, 1, [200, 100, 0, 255])], 'add');
     expect(px(out, 0, 0)).toEqual([255, 255, 0, 255]);
   });
-  it('subtract clamps at 0 (per channel, incl. alpha)', () => {
+  it('subtract clamps RGB at 0 and keeps the result visible (alpha = coverage)', () => {
     const out = combine([solid(1, 1, [100, 50, 0, 255]), solid(1, 1, [30, 80, 10, 255])], 'subtract');
-    expect(px(out, 0, 0)).toEqual([70, 0, 0, 0]);
+    expect(px(out, 0, 0)).toEqual([70, 0, 0, 255]); // opaque ⊖ opaque stays opaque
   });
-  it('difference is the absolute per-channel delta', () => {
+  it('difference is the absolute per-channel delta, still visible', () => {
     const out = combine([solid(1, 1, [100, 50, 255, 255]), solid(1, 1, [30, 80, 10, 255])], 'difference');
-    expect(px(out, 0, 0)).toEqual([70, 30, 245, 0]);
+    expect(px(out, 0, 0)).toEqual([70, 30, 245, 255]);
   });
-  it('average is the per-channel mean', () => {
+  it('average is the per-channel RGB mean; alpha is coverage (max)', () => {
     const out = combine([solid(1, 1, [100, 0, 200, 100]), solid(1, 1, [200, 100, 0, 50])], 'average');
-    expect(px(out, 0, 0)).toEqual([150, 50, 100, 75]);
+    expect(px(out, 0, 0)).toEqual([150, 50, 100, 100]);
   });
   it('screen with black leaves A unchanged', () => {
     const out = combine([solid(1, 1, [100, 200, 50, 255]), solid(1, 1, [0, 0, 0, 0])], 'screen');
