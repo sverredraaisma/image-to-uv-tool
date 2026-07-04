@@ -131,6 +131,18 @@ export const aiNodes: NodeDefinition[] = [
     ],
   }),
   makeReplicateNode({
+    type: 'fluxFill',
+    label: 'Flux Fill',
+    group: 'Edit',
+    description: 'High-quality inpaint/outpaint from image + mask + prompt (black-forest-labs/flux-fill-dev).',
+    model: 'black-forest-labs/flux-fill-dev',
+    ports: [
+      IMAGE(),
+      { id: 'mask', label: 'Mask', type: 'mask', key: 'mask', required: false },
+      PROMPT({ required: false }),
+    ],
+  }),
+  makeReplicateNode({
     type: 'fluxCanny',
     label: 'Flux ControlNet (Canny)',
     group: 'Edit',
