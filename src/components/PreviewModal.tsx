@@ -3,6 +3,7 @@ import { useStore } from '../store/store';
 import { browserPlatform } from '../lib/canvas';
 import { downloadBlob, downloadText, previewFileName } from '../lib/download';
 import { stlToAscii, stlToBinary, stlToObj } from '../lib/stl';
+import { stlToThreeMf } from '../lib/threeMf';
 import { Modal } from './Modal';
 
 export function PreviewModal() {
@@ -64,6 +65,16 @@ export function PreviewModal() {
     }
   };
 
+  const download3mf = () => {
+    if (value.kind !== 'stl') return;
+    try {
+      const bytes = stlToThreeMf(value);
+      downloadBlob(new Blob([bytes], { type: 'model/3mf' }), previewFileName(title, '3mf'));
+    } catch (e) {
+      addToast('error', `Download failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+    }
+  };
+
   return (
     <Modal
       title={title}
@@ -73,9 +84,14 @@ export function PreviewModal() {
       headerActions={
         <>
           {value.kind === 'stl' && (
-            <button type="button" className="btn" onClick={downloadObj}>
-              OBJ
-            </button>
+            <>
+              <button type="button" className="btn" onClick={download3mf}>
+                3MF
+              </button>
+              <button type="button" className="btn" onClick={downloadObj}>
+                OBJ
+              </button>
+            </>
           )}
           <button type="button" className="btn btn-primary" onClick={download}>
             {value.kind === 'stl' ? 'STL' : 'Download'}
