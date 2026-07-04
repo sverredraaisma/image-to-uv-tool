@@ -19,7 +19,7 @@ import {
 } from '../engine/graph';
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
-import { sanitizeGraph } from '../engine/sanitize';
+import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { reconcileRuntime } from '../engine/reconcile';
 import { findReadyAutoNode, gatherInputs } from '../engine/schedule';
 import { createSafeStorage } from './safeStorage';
@@ -45,6 +45,16 @@ function statusOf(runtime: Record<string, NodeRuntime>, id: string) {
 // Cross-call guards for the auto-run scheduler.
 let autoRunPromise: Promise<void> | null = null;
 let autoRunPending = false;
+
+// Validate imported/rehydrated edges against the real node definitions, so a
+// file import is held to the same invariants as live editing (see sanitizeGraph).
+const SANITIZE_OPTIONS: SanitizeOptions = {
+  getPorts: (type) => {
+    const def = getNodeDefSafe(type);
+    return def ? { inputs: def.inputs, outputs: def.outputs } : null;
+  },
+  isCompatible,
+};
 
 // Abort controllers for in-flight node runs, so long/hung runs can be cancelled.
 const runControllers = new Map<string, AbortController>();
@@ -698,7 +708,7 @@ export const useStore = create<StoreState>()(
       loadGraph: (graph) => {
         get()._snapshot();
         abortAllRuns();
-        const { nodes, edges } = sanitizeGraph(graph);
+        const { nodes, edges } = sanitizeGraph(graph, SANITIZE_OPTIONS);
         set({
           nodes,
           edges,
@@ -755,7 +765,7 @@ export const useStore = create<StoreState>()(
       // corrupt/partially-written localStorage entry can't crash on startup.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<StoreState>;
-        const { nodes, edges } = sanitizeGraph({ nodes: p.nodes, edges: p.edges });
+        const { nodes, edges } = sanitizeGraph({ nodes: p.nodes, edges: p.edges }, SANITIZE_OPTIONS);
         return { ...current, ...p, nodes, edges };
       },
     },
