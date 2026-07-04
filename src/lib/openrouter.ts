@@ -33,22 +33,28 @@ export async function chatCompletion(
   if (!model) throw new Error('No OpenRouter model set');
   const fetchImpl = opts.fetchImpl ?? fetch;
 
-  const resp = await fetchImpl(opts.url ?? DEFAULT_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${opts.apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://github.com/node-image-tool',
-      'X-Title': 'Node Image Tool',
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
-      ...(opts.maxTokens != null ? { max_tokens: opts.maxTokens } : {}),
-    }),
-    signal: opts.signal,
-  });
+  let resp: Response;
+  try {
+    resp = await fetchImpl(opts.url ?? DEFAULT_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/node-image-tool',
+        'X-Title': 'Node Image Tool',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
+        ...(opts.maxTokens != null ? { max_tokens: opts.maxTokens } : {}),
+      }),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError') throw err;
+    throw new Error('Could not reach OpenRouter — check your internet connection');
+  }
 
   if (!resp.ok) {
     let detail = '';

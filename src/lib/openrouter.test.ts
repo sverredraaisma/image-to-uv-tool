@@ -53,4 +53,24 @@ describe('chatCompletion', () => {
       }),
     ).rejects.toThrow(/no content/i);
   });
+
+  it('translates a network failure into a friendly message', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(
+      chatCompletion('m', [{ role: 'user', content: 'x' }], {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/check your internet connection/i);
+  });
+
+  it('preserves cancellation (AbortError)', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+    await expect(
+      chatCompletion('m', [{ role: 'user', content: 'x' }], {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/Abort/);
+  });
 });
