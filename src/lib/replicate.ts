@@ -14,10 +14,22 @@ export interface ReplicateOptions {
   onProgress?: (message: string) => void;
   /** Poll interval in ms (overridable for tests). */
   pollIntervalMs?: number;
+  /** Cap on the (backed-off) poll interval in ms. */
+  maxPollIntervalMs?: number;
+  /** Give up polling after roughly this long. Guards a stuck prediction. */
+  maxDurationMs?: number;
+  /** Consecutive transient (429/5xx/network) poll failures tolerated. */
+  maxPollRetries?: number;
   /** Injected fetch (defaults to global fetch) — handy for tests. */
   fetchImpl?: typeof fetch;
   /** Injected sleep (defaults to setTimeout) — handy for tests. */
   sleepImpl?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+/** A transient poll failure worth retrying (rate limit, upstream 5xx, network blip). */
+function isTransientPollError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return /error (429|5\d\d)\b/.test(err.message) || /Network request failed/.test(err.message);
 }
 
 interface Prediction {
@@ -94,6 +106,23 @@ async function request<T>(url: string, init: RequestInit, opts: ReplicateOptions
   return (await resp.json()) as T;
 }
 
+/**
+ * Best-effort remote cancel so a cancelled/deleted node stops billing on
+ * Replicate. Deliberately swallows all errors and never uses the run's abort
+ * signal (which is already aborted by the time we call this).
+ */
+async function cancelPrediction(base: string, id: string, opts: ReplicateOptions): Promise<void> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  try {
+    await fetchImpl(`${base}/predictions/${id}/cancel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.apiKey}` },
+    });
+  } catch {
+    /* best effort — the prediction may already have finished */
+  }
+}
+
 interface ModelInfo {
   latest_version?: { id?: string } | null;
 }
@@ -158,16 +187,53 @@ export async function runModel(
         opts,
       );
 
-  while (pred.status === 'starting' || pred.status === 'processing') {
-    opts.onProgress?.(`Prediction ${pred.status}…`);
-    await sleep(opts.pollIntervalMs ?? 1500, opts.signal);
-    pred = await request<Prediction>(`${base}/predictions/${pred.id}`, { method: 'GET' }, opts);
+  // Once the prediction exists, a cancel/abort must tell Replicate to stop it —
+  // otherwise it keeps running and billing after the user cancels (H6).
+  const onAbort = () => void cancelPrediction(base, pred.id, opts);
+  if (opts.signal) {
+    if (opts.signal.aborted) onAbort();
+    else opts.signal.addEventListener('abort', onAbort, { once: true });
   }
 
-  if (pred.status !== 'succeeded') {
-    throw new Error(pred.error || `Prediction ${pred.status}`);
+  try {
+    const pollInterval = opts.pollIntervalMs ?? 1500;
+    const maxPollInterval = opts.maxPollIntervalMs ?? 15_000;
+    const maxDuration = opts.maxDurationMs ?? 5 * 60 * 1000;
+    const maxRetries = opts.maxPollRetries ?? 6;
+    let elapsed = 0;
+    let failures = 0;
+
+    while (pred.status === 'starting' || pred.status === 'processing') {
+      if (elapsed >= maxDuration) {
+        throw new Error(`Prediction timed out after ${Math.round(elapsed / 1000)}s (still ${pred.status})`);
+      }
+      opts.onProgress?.(`Prediction ${pred.status}…`);
+      // Back off after a transient failure; steady interval while healthy.
+      const wait = Math.min(pollInterval * 2 ** failures, maxPollInterval);
+      await sleep(wait, opts.signal);
+      elapsed += wait;
+      try {
+        pred = await request<Prediction>(`${base}/predictions/${pred.id}`, { method: 'GET' }, opts);
+        failures = 0;
+      } catch (err) {
+        if (isAbort(err)) throw err;
+        // Ride out a rate limit / upstream blip instead of failing the whole run
+        // (and orphaning the still-running prediction).
+        if (isTransientPollError(err) && failures < maxRetries) {
+          failures++;
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    if (pred.status !== 'succeeded') {
+      throw new Error(pred.error || `Prediction ${pred.status}`);
+    }
+    return pred.output;
+  } finally {
+    opts.signal?.removeEventListener('abort', onAbort);
   }
-  return pred.output;
 }
 
 const isUrlLike = (s: unknown): s is string =>

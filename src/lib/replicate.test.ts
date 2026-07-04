@@ -231,4 +231,93 @@ describe('runModel', () => {
       }),
     ).rejects.toThrow(/401/);
   });
+
+  it('rides out a transient 429 during polling and still succeeds', async () => {
+    let polls = 0;
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith('/models/a/b') && method(init) === 'GET') return jsonResponse({ latest_version: { id: 'v' } });
+      if (u.endsWith('/predictions') && method(init) === 'POST') return jsonResponse({ id: 'p', status: 'processing' });
+      if (u.includes('/predictions/p') && method(init) === 'GET') {
+        polls += 1;
+        if (polls === 1) return jsonResponse({ detail: 'rate limited' }, false, 429); // transient
+        return jsonResponse({ id: 'p', status: 'succeeded', output: 'http://x.png' });
+      }
+      throw new Error(`unexpected ${method(init)} ${u}`);
+    });
+    const out = await runModel('a/b', {}, {
+      apiKey: 'k',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl: noSleep,
+    });
+    expect(out).toBe('http://x.png');
+    expect(polls).toBe(2); // one 429, then success
+  });
+
+  it('gives up on a transient failure once retries are exhausted', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith('/models/a/b') && method(init) === 'GET') return jsonResponse({ latest_version: { id: 'v' } });
+      if (u.endsWith('/predictions') && method(init) === 'POST') return jsonResponse({ id: 'p', status: 'processing' });
+      if (u.includes('/predictions/p') && method(init) === 'GET') return jsonResponse({ detail: 'boom' }, false, 503);
+      throw new Error(`unexpected ${method(init)} ${u}`);
+    });
+    await expect(
+      runModel('a/b', {}, {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+        maxPollRetries: 2,
+      }),
+    ).rejects.toThrow(/503/);
+  });
+
+  it('times out a prediction stuck in starting', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith('/models/a/b') && method(init) === 'GET') return jsonResponse({ latest_version: { id: 'v' } });
+      if (u.endsWith('/predictions') && method(init) === 'POST') return jsonResponse({ id: 'p', status: 'starting' });
+      if (u.includes('/predictions/p') && method(init) === 'GET') return jsonResponse({ id: 'p', status: 'starting' });
+      throw new Error(`unexpected ${method(init)} ${u}`);
+    });
+    await expect(
+      runModel('a/b', {}, {
+        apiKey: 'k',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: noSleep,
+        pollIntervalMs: 1000,
+        maxDurationMs: 4000,
+      }),
+    ).rejects.toThrow(/timed out/i);
+  });
+
+  it('cancels the remote prediction when the run is aborted', async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${method(init)} ${url}`);
+      const u = String(url);
+      if (u.endsWith('/models/a/b') && method(init) === 'GET') return jsonResponse({ latest_version: { id: 'v' } });
+      if (u.endsWith('/predictions') && method(init) === 'POST') return jsonResponse({ id: 'p', status: 'processing' });
+      if (u.endsWith('/predictions/p/cancel') && method(init) === 'POST') return jsonResponse({});
+      if (u.includes('/predictions/p') && method(init) === 'GET') return jsonResponse({ id: 'p', status: 'processing' });
+      throw new Error(`unexpected ${method(init)} ${u}`);
+    });
+    // Abort during the first poll sleep, then reject like a real aborted sleep.
+    const sleepImpl = (_ms: number, signal?: AbortSignal) =>
+      new Promise<void>((resolve, reject) => {
+        controller.abort();
+        if (signal?.aborted) reject(new DOMException('Aborted', 'AbortError'));
+        else resolve();
+      });
+    await expect(
+      runModel('a/b', {}, {
+        apiKey: 'k',
+        signal: controller.signal,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl,
+      }),
+    ).rejects.toThrow(/Abort/);
+    expect(calls).toContain('POST https://api.replicate.com/v1/predictions/p/cancel');
+  });
 });
