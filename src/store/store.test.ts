@@ -461,6 +461,27 @@ describe('node + edge removal', () => {
     expect(store().nodes.length).toBe(beforeNodes);
   });
 
+  it('copySelection + paste clones the selection (with internal edges) and selects the copies', async () => {
+    const a = store().addNode('test.const');
+    const b = store().addNode('test.pass');
+    store().addConnection({ source: a, sourceHandle: 'out', target: b, targetHandle: 'in' });
+    await store().processAutoRun();
+    store().setSelection([a, b]);
+    store().copySelection();
+
+    const before = store().nodes.length;
+    const pasted = store().paste();
+    expect(pasted).toHaveLength(2);
+    expect(store().nodes.length).toBe(before + 2);
+    expect(store().edges.some((e) => e.source === pasted[0] && e.target === pasted[1])).toBe(true);
+    expect(store().selectedNodeIds).toEqual(pasted); // copies become the selection
+
+    // paste again works even after the originals are gone (clipboard holds content)
+    store().removeNodes([a, b]);
+    const second = store().paste();
+    expect(second).toHaveLength(2);
+  });
+
   it('duplicateNode copies type + config with a new id and offset position', () => {
     const a = store().addNode('test.const');
     store().updateNodeConfig(a, { v: '9' });

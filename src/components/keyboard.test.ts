@@ -9,7 +9,13 @@ const ev = (over: Partial<ShortcutEvent>): ShortcutEvent => ({
   target: null,
   ...over,
 });
-const actions = () => ({ undo: vi.fn(), redo: vi.fn(), duplicateSelected: vi.fn() });
+const actions = () => ({
+  undo: vi.fn(),
+  redo: vi.fn(),
+  duplicateSelected: vi.fn(),
+  copy: vi.fn(),
+  paste: vi.fn(),
+});
 
 describe('handleShortcut', () => {
   it('Ctrl+Z undoes; Cmd+Z too', () => {
@@ -32,6 +38,14 @@ describe('handleShortcut', () => {
     const a = actions();
     expect(handleShortcut(ev({ ctrlKey: true, key: 'd' }), a)).toBe(true);
     expect(a.duplicateSelected).toHaveBeenCalledTimes(1);
+  });
+
+  it('Ctrl+C copies and Ctrl+V pastes', () => {
+    const a = actions();
+    expect(handleShortcut(ev({ ctrlKey: true, key: 'c' }), a)).toBe(true);
+    expect(handleShortcut(ev({ ctrlKey: true, key: 'v' }), a)).toBe(true);
+    expect(a.copy).toHaveBeenCalledTimes(1);
+    expect(a.paste).toHaveBeenCalledTimes(1);
   });
 
   it('ignores plain keys and text fields', () => {

@@ -34,6 +34,8 @@ export default function App() {
               : [];
           if (ids.length) s.duplicateNodes(ids);
         },
+        copy: s.copySelection,
+        paste: s.paste,
       });
       if (handled) e.preventDefault();
     };

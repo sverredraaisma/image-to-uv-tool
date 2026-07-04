@@ -61,6 +61,9 @@ const SANITIZE_OPTIONS: SanitizeOptions = {
   isCompatible,
 };
 
+// In-app clipboard for copy/paste (module-scoped; survives selection changes).
+let clipboard: GraphSnapshot | null = null;
+
 // Abort controllers for in-flight node runs, so long/hung runs can be cancelled.
 const runControllers = new Map<string, AbortController>();
 
@@ -146,6 +149,8 @@ export interface StoreState {
   addNode: (type: string, position?: { x: number; y: number }) => string;
   duplicateNode: (id: string) => string;
   duplicateNodes: (ids: string[]) => string[];
+  copySelection: () => void;
+  paste: () => string[];
   removeNode: (id: string) => void;
   removeNodes: (ids: string[]) => void;
   setNodePosition: (id: string, position: { x: number; y: number }) => void;
@@ -293,6 +298,43 @@ export const useStore = create<StoreState>()(
             ...s.runtime,
             ...Object.fromEntries(newNodes.map((n) => [n.id, defaultRuntime()])),
           },
+        }));
+        void get().processAutoRun();
+        return newNodes.map((n) => n.id);
+      },
+
+      copySelection: () => {
+        const ids = new Set(get().selectedNodeIds);
+        if (!ids.size) return;
+        clipboard = {
+          nodes: get()
+            .nodes.filter((n) => ids.has(n.id))
+            .map((n) => structuredClone(n)),
+          edges: get()
+            .edges.filter((e) => ids.has(e.source) && ids.has(e.target))
+            .map((e) => structuredClone(e)),
+        };
+      },
+
+      paste: () => {
+        if (!clipboard || !clipboard.nodes.length) return [];
+        get()._snapshot();
+        const ids = new Set(clipboard.nodes.map((n) => n.id));
+        const { nodes: newNodes, edges: newEdges } = cloneFragment(
+          clipboard.nodes,
+          clipboard.edges,
+          ids,
+          genId,
+        );
+        set((s) => ({
+          nodes: [...s.nodes, ...newNodes],
+          edges: [...s.edges, ...newEdges],
+          runtime: {
+            ...s.runtime,
+            ...Object.fromEntries(newNodes.map((n) => [n.id, defaultRuntime()])),
+          },
+          selectedNodeIds: newNodes.map((n) => n.id),
+          selectedNodeId: newNodes.length === 1 ? newNodes[0].id : null,
         }));
         void get().processAutoRun();
         return newNodes.map((n) => n.id);

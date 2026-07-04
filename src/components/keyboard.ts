@@ -12,12 +12,14 @@ export interface ShortcutActions {
   undo: () => void;
   redo: () => void;
   duplicateSelected: () => void;
+  copy: () => void;
+  paste: () => void;
 }
 
 /**
- * Ctrl/Cmd + Z = undo, +Shift+Z or +Y = redo, +D = duplicate selected node.
- * Ignored while a text field is focused (keeps native shortcuts). Returns true
- * if handled (so the caller can preventDefault).
+ * Ctrl/Cmd + Z = undo, +Shift+Z or +Y = redo, +D = duplicate, +C/+V =
+ * copy/paste selected nodes. Ignored while a text field is focused (keeps
+ * native shortcuts). Returns true if handled (so the caller can preventDefault).
  */
 export function handleShortcut(e: ShortcutEvent, actions: ShortcutActions): boolean {
   if (!(e.ctrlKey || e.metaKey)) return false;
@@ -34,6 +36,14 @@ export function handleShortcut(e: ShortcutEvent, actions: ShortcutActions): bool
   }
   if (key === 'd') {
     actions.duplicateSelected();
+    return true;
+  }
+  if (key === 'c') {
+    actions.copy();
+    return true;
+  }
+  if (key === 'v') {
+    actions.paste();
     return true;
   }
   return false;
