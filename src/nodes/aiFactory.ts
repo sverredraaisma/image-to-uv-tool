@@ -122,16 +122,26 @@ export function makeReplicateNode(spec: AiSpec): NodeDefinition {
       );
       const result: ComputeResult = {};
       const jobs: Promise<void>[] = [];
+      // A failed image download shouldn't lose the outputs that succeeded, so
+      // each fetch is isolated; the first error is kept in case they all fail.
+      let firstError: unknown;
       for (const [portId, out] of Object.entries(resolved)) {
         if (!out) result[portId] = undefined;
         else if ('text' in out) result[portId] = { kind: 'text', text: out.text };
-        else jobs.push(platform.fetchImage(out.url, signal).then((img) => void (result[portId] = img)));
+        else {
+          jobs.push(
+            platform
+              .fetchImage(out.url, signal)
+              .then((img) => void (result[portId] = img))
+              .catch((e) => void (firstError ??= e)),
+          );
+        }
       }
       if (jobs.length) onProgress?.('Downloading results…');
       await Promise.all(jobs);
 
       if (Object.values(result).every((v) => v == null)) {
-        throw new Error('Model returned no usable output');
+        throw firstError ?? new Error('Model returned no usable output');
       }
       return result;
     },

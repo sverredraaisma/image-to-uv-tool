@@ -219,6 +219,47 @@ describe('LLM + image-to-text (with stubbed fetch)', () => {
     expect(outs.negAnnotated?.kind).toBe('image');
   });
 
+  it('a multi-output node keeps successful outputs when one download fails', async () => {
+    setPlatform({
+      decodeImage: async () => FAKE,
+      encodePng: () => 'data:',
+      encodePngBlob: async () => new Blob(),
+      fetchImage: async (url: string) => {
+        if (url.includes('mask.jpg')) throw new Error('download failed');
+        return FAKE;
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.endsWith('/models/schananas/grounded_sam')) return jsonResponse({ latest_version: { id: 'v' } });
+        if (u.endsWith('/predictions') && (init?.method ?? 'GET') === 'POST') {
+          return jsonResponse({
+            id: 'p',
+            status: 'succeeded',
+            output: ['https://x/annotated.jpg', 'https://x/neg.jpg', 'https://x/mask.jpg', 'https://x/inv.jpg'],
+          });
+        }
+        throw new Error(`unexpected ${u}`);
+      }),
+    );
+    useStore.setState({ apiKey: 'r8-key' });
+    const s = useStore.getState();
+    const img = s.addNode('imageInput');
+    s.updateNodeConfig(img, { src: 'data:img' });
+    const gs = s.addNode('groundedSam');
+    s.updateNodeConfig(gs, { mask_prompt: 'thing' });
+    s.addConnection({ source: img, sourceHandle: 'out', target: gs, targetHandle: 'image' });
+    await useStore.getState().processAutoRun();
+
+    await useStore.getState().runNode(gs);
+    const rt = useStore.getState().runtime[gs];
+    expect(rt.status).toBe('upToDate');
+    expect(rt.outputs.mask).toBeUndefined(); // failed download
+    expect(rt.outputs.annotated?.kind).toBe('image'); // others survived
+  });
+
   it('Depth Anything splits grey and colour depth into separate outputs', async () => {
     vi.stubGlobal(
       'fetch',
