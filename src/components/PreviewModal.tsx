@@ -67,7 +67,7 @@ export function PreviewModal() {
               <div className="preview-meta">
                 {value.triangleCount} triangles — downloads as binary STL
               </div>
-              <pre className="preview-textfull">{stlToAscii(value).slice(0, 4000)}</pre>
+              <pre className="preview-textfull">{stlToAscii(value, 'heightmap', 40)}</pre>
             </>
           )}
         </div>

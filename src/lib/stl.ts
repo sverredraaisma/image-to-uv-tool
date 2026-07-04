@@ -128,10 +128,11 @@ function wall(
 }
 
 /** ASCII STL text (mainly for previews / debugging). */
-export function stlToAscii(stl: StlValue, name = 'heightmap'): string {
+export function stlToAscii(stl: StlValue, name = 'heightmap', maxTriangles = Infinity): string {
   const t = stl.triangles;
+  const count = Math.min(stl.triangleCount, maxTriangles);
   const lines: string[] = [`solid ${name}`];
-  for (let i = 0; i < stl.triangleCount; i++) {
+  for (let i = 0; i < count; i++) {
     const b = i * 9;
     const [n0, n1, n2] = normal(
       t[b], t[b + 1], t[b + 2], t[b + 3], t[b + 4], t[b + 5], t[b + 6], t[b + 7], t[b + 8],
@@ -144,6 +145,9 @@ export function stlToAscii(stl: StlValue, name = 'heightmap'): string {
     lines.push('    endloop');
     lines.push('  endfacet');
   }
+  // Preview callers pass a small maxTriangles to avoid building a multi-MB
+  // string for a large mesh; mark the truncation rather than serialising it all.
+  if (count < stl.triangleCount) lines.push(`  # … ${stl.triangleCount - count} more facets`);
   lines.push(`endsolid ${name}`);
   return lines.join('\n');
 }

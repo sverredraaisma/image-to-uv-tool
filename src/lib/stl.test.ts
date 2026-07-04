@@ -29,6 +29,16 @@ describe('heightmapToStl', () => {
     expect(text).not.toMatch(/NaN/);
   });
 
+  it('caps facets and marks truncation when maxTriangles is given', () => {
+    const img = createImage(2, 2, [255, 255, 255, 255]);
+    const stl = heightmapToStl(img, { minWhite: -1, baseThickness: 1, depthRange: 5, width: 4 });
+    expect(stl.triangleCount).toBeGreaterThan(3);
+    const text = stlToAscii(stl, 'heightmap', 3);
+    expect(text.match(/facet normal/g)?.length ?? 0).toBe(3); // capped
+    expect(text).toMatch(/# … \d+ more facets/); // truncation marker
+    expect(text.trimEnd().endsWith('endsolid heightmap')).toBe(true);
+  });
+
   it('serialises binary STL with the correct size and triangle count', () => {
     const img = createImage(1, 1, [255, 255, 255, 255]);
     const stl = heightmapToStl(img, { minWhite: -1, baseThickness: 0, depthRange: 10, width: 2 });
