@@ -840,3 +840,12 @@ textarea {
 .port-required-missing .port-label {
   color: #ffd7d7;
 }
+
+/* ---------------- Canvas context menu ---------------- */
+.context-menu {
+  position: fixed;
+  z-index: 160;
+}
+.context-menu .add-node-menu {
+  position: static;
+}

@@ -1,23 +1,15 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore } from '../store/store';
-import { allNodeDefs } from '../engine/registry';
 import { downloadText, graphFileName } from '../lib/download';
-import { buildNodeMenu } from './nodeMenu';
+import { NodePicker } from './NodePicker';
 import type { SavedGraph } from '../types';
 
 function AddNodeMenu() {
   const addNode = useStore((s) => s.addNode);
   const nodeCount = useStore((s) => s.nodes.length);
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
 
-  const nodes = useMemo(() => allNodeDefs(), []);
-  const menu = buildNodeMenu(nodes, query);
-
-  const close = () => {
-    setOpen(false);
-    setQuery('');
-  };
+  const close = () => setOpen(false);
   const pick = (type: string) => {
     addNode(type, { x: 60 + (nodeCount % 8) * 34, y: 90 + (nodeCount % 8) * 34 });
     close();
@@ -31,44 +23,7 @@ function AddNodeMenu() {
       {open && (
         <>
           <div className="menu-backdrop" onClick={close} />
-          <div className="add-node-menu">
-            <input
-              className="menu-search nodrag"
-              autoFocus
-              placeholder="Search nodes…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') close();
-                else if (e.key === 'Enter' && query.trim()) {
-                  const first = menu[0]?.groups[0]?.items[0];
-                  if (first) pick(first.type);
-                }
-              }}
-            />
-            {menu.length === 0 && <div className="menu-empty">No matching nodes</div>}
-            {menu.map((cat) => (
-              <div className="menu-group" key={cat.category}>
-                <div className="menu-group-title">{cat.category}</div>
-                {cat.groups.map((g) => (
-                  <div key={g.group || '_'}>
-                    {g.group && <div className="menu-subgroup-title">{g.group}</div>}
-                    {g.items.map((item) => (
-                      <button
-                        key={item.type}
-                        type="button"
-                        className="menu-item"
-                        title={item.description}
-                        onClick={() => pick(item.type)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
+          <NodePicker onPick={pick} onClose={close} />
         </>
       )}
     </div>

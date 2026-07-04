@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Node,
   type Edge,
   type Connection,
@@ -13,7 +15,9 @@ import {
   type EdgeChange,
 } from '@xyflow/react';
 import { useStore } from '../store/store';
+import { platform } from '../lib/platform';
 import { NodeView } from './NodeView';
+import { NodePicker } from './NodePicker';
 
 const nodeTypes = { imageTool: NodeView };
 
@@ -23,7 +27,16 @@ const nodeTypes = { imageTool: NodeView };
 // memoisation and re-render every NodeView on any change (H3).
 const NODE_DATA = {} as const;
 
-export function Canvas() {
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function FlowCanvas() {
   const storeNodes = useStore((s) => s.nodes);
   const storeEdges = useStore((s) => s.edges);
   const pending = useStore((s) => s.pendingConnection);
@@ -32,9 +45,15 @@ export function Canvas() {
   const removeEdge = useStore((s) => s.removeEdge);
   const selectNode = useStore((s) => s.selectNode);
   const setSelection = useStore((s) => s.setSelection);
+  const addNode = useStore((s) => s.addNode);
+  const updateNodeConfig = useStore((s) => s.updateNodeConfig);
   const addConnection = useStore((s) => s.addConnection);
   const canConnect = useStore((s) => s.canConnect);
   const cancelPending = useStore((s) => s.cancelPendingConnection);
+  const addToast = useStore((s) => s.addToast);
+
+  const { screenToFlowPosition } = useReactFlow();
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   // Nodes live in local React Flow state for smooth dragging; only the final
   // dropped position is written back to the (persisted) store.
@@ -46,9 +65,7 @@ export function Canvas() {
       return storeNodes.map((n) => {
         // Preserve the existing React Flow node object (identity) when nothing
         // this layer cares about changed, so a config keystroke on one node
-        // doesn't re-render every other node. The store keeps the same node
-        // object reference (and thus the same `position` ref) for untouched
-        // nodes, so an unchanged `position` ref means "reuse as-is".
+        // doesn't re-render every other node.
         const existing = prevById.get(n.id);
         if (existing && existing.position === n.position) return existing;
         return {
@@ -62,9 +79,7 @@ export function Canvas() {
     });
   }, [storeNodes, setRfNodes]);
 
-  // Edges also live in local state so React Flow can track their selection —
-  // otherwise clicking an edge never marks it selected and Delete can't remove
-  // it. Removals are propagated back to the store.
+  // Edges also live in local state so React Flow can track their selection.
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   useEffect(() => {
@@ -85,8 +100,7 @@ export function Canvas() {
 
   const handleNodesChange = (changes: NodeChange<Node>[]) => {
     onNodesChange(changes); // keep local state smooth (drag, select…)
-    // Batch a multi-selection delete into one store mutation so it is a single
-    // undo step (not one per node).
+    // Batch a multi-selection delete into one store mutation (single undo step).
     const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id);
     if (removed.length) removeNodes(removed);
   };
@@ -96,15 +110,45 @@ export function Canvas() {
     for (const c of changes) if (c.type === 'remove') removeEdge(c.id);
   };
 
+  // Drag an image file onto the canvas → create an Image Input node there.
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith('image/'));
+    if (!file) return;
+    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const id = addNode('imageInput', position);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      try {
+        const ref = await platform.putBlob(dataUrl);
+        updateNodeConfig(id, { srcRef: ref, src: '', name: file.name });
+      } catch {
+        updateNodeConfig(id, { src: dataUrl, srcRef: '', name: file.name });
+      }
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : 'Could not read the dropped file');
+    }
+  };
+
+  const addAtMenu = (type: string) => {
+    if (menu) addNode(type, screenToFlowPosition({ x: menu.x, y: menu.y }));
+    setMenu(null);
+  };
+
   return (
-    <div className={`canvas ${pending ? 'connecting' : ''}`}>
+    <div
+      className={`canvas ${pending ? 'connecting' : ''}`}
+      onDrop={(e) => void onDrop(e)}
+      onDragOver={(e) => e.preventDefault()}
+    >
       {storeNodes.length === 0 && (
         <div className="canvas-empty">
           <div className="canvas-empty-card">
             <div className="canvas-empty-title">Start building</div>
-            <div>Add a node from the top-right menu, then wire outputs into inputs.</div>
+            <div>Add a node from the top-right menu (or right-click), then wire outputs into inputs.</div>
             <div className="canvas-empty-sub">
-              Paste your Replicate / OpenRouter key (top-left) to use the AI nodes.
+              Drag an image file onto the canvas, and paste your Replicate / OpenRouter key (top-left) for the
+              AI nodes.
             </div>
           </div>
         </div>
@@ -116,8 +160,6 @@ export function Canvas() {
         onNodesChange={handleNodesChange}
         onSelectionChange={({ nodes }) => setSelection(nodes.map((n) => n.id))}
         onNodeDragStop={(_e, node, nodes) => {
-          // `nodes` is every node moved in this drag (the whole selection);
-          // persist them all so none snap back, falling back to the single node.
           const dragged = nodes?.length ? nodes : [node];
           setNodePositions(dragged.map((d) => ({ id: d.id, position: d.position })));
         }}
@@ -127,6 +169,11 @@ export function Canvas() {
         onPaneClick={() => {
           cancelPending();
           selectNode(null);
+          setMenu(null);
+        }}
+        onPaneContextMenu={(e) => {
+          e.preventDefault();
+          setMenu({ x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY });
         }}
         deleteKeyCode={['Backspace', 'Delete']}
         fitView
@@ -137,6 +184,22 @@ export function Canvas() {
         <MiniMap pannable zoomable />
         <Controls />
       </ReactFlow>
+      {menu && (
+        <>
+          <div className="menu-backdrop" onClick={() => setMenu(null)} />
+          <div className="context-menu" style={{ left: menu.x, top: menu.y }}>
+            <NodePicker onPick={addAtMenu} onClose={() => setMenu(null)} />
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+export function Canvas() {
+  return (
+    <ReactFlowProvider>
+      <FlowCanvas />
+    </ReactFlowProvider>
   );
 }
