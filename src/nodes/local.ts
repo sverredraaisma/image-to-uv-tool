@@ -5,7 +5,6 @@ import { platform } from '../lib/platform';
 import {
   alphaCleanup,
   applyMask,
-  boxBlur,
   brightnessContrast,
   channelPack,
   colorKeyMask,
@@ -24,26 +23,16 @@ import {
   levels,
   linearGradient,
   maskCombine,
-  morphology,
   normalize,
-  normalMap,
   opacity,
-  outline,
   pad,
-  pixelate,
-  posterize,
   removeColor,
   resize,
   resizeBilinear,
-  rotate,
-  seamlessTile,
-  sharpen,
-  sobel,
   splitCompare,
   threshold,
   tint,
   valueNoise,
-  vignette,
   transform,
   whiteBalance,
   type AlphaCleanupMode,
@@ -55,11 +44,16 @@ import {
 import { magicWandMask, type Point } from '../lib/magicWand';
 import { heightmapToStl } from '../lib/stl';
 import { isBlobRef } from '../lib/blobStore';
+import { runHeavyOp } from '../lib/heavyOps';
 import { asImage, bool, num, str } from './helpers';
 
 /**
  * Helper for the very common single-image-in / single-image-out, auto-run node.
  * Keeps the many pixel-op nodes free of boilerplate.
+ *
+ * Pass `opName` (a key in the heavy-op registry) for CPU-heavy ops: they run in
+ * a Web Worker when one is available (`platform.runImageOp`), and fall back to
+ * the identical synchronous registry call otherwise.
  */
 function singleImageOp(opts: {
   type: string;
@@ -68,8 +62,10 @@ function singleImageOp(opts: {
   description?: string;
   configFields?: ConfigField[];
   defaultConfig?: () => NodeConfig;
-  op: (img: RasterImage, config: NodeConfig) => RasterImage;
+  op?: (img: RasterImage, config: NodeConfig) => RasterImage;
+  opName?: string;
 }): NodeDefinition {
+  const op = opts.op ?? ((img: RasterImage, config: NodeConfig) => runHeavyOp(opts.opName!, img, config));
   return {
     type: opts.type,
     label: opts.label,
@@ -80,10 +76,13 @@ function singleImageOp(opts: {
     outputs: [{ id: 'out', label: 'Image', type: 'image' }],
     configFields: opts.configFields,
     defaultConfig: opts.defaultConfig ?? (() => ({})),
-    compute: ({ inputs, config }) => {
+    compute: async ({ inputs, config }) => {
       const img = asImage(inputs.in);
       if (!img) return { out: undefined };
-      return { out: opts.op(img, config) };
+      if (opts.opName && platform.runImageOp) {
+        return { out: await platform.runImageOp(opts.opName, img, config) };
+      }
+      return { out: op(img, config) };
     },
   };
 }
@@ -320,7 +319,7 @@ export const blurNode = singleImageOp({
   description: 'Blur by an adjustable pixel radius.',
   configFields: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 100, step: 1 }],
   defaultConfig: () => ({ radius: 2 }),
-  op: (img, config) => boxBlur(img, num(config.radius, 2)),
+  opName: 'blur',
 });
 
 export const sharpenNode = singleImageOp({
@@ -330,7 +329,7 @@ export const sharpenNode = singleImageOp({
   description: 'Unsharp-mask sharpening.',
   configFields: [{ kind: 'number', key: 'amount', label: 'Amount', min: 0, max: 5, step: 0.1 }],
   defaultConfig: () => ({ amount: 1 }),
-  op: (img, config) => sharpen(img, num(config.amount, 1)),
+  opName: 'sharpen',
 });
 
 export const gradientMapNode = singleImageOp({
@@ -420,7 +419,7 @@ export const edgeDetectNode = singleImageOp({
   label: 'Edge Detect',
   category: 'Adjust',
   description: 'Sobel edge detection — white edges on black (feeds ControlNet).',
-  op: (img) => sobel(img),
+  opName: 'edgeDetect',
 });
 
 export const pixelateNode = singleImageOp({
@@ -430,7 +429,7 @@ export const pixelateNode = singleImageOp({
   description: 'Mosaic / blocky pixelation.',
   configFields: [{ kind: 'number', key: 'blockSize', label: 'Block size', min: 1, max: 128, step: 1 }],
   defaultConfig: () => ({ blockSize: 8 }),
-  op: (img, config) => pixelate(img, num(config.blockSize, 8)),
+  opName: 'pixelate',
 });
 
 export const vignetteNode = singleImageOp({
@@ -440,7 +439,7 @@ export const vignetteNode = singleImageOp({
   description: 'Darken towards the corners.',
   configFields: [{ kind: 'number', key: 'strength', label: 'Strength', min: 0, max: 1, step: 0.05 }],
   defaultConfig: () => ({ strength: 0.5 }),
-  op: (img, config) => vignette(img, num(config.strength, 0.5)),
+  opName: 'vignette',
 });
 
 export const posterizeNode = singleImageOp({
@@ -450,7 +449,7 @@ export const posterizeNode = singleImageOp({
   description: 'Reduce each colour channel to a limited number of levels.',
   configFields: [{ kind: 'number', key: 'levels', label: 'Levels', min: 2, max: 64, step: 1 }],
   defaultConfig: () => ({ levels: 4 }),
-  op: (img, config) => posterize(img, num(config.levels, 4)),
+  opName: 'posterize',
 });
 
 export const outlineNode = singleImageOp({
@@ -464,13 +463,7 @@ export const outlineNode = singleImageOp({
     { kind: 'number', key: 'alphaThreshold', label: 'Alpha threshold', min: 0, max: 255, advanced: true },
   ],
   defaultConfig: () => ({ thickness: 4, color: '#000000', alphaThreshold: 0 }),
-  op: (img, config) =>
-    outline(
-      img,
-      num(config.thickness, 4),
-      hexToRgba(str(config.color, '#000000'), 255),
-      num(config.alphaThreshold, 0),
-    ),
+  opName: 'outline',
 });
 
 export const alphaCleanupNode = singleImageOp({
@@ -555,7 +548,7 @@ export const rotateAngleNode = singleImageOp({
   description: 'Rotate by an arbitrary angle — expands the canvas, bilinear sampled.',
   configFields: [{ kind: 'number', key: 'degrees', label: 'Degrees', min: -360, max: 360, step: 1 }],
   defaultConfig: () => ({ degrees: 45 }),
-  op: (img, config) => rotate(img, num(config.degrees, 45)),
+  opName: 'rotateAngle',
 });
 
 export const whiteBalanceNode = singleImageOp({
@@ -578,7 +571,7 @@ export const seamlessTileNode = singleImageOp({
   description: 'Blend the borders so the texture tiles without visible seams.',
   configFields: [{ kind: 'number', key: 'feather', label: 'Feather', min: 0, max: 1, step: 0.05 }],
   defaultConfig: () => ({ feather: 0.5 }),
-  op: (img, config) => seamlessTile(img, num(config.feather, 0.5)),
+  opName: 'seamlessTile',
 });
 
 export const compareNode: NodeDefinition = {
@@ -758,7 +751,7 @@ export const dilateNode = singleImageOp({
   description: 'Grow bright / white regions (greyscale dilation).',
   configFields: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 50, step: 1 }],
   defaultConfig: () => ({ radius: 2 }),
-  op: (img, config) => morphology(img, num(config.radius, 2), 'dilate'),
+  opName: 'dilate',
 });
 
 export const erodeNode = singleImageOp({
@@ -768,7 +761,7 @@ export const erodeNode = singleImageOp({
   description: 'Shrink bright / white regions (greyscale erosion).',
   configFields: [{ kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 50, step: 1 }],
   defaultConfig: () => ({ radius: 2 }),
-  op: (img, config) => morphology(img, num(config.radius, 2), 'erode'),
+  opName: 'erode',
 });
 
 export const areaPickerNode: NodeDefinition = {
@@ -830,7 +823,7 @@ export const normalMapNode = singleImageOp({
   description: 'Heightmap → tangent-space normal map (white = high). OpenGL +Y.',
   configFields: [{ kind: 'number', key: 'strength', label: 'Strength', min: 0, max: 10, step: 0.1 }],
   defaultConfig: () => ({ strength: 2 }),
-  op: (img, config) => normalMap(img, num(config.strength, 2)),
+  opName: 'normalMap',
 });
 
 export const channelPackNode: NodeDefinition = {

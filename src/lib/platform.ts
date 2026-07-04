@@ -2,7 +2,7 @@
 // depending directly on the DOM. The browser entry point installs the real
 // canvas-based adapter (`lib/canvas.ts`); tests can install fakes.
 
-import type { RasterImage } from '../types';
+import type { NodeConfig, RasterImage } from '../types';
 
 export interface Platform {
   /** Decode a data URL / object URL / http URL into a raster image. */
@@ -17,6 +17,8 @@ export interface Platform {
   putBlob(dataUrl: string): Promise<string>;
   /** Resolve a blob reference back to its data URL (null if unknown). */
   getBlob(ref: string): Promise<string | null>;
+  /** Optional: run a heavy image op off the main thread (Web Worker pool). */
+  runImageOp?(name: string, img: RasterImage, config: NodeConfig): Promise<RasterImage>;
 }
 
 const notReady = (): never => {
