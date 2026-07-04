@@ -124,17 +124,21 @@ describe('new local nodes', () => {
 describe('LLM + image-to-text (with stubbed fetch)', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('runs an OpenRouter LLM node with a prompt + wired text', async () => {
+  it('runs an OpenRouter LLM node, combining the prompt with wired text + system', async () => {
+    let body: { messages?: { role: string; content: string }[] } | null = null;
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse({ choices: [{ message: { content: 'ROBOT SAYS HI' } }] })),
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body));
+        return jsonResponse({ choices: [{ message: { content: 'ROBOT SAYS HI' } }] });
+      }),
     );
     useStore.setState({ openRouterKey: 'or-key' });
     const s = useStore.getState();
     const prompt = s.addNode('promptInput');
     s.updateNodeConfig(prompt, { text: 'hello' });
     const llm = s.addNode('llmLlama8b');
-    s.updateNodeConfig(llm, { prompt: 'Uppercase this:' });
+    s.updateNodeConfig(llm, { prompt: 'Uppercase this:', system: 'You are terse.' });
     s.addConnection({ source: prompt, sourceHandle: 'out', target: llm, targetHandle: 'text' });
     await useStore.getState().processAutoRun();
 
@@ -143,6 +147,11 @@ describe('LLM + image-to-text (with stubbed fetch)', () => {
     const out = useStore.getState().runtime[llm].outputs.out;
     expect(out?.kind).toBe('text');
     if (out?.kind === 'text') expect(out.text).toBe('ROBOT SAYS HI');
+    // system message first, then the prompt joined with the wired text
+    expect(body!.messages).toEqual([
+      { role: 'system', content: 'You are terse.' },
+      { role: 'user', content: 'Uppercase this:\n\nhello' },
+    ]);
   });
 
   it('an image-to-text node returns the model text', async () => {
