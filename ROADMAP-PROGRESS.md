@@ -25,18 +25,29 @@ Tracks execution of the plan in `CODEBASE-ANALYSIS.md` §6. Branch: `roadmap-pha
 
 **Test/type/build status:** 261 tests green, `tsc -b` clean, `vite build` clean, `eslint .` clean, `prettier --check` clean.
 
-### Post-merge continuation (branch `roadmap-rest`)
+### Post-merge continuation (branch `roadmap-rest`, 306 tests green)
 
-- ✅ **Batch A** — crop negative-origin clip, hexToRgba `#rgba`/invalid, normalize
-  excludes transparent, morphology radius cap, registerNode collision warn,
-  bounded toasts, exportGraph deep-clone, OpenRouter attribution, defaultSleep
-  listener leak, aiFactory cancel-mid-download.
-- ✅ **1.1 IndexedDB blob store** — content-addressed store, platform seam,
-  imageInput `srcRef` (back-compat), portable inlined export. **(H4 / 5 MB wall)**
-- ✅ **§5.4 UV pipeline** — Normal Map, Channel Pack, Noise, bilinear Resize, OBJ export.
-- ✅ **§5.2 Node bypass/mute.**
+- ✅ **Batch A (§2.2/2.3)** — crop negative-origin clip, hexToRgba `#rgba`/invalid,
+  normalize excludes transparent, morphology radius cap, registerNode collision
+  warn, bounded toasts, exportGraph deep-clone, OpenRouter attribution,
+  defaultSleep listener leak, aiFactory cancel-mid-download, `merge` key
+  whitelist, safeStorage per-key, stop-on-failed-ancestor.
+- ✅ **1.1 IndexedDB blob store (H4)** — content-addressed `lib/blobStore.ts`
+  (injectable backend + browser IndexedDB), platform seam `putBlob`/`getBlob`,
+  imageInput `srcRef` with legacy back-compat, portable inlined export.
+- ✅ **§5.4 UV/texture** — Normal Map, Channel Pack, Noise, bilinear Resize, OBJ export.
+- ✅ **§5.3 nodes** — Histogram scope; bilinear resample.
+- ✅ **§5.2 editor UX** — Node bypass/mute; multi-selection + group duplicate
+  (internal edges, single undo); accessibility pass (dialog focus-trap, live-region toasts).
+- ✅ **§5.3 AI** — first-class seed control on generation nodes.
 
-Remaining: worker pool (1.2), executor unification (1.3), most of Phase 2–4.
+**Remaining (mostly UI-heavy / product-gated / risky refactor):**
+
+- **1.2 Web Worker pool** — env-specific, not unit-testable in jsdom.
+- **1.3 executor unification** — pure refactor (Phase 0 already fixed the bugs); high regression risk, do test-first.
+- **Phase 2** — context menu, drag-drop image import, viewport-aware placement, zoom-to-fit, keyboard connection flow.
+- **Phase 3** — AI result caching (now feasible on the blob store), A/B compare, curves/LUT/text/warp nodes, multiple projects + save-format migration.
+- **Phase 4** — seamless tiling, PBR export presets, 3MF, LICENSE (awaiting owner's choice), PWA/offline, static deploy, shareable links, plugin API.
 
 ## Deferred — large infra (need dedicated effort; not safe to rush)
 
