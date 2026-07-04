@@ -7,6 +7,7 @@ import {
   applyMask,
   boxBlur,
   brightnessContrast,
+  channelPack,
   colorKeyMask,
   combine,
   createImage,
@@ -24,6 +25,7 @@ import {
   maskCombine,
   morphology,
   normalize,
+  normalMap,
   opacity,
   outline,
   pad,
@@ -31,10 +33,12 @@ import {
   posterize,
   removeColor,
   resize,
+  resizeBilinear,
   sharpen,
   sobel,
   threshold,
   tint,
+  valueNoise,
   vignette,
   transform,
   type AlphaCleanupMode,
@@ -503,14 +507,28 @@ export const resizeNode = singleImageOp({
   type: 'resize',
   label: 'Resize',
   category: 'Transform',
-  description: 'Resize to a target width/height (nearest-neighbour).',
+  description: 'Resize to a target width/height (nearest or bilinear).',
   configFields: [
     { kind: 'number', key: 'width', label: 'Width', min: 1, step: 1 },
     { kind: 'number', key: 'height', label: 'Height', min: 1, step: 1 },
+    {
+      kind: 'select',
+      key: 'method',
+      label: 'Method',
+      options: [
+        { value: 'bilinear', label: 'Bilinear (smooth)' },
+        { value: 'nearest', label: 'Nearest (blocky)' },
+      ],
+    },
   ],
-  defaultConfig: () => ({ width: 256, height: 256 }),
-  op: (img, config) =>
-    resize(img, Math.max(1, num(config.width, img.width)), Math.max(1, num(config.height, img.height))),
+  // Nodes created before this field default to nearest (unchanged behaviour);
+  // new nodes prefer the higher-quality bilinear path.
+  defaultConfig: () => ({ width: 256, height: 256, method: 'bilinear' }),
+  op: (img, config) => {
+    const w = Math.max(1, num(config.width, img.width));
+    const h = Math.max(1, num(config.height, img.height));
+    return str(config.method, 'nearest') === 'nearest' ? resize(img, w, h) : resizeBilinear(img, w, h);
+  },
 });
 
 export const padNode = singleImageOp({
@@ -715,6 +733,67 @@ export const heightmapStlNode: NodeDefinition = {
   },
 };
 
+// ---- UV / Texture ----
+
+export const normalMapNode = singleImageOp({
+  type: 'normalMap',
+  label: 'Normal Map',
+  category: 'UV',
+  description: 'Heightmap → tangent-space normal map (white = high). OpenGL +Y.',
+  configFields: [{ kind: 'number', key: 'strength', label: 'Strength', min: 0, max: 10, step: 0.1 }],
+  defaultConfig: () => ({ strength: 2 }),
+  op: (img, config) => normalMap(img, num(config.strength, 2)),
+});
+
+export const channelPackNode: NodeDefinition = {
+  type: 'channelPack',
+  label: 'Channel Pack',
+  category: 'UV',
+  description: 'Pack up to four greyscale inputs into R/G/B/A (e.g. roughness/metallic/AO).',
+  autoRun: true,
+  inputs: [
+    { id: 'r', label: 'R', type: 'image' },
+    { id: 'g', label: 'G', type: 'image' },
+    { id: 'b', label: 'B', type: 'image' },
+    { id: 'a', label: 'A', type: 'image' },
+  ],
+  outputs: [{ id: 'out', label: 'Image', type: 'image' }],
+  defaultConfig: () => ({}),
+  compute: ({ inputs }) => {
+    const r = asImage(inputs.r);
+    const g = asImage(inputs.g);
+    const b = asImage(inputs.b);
+    const a = asImage(inputs.a);
+    if (!r && !g && !b && !a) return { out: undefined };
+    return { out: channelPack({ r, g, b, a }) };
+  },
+};
+
+export const noiseNode: NodeDefinition = {
+  type: 'noise',
+  label: 'Noise',
+  category: 'Input',
+  description: 'Generate seeded value noise (procedural greyscale texture).',
+  autoRun: true,
+  inputs: [],
+  outputs: [{ id: 'out', label: 'Image', type: 'image' }],
+  configFields: [
+    { kind: 'number', key: 'width', label: 'Width', min: 1, step: 1 },
+    { kind: 'number', key: 'height', label: 'Height', min: 1, step: 1 },
+    { kind: 'number', key: 'scale', label: 'Scale (px/cell)', min: 1, step: 1 },
+    { kind: 'number', key: 'seed', label: 'Seed', min: 0, step: 1 },
+  ],
+  defaultConfig: () => ({ width: 256, height: 256, scale: 24, seed: 1 }),
+  compute: ({ config }) => ({
+    out: valueNoise(
+      Math.max(1, num(config.width, 256)),
+      Math.max(1, num(config.height, 256)),
+      Math.max(1, num(config.scale, 24)),
+      num(config.seed, 1),
+    ),
+  }),
+};
+
 export const localNodes: NodeDefinition[] = [
   imageInputNode,
   promptInputNode,
@@ -752,5 +831,8 @@ export const localNodes: NodeDefinition[] = [
   dilateNode,
   erodeNode,
   areaPickerNode,
+  noiseNode,
+  normalMapNode,
+  channelPackNode,
   heightmapStlNode,
 ];

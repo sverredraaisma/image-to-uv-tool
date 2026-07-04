@@ -884,3 +884,149 @@ export function sobel(img: RasterImage): RasterImage {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Texture / UV helpers (heightmap → normal map, channel packing, procedural
+// noise) and high-quality resampling.
+// ---------------------------------------------------------------------------
+
+/**
+ * Tangent-space normal map from a heightmap (luminance = height). Flat areas
+ * become the canonical "flat blue" (128,128,255). +Y is up (OpenGL convention);
+ * flip the green channel afterwards for DirectX.
+ */
+export function normalMap(img: RasterImage, strength = 1): RasterImage {
+  const { width: w, height: h } = img;
+  const out = createImage(w, h, [128, 128, 255, 255]);
+  const heightAt = (x: number, y: number) => {
+    const cx = Math.max(0, Math.min(w - 1, x));
+    const cy = Math.max(0, Math.min(h - 1, y));
+    const i = (cy * w + cx) * 4;
+    return luminance(img.data[i], img.data[i + 1], img.data[i + 2]) / 255;
+  };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (heightAt(x + 1, y) - heightAt(x - 1, y)) * strength;
+      const dy = (heightAt(x, y + 1) - heightAt(x, y - 1)) * strength;
+      let nx = -dx;
+      let ny = -dy;
+      let nz = 1;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len;
+      ny /= len;
+      nz /= len;
+      const i = (y * w + x) * 4;
+      out.data[i] = (nx * 0.5 + 0.5) * 255;
+      out.data[i + 1] = (ny * 0.5 + 0.5) * 255;
+      out.data[i + 2] = (nz * 0.5 + 0.5) * 255;
+      out.data[i + 3] = 255;
+    }
+  }
+  return out;
+}
+
+/**
+ * Pack up to four single-value sources into the R,G,B,A channels of one image
+ * (e.g. roughness/metallic/AO/opacity). Each source contributes its luminance;
+ * missing sources default (RGB→0, A→255). Sources are resized to the first
+ * present one.
+ */
+export function channelPack(sources: {
+  r?: RasterImage;
+  g?: RasterImage;
+  b?: RasterImage;
+  a?: RasterImage;
+}): RasterImage {
+  const ref = sources.r ?? sources.g ?? sources.b ?? sources.a;
+  if (!ref) return createImage(1, 1, [0, 0, 0, 255]);
+  const w = ref.width;
+  const h = ref.height;
+  const fit = (img?: RasterImage) =>
+    img ? (img.width === w && img.height === h ? img : resize(img, w, h)) : undefined;
+  const R = fit(sources.r);
+  const G = fit(sources.g);
+  const B = fit(sources.b);
+  const A = fit(sources.a);
+  const out = createImage(w, h, [0, 0, 0, 255]);
+  const lum = (img: RasterImage, i: number) => luminance(img.data[i], img.data[i + 1], img.data[i + 2]);
+  for (let i = 0; i < out.data.length; i += 4) {
+    if (R) out.data[i] = lum(R, i);
+    if (G) out.data[i + 1] = lum(G, i);
+    if (B) out.data[i + 2] = lum(B, i);
+    out.data[i + 3] = A ? lum(A, i) : 255;
+  }
+  return out;
+}
+
+// Deterministic 2D hash → [0,1). Integer-mixed so the same (x,y,seed) is stable.
+function hash2(ix: number, iy: number, seed: number): number {
+  let h = (Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + Math.imul(seed, 362437)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+const smoothstep = (t: number) => t * t * (3 - 2 * t);
+
+/**
+ * Seeded value noise as a greyscale image. `scale` is the cell size in pixels
+ * (larger = smoother). Deterministic for a given seed.
+ */
+export function valueNoise(width: number, height: number, scale: number, seed = 0): RasterImage {
+  const out = createImage(Math.max(1, width), Math.max(1, height), [0, 0, 0, 255]);
+  const s = Math.max(1, scale);
+  const si = Math.floor(seed);
+  for (let y = 0; y < out.height; y++) {
+    for (let x = 0; x < out.width; x++) {
+      const gx = x / s;
+      const gy = y / s;
+      const x0 = Math.floor(gx);
+      const y0 = Math.floor(gy);
+      const tx = smoothstep(gx - x0);
+      const ty = smoothstep(gy - y0);
+      const v00 = hash2(x0, y0, si);
+      const v10 = hash2(x0 + 1, y0, si);
+      const v01 = hash2(x0, y0 + 1, si);
+      const v11 = hash2(x0 + 1, y0 + 1, si);
+      const top = v00 + (v10 - v00) * tx;
+      const bot = v01 + (v11 - v01) * tx;
+      const v = top + (bot - top) * ty;
+      const g = Math.round(v * 255);
+      const i = (y * out.width + x) * 4;
+      out.data[i] = g;
+      out.data[i + 1] = g;
+      out.data[i + 2] = g;
+    }
+  }
+  return out;
+}
+
+/** Bilinear resize (smooth) — the quality alternative to nearest-neighbour. */
+export function resizeBilinear(img: RasterImage, width: number, height: number): RasterImage {
+  const w = Math.max(1, Math.floor(width));
+  const h = Math.max(1, Math.floor(height));
+  if (img.width === w && img.height === h) return cloneImage(img);
+  const { width: iw, height: ih, data } = img;
+  const out = createImage(w, h);
+  for (let y = 0; y < h; y++) {
+    const fy = h > 1 ? (y * (ih - 1)) / (h - 1) : 0;
+    const y0 = Math.floor(fy);
+    const y1 = Math.min(ih - 1, y0 + 1);
+    const wy = fy - y0;
+    for (let x = 0; x < w; x++) {
+      const fx = w > 1 ? (x * (iw - 1)) / (w - 1) : 0;
+      const x0 = Math.floor(fx);
+      const x1 = Math.min(iw - 1, x0 + 1);
+      const wx = fx - x0;
+      const i00 = (y0 * iw + x0) * 4;
+      const i10 = (y0 * iw + x1) * 4;
+      const i01 = (y1 * iw + x0) * 4;
+      const i11 = (y1 * iw + x1) * 4;
+      const di = (y * w + x) * 4;
+      for (let c = 0; c < 4; c++) {
+        const top = data[i00 + c] * (1 - wx) + data[i10 + c] * wx;
+        const bot = data[i01 + c] * (1 - wx) + data[i11 + c] * wx;
+        out.data[di + c] = top * (1 - wy) + bot * wy;
+      }
+    }
+  }
+  return out;
+}
