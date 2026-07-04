@@ -50,7 +50,12 @@ const SEED_SCALAR: AiScalar = {
 };
 
 export function makeReplicateNode(spec: AiSpec): NodeDefinition {
-  const inputs: PortSpec[] = spec.ports.map((p) => ({ id: p.id, label: p.label, type: p.type }));
+  const inputs: PortSpec[] = spec.ports.map((p) => ({
+    id: p.id,
+    label: p.label,
+    type: p.type,
+    required: p.required,
+  }));
   const scalars = [...(spec.scalars ?? []), ...(spec.seed ? [SEED_SCALAR] : [])];
   const outputPorts: AiOutput[] = spec.outputs ?? [
     { id: 'out', label: 'Output', type: spec.output === 'text' ? 'text' : 'image' },

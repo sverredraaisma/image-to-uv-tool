@@ -40,6 +40,8 @@ export interface PortSpec {
   type: PortType;
   /** Input ports only: accept more than one incoming connection. */
   multiple?: boolean;
+  /** Input ports only: the node can't compute until this is connected/filled. */
+  required?: boolean;
 }
 
 // ---------------------------------------------------------------------------

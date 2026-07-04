@@ -74,20 +74,33 @@ export function NodeView({ id, selected }: NodeProps) {
     return cls;
   };
 
-  const renderInput = (port: PortSpec) => (
-    <div className={portClass('input', port.id)} key={port.id}>
-      <Handle type="target" position={Position.Left} id={port.id} className="rf-handle" />
-      <ValuePreview
-        value={inputValues[port.id]}
-        onClick={() =>
-          inputValues[port.id] && openPreview(inputValues[port.id]!, `${def.label} · ${port.label}`)
-        }
-      />
-      <span className="port-label" onClick={() => clickPort(id, port.id, 'input')} title="Click to connect">
-        {port.label}
-      </span>
-    </div>
-  );
+  const renderInput = (port: PortSpec) => {
+    const inlineText = port.type === 'text' ? String(node.config[port.id] ?? '') : '';
+    const missing = port.required && inputValues[port.id] === undefined && inlineText.length === 0;
+    return (
+      <div
+        className={`${portClass('input', port.id)}${missing ? ' port-required-missing' : ''}`}
+        key={port.id}
+      >
+        <Handle type="target" position={Position.Left} id={port.id} className="rf-handle" />
+        <ValuePreview
+          value={inputValues[port.id]}
+          onClick={() =>
+            inputValues[port.id] && openPreview(inputValues[port.id]!, `${def.label} · ${port.label}`)
+          }
+        />
+        <span className="port-label" onClick={() => clickPort(id, port.id, 'input')} title="Click to connect">
+          {port.label}
+          {port.required && (
+            <span className="port-required" title="Required input">
+              {' '}
+              *
+            </span>
+          )}
+        </span>
+      </div>
+    );
+  };
 
   const renderOutput = (port: PortSpec) => {
     const value = rt?.outputs?.[port.id];
