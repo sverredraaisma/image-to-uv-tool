@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 
 import type {
   ComputeContext,
+  ComputeResult,
   DataValue,
   GraphEdge,
   GraphNode,
@@ -22,7 +23,7 @@ import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { reconcileRuntime } from '../engine/reconcile';
-import { findReadyAutoNode, gatherInputs } from '../engine/schedule';
+import { bypassOutputs, findReadyAutoNode, gatherInputs } from '../engine/schedule';
 import { createSafeStorage } from './safeStorage';
 import '../nodes'; // side-effect: register built-in node definitions
 
@@ -144,6 +145,7 @@ export interface StoreState {
   setNodePosition: (id: string, position: { x: number; y: number }) => void;
   setNodePositions: (updates: { id: string; position: { x: number; y: number } }[]) => void;
   updateNodeConfig: (id: string, patch: NodeConfig) => void;
+  toggleBypass: (id: string) => void;
   addConnection: (conn: ConnectionInput) => boolean;
   canConnect: (conn: ConnectionInput) => boolean;
   removeEdge: (id: string) => void;
@@ -358,6 +360,18 @@ export const useStore = create<StoreState>()(
         void get().processAutoRun();
       },
 
+      toggleBypass: (id) => {
+        if (!get().nodes.some((n) => n.id === id)) return;
+        get()._snapshot();
+        set((s) => ({
+          nodes: s.nodes.map((n) => (n.id === id ? { ...n, bypassed: !n.bypassed } : n)),
+        }));
+        // The node's own output changes, so it and everything downstream go stale.
+        get().markOutOfDate(id);
+        for (const d of descendants(id, get().edges)) get().markOutOfDate(d);
+        void get().processAutoRun();
+      },
+
       addConnection: (conn) => {
         const s = get();
         const check = checkConnection(s.nodes, s.edges, conn);
@@ -534,22 +548,29 @@ export const useStore = create<StoreState>()(
         try {
           const s = get();
           const inputs = gatherInputs(def.inputs, s.edges, s.runtime, id);
-          const ctx: ComputeContext = {
-            inputs,
-            config: node.config,
-            apiKey: get().apiKey || null,
-            openRouterKey: get().openRouterKey || null,
-            proxyUrl: get().proxyUrl || null,
-            signal: controller.signal,
-            onProgress: (message) =>
-              set((st) => ({
-                runtime: {
-                  ...st.runtime,
-                  [id]: { ...(st.runtime[id] ?? defaultRuntime()), progress: message },
-                },
-              })),
-          };
-          const result = await def.compute(ctx);
+          // A muted node acts as a wire: forward a compatible input to its
+          // outputs instead of computing (no compute, no network, no token spend).
+          let result: ComputeResult;
+          if (node.bypassed) {
+            result = bypassOutputs(def.inputs, def.outputs, inputs);
+          } else {
+            const ctx: ComputeContext = {
+              inputs,
+              config: node.config,
+              apiKey: get().apiKey || null,
+              openRouterKey: get().openRouterKey || null,
+              proxyUrl: get().proxyUrl || null,
+              signal: controller.signal,
+              onProgress: (message) =>
+                set((st) => ({
+                  runtime: {
+                    ...st.runtime,
+                    [id]: { ...(st.runtime[id] ?? defaultRuntime()), progress: message },
+                  },
+                })),
+            };
+            result = await def.compute(ctx);
+          }
 
           // Node deleted while running — drop the result, don't resurrect it.
           if (!get().nodes.some((n) => n.id === id)) return;
@@ -626,7 +647,7 @@ export const useStore = create<StoreState>()(
               nodes,
               edges,
               runtime,
-              (type) => getNodeDefSafe(type)?.autoRun ?? false,
+              (n) => n.bypassed === true || (getNodeDefSafe(n.type)?.autoRun ?? false),
             );
             if (!ready) break;
             await get()._executeNode(ready);

@@ -814,3 +814,8 @@ textarea {
 .error-boundary-actions button:hover {
   border-color: var(--accent);
 }
+
+/* ---------------- Node bypass (mute) ---------------- */
+.icon-btn.icon-active { color: var(--accent); border-color: var(--accent); }
+.node-bypassed { opacity: 0.6; }
+.node-bypassed .node-title::after { content: ' (muted)'; color: var(--muted, #9aa4b2); font-size: 10px; }

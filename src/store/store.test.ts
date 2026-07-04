@@ -585,6 +585,37 @@ describe('graph-swap safety (H1 / H5)', () => {
   });
 });
 
+describe('node bypass (mute)', () => {
+  it('a bypassed auto node forwards its input and stops computing', async () => {
+    const { a, b } = await buildChain(); // a(const '5') -> b(pass) -> c(manual)
+    expect((store().runtime[b].outputs.out as { text: string }).text).toBe('5');
+    const passRuns = runCounts.pass ?? 0;
+
+    store().toggleBypass(b);
+    await store().processAutoRun();
+    // b now passes 'a' straight through (still '5' here) without running compute…
+    expect((store().runtime[b].outputs.out as { text: string }).text).toBe('5');
+    expect(runCounts.pass ?? 0).toBe(passRuns); // pass compute did not run
+    void a;
+  });
+
+  it('a bypassed manual node auto-updates when its input changes', async () => {
+    const a = store().addNode('test.const');
+    store().updateNodeConfig(a, { v: 'hello' });
+    const m = store().addNode('test.manual'); // manual: normally needs Run
+    store().addConnection({ source: a, sourceHandle: 'out', target: m, targetHandle: 'in' });
+    await store().processAutoRun();
+    expect(store().runtime[m].status).toBe('outOfDate'); // manual, not run yet
+
+    store().toggleBypass(m);
+    await store().processAutoRun();
+    // muted manual node now behaves as a wire and updates automatically
+    expect(store().runtime[m].status).toBe('upToDate');
+    expect((store().runtime[m].outputs.out as { text: string }).text).toBe('hello');
+    expect(runCounts.manual ?? 0).toBe(0); // never actually ran the manual compute
+  });
+});
+
 describe('robustness (§2.3)', () => {
   it('caps the toast list so an error flood cannot grow unbounded', () => {
     for (let i = 0; i < 12; i++) store().addToast('error', `e${i}`);

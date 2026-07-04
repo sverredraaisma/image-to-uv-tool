@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findReadyAutoNode, gatherInputs } from './schedule';
+import { bypassOutputs, findReadyAutoNode, gatherInputs } from './schedule';
 import type { DataValue, GraphEdge, NodeRuntime, PortSpec } from '../types';
 
 const edge = (source: string, sh: string, target: string, th: string): GraphEdge => ({
@@ -40,7 +40,7 @@ describe('gatherInputs', () => {
 });
 
 describe('findReadyAutoNode', () => {
-  const auto = (t: string) => t === 'auto';
+  const auto = (n: { type: string; bypassed?: boolean }) => n.type === 'auto' || n.bypassed === true;
   const rt = (m: Record<string, NodeRuntime['status']>): Record<string, NodeRuntime> =>
     Object.fromEntries(Object.entries(m).map(([k, status]) => [k, { status, outputs: {} }]));
 
@@ -56,6 +56,12 @@ describe('findReadyAutoNode', () => {
     ).toBeUndefined();
   });
 
+  it('treats a bypassed manual node as auto-runnable', () => {
+    expect(
+      findReadyAutoNode([{ id: 'b', type: 'manual', bypassed: true }], [], rt({ b: 'outOfDate' }), auto),
+    ).toBe('b');
+  });
+
   it('waits until upstream nodes are up to date', () => {
     const nodes = [
       { id: 'a', type: 'auto' },
@@ -66,5 +72,30 @@ describe('findReadyAutoNode', () => {
     expect(findReadyAutoNode(nodes, edges, rt({ a: 'outOfDate', c: 'outOfDate' }), auto)).toBe('a');
     // a up to date -> c becomes ready
     expect(findReadyAutoNode(nodes, edges, rt({ a: 'upToDate', c: 'outOfDate' }), auto)).toBe('c');
+  });
+});
+
+describe('bypassOutputs', () => {
+  const img: DataValue = { kind: 'image', width: 1, height: 1, data: new Uint8ClampedArray(4) };
+
+  it('forwards the first type-compatible input to each output', () => {
+    const inputs: PortSpec[] = [
+      { id: 'a', label: 'a', type: 'text' },
+      { id: 'b', label: 'b', type: 'image' },
+    ];
+    const outputs: PortSpec[] = [{ id: 'out', label: 'out', type: 'image' }];
+    const result = bypassOutputs(inputs, outputs, { a: txt('x'), b: img });
+    expect(result.out).toBe(img); // image output takes the image input, not the text
+  });
+
+  it('accepts an image value for a mask output and leaves unmatched outputs empty', () => {
+    const inputs: PortSpec[] = [{ id: 'in', label: 'in', type: 'image' }];
+    const outputs: PortSpec[] = [
+      { id: 'mask', label: 'mask', type: 'mask' },
+      { id: 'text', label: 'text', type: 'text' },
+    ];
+    const result = bypassOutputs(inputs, outputs, { in: img });
+    expect(result.mask).toBe(img);
+    expect(result.text).toBeUndefined();
   });
 });

@@ -41,6 +41,7 @@ export function NodeView({ id, selected }: NodeProps) {
   const cancelNode = useStore((s) => s.cancelNode);
   const bringUpToDate = useStore((s) => s.bringUpToDate);
   const duplicateNode = useStore((s) => s.duplicateNode);
+  const toggleBypass = useStore((s) => s.toggleBypass);
   const removeNode = useStore((s) => s.removeNode);
   const openEditor = useStore((s) => s.openEditor);
   const openPreview = useStore((s) => s.openPreview);
@@ -108,7 +109,9 @@ export function NodeView({ id, selected }: NodeProps) {
 
   return (
     <div
-      className={`node cat-${def.category.replace(/\W+/g, '')} ${selected ? 'node-selected' : ''}`}
+      className={`node cat-${def.category.replace(/\W+/g, '')} ${selected ? 'node-selected' : ''} ${
+        node.bypassed ? 'node-bypassed' : ''
+      }`}
       style={{ width: nodeWidth(def) }}
     >
       <div className="node-header">
@@ -130,6 +133,15 @@ export function NodeView({ id, selected }: NodeProps) {
               ⚙
             </button>
           )}
+          <button
+            type="button"
+            className={`icon-btn ${node.bypassed ? 'icon-active' : ''}`}
+            title={node.bypassed ? 'Un-mute node' : 'Mute (bypass) node'}
+            aria-pressed={node.bypassed ? true : false}
+            onClick={() => toggleBypass(id)}
+          >
+            ⏻
+          </button>
           <button type="button" className="icon-btn" title="Duplicate node" onClick={() => duplicateNode(id)}>
             ⧉
           </button>
@@ -174,6 +186,7 @@ export function NodeView({ id, selected }: NodeProps) {
         )}
 
         {!def.autoRun &&
+          !node.bypassed &&
           (status === 'running' ? (
             <button type="button" className="wide-btn cancel-btn nodrag" onClick={() => cancelNode(id)}>
               Cancel ✕

@@ -41,6 +41,7 @@ export function reconcileRuntime(
     const c = currentById.get(t.id);
     if (
       !c ||
+      Boolean(c.bypassed) !== Boolean(t.bypassed) ||
       JSON.stringify(c.config) !== JSON.stringify(t.config) ||
       incomingSignature(current.edges, t.id) !== incomingSignature(target.edges, t.id)
     ) {

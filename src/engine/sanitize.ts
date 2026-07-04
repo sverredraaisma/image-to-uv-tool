@@ -40,6 +40,7 @@ export function sanitizeGraph(
       type?: unknown;
       position?: { x?: unknown; y?: unknown };
       config?: unknown;
+      bypassed?: unknown;
     };
     if (typeof n.id !== 'string' || typeof n.type !== 'string') continue;
     if (seenNodeIds.has(n.id)) continue; // collapse duplicate ids
@@ -47,12 +48,14 @@ export function sanitizeGraph(
     const px = n.position?.x;
     const py = n.position?.y;
     const finitePos = Number.isFinite(px) && Number.isFinite(py);
-    nodes.push({
+    const node: GraphNode = {
       id: n.id,
       type: n.type,
       position: finitePos ? { x: px as number, y: py as number } : { x: 0, y: 0 },
       config: n.config && typeof n.config === 'object' ? (n.config as NodeConfig) : {},
-    });
+    };
+    if (n.bypassed === true) node.bypassed = true;
+    nodes.push(node);
   }
 
   const nodeById = new Map(nodes.map((n) => [n.id, n]));

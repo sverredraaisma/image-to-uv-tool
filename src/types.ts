@@ -126,6 +126,8 @@ export interface GraphNode {
   type: string;
   position: { x: number; y: number };
   config: NodeConfig;
+  /** Muted: pass a compatible input straight through instead of computing. */
+  bypassed?: boolean;
 }
 
 export interface GraphEdge {
