@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 import { useStore } from './store/store';
@@ -41,6 +41,14 @@ describe('App smoke test', () => {
     });
     render(<App />);
     expect(screen.getByText('Unknown node')).toBeInTheDocument();
+  });
+
+  it('Escape closes the preview modal', () => {
+    render(<App />);
+    act(() => useStore.getState().openPreview({ kind: 'text', text: 'hi' }, 'Preview'));
+    expect(screen.getByText('Download')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByText('Download')).not.toBeInTheDocument();
   });
 
   it('shows an empty-state hint until the first node is added', async () => {

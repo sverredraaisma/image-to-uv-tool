@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { handleShortcut, type ShortcutEvent } from './keyboard';
+import { escapeTarget, handleShortcut, type ShortcutEvent } from './keyboard';
 
 const ev = (over: Partial<ShortcutEvent>): ShortcutEvent => ({
   ctrlKey: false,
@@ -41,5 +41,14 @@ describe('handleShortcut', () => {
     expect(handleShortcut(ev({ ctrlKey: true, target: { tagName: 'TEXTAREA' } }), a)).toBe(false);
     expect(a.undo).not.toHaveBeenCalled();
     expect(a.duplicateSelected).not.toHaveBeenCalled();
+  });
+});
+
+describe('escapeTarget', () => {
+  it('prioritises preview > editor > pending, else null', () => {
+    expect(escapeTarget({ hasPreview: true, hasEditor: true, hasPending: true })).toBe('preview');
+    expect(escapeTarget({ hasPreview: false, hasEditor: true, hasPending: true })).toBe('editor');
+    expect(escapeTarget({ hasPreview: false, hasEditor: false, hasPending: true })).toBe('pending');
+    expect(escapeTarget({ hasPreview: false, hasEditor: false, hasPending: false })).toBe(null);
   });
 });
