@@ -30,7 +30,12 @@ export function SettingsModal() {
           {isAreaPicker ? (
             <AreaPickerEditor nodeId={editorNodeId} />
           ) : (
-            <ConfigFields nodeId={editorNodeId} fields={def.configFields ?? []} config={node.config} />
+            <ConfigFields
+              nodeId={editorNodeId}
+              fields={def.configFields ?? []}
+              config={node.config}
+              collapseAdvanced
+            />
           )}
         </div>
       </div>

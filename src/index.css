@@ -119,6 +119,13 @@ textarea { resize: vertical; }
 .config-field input[type=number] { width: 74px; }
 .config-field textarea { width: 100%; }
 .config-field:has(textarea) { flex-direction: column; align-items: stretch; }
+.config-advanced { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 6px; }
+.config-advanced > summary {
+  cursor: pointer; font-size: 11px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: .5px; padding: 2px 0; user-select: none;
+}
+.config-advanced > summary:hover { color: var(--text); }
+.config-advanced[open] { display: flex; flex-direction: column; gap: 6px; }
 
 .image-upload { display: flex; }
 .upload-btn {
