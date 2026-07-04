@@ -206,6 +206,24 @@ export function stlToAscii(stl: StlValue, name = 'heightmap', maxTriangles = Inf
   return lines.join('\n');
 }
 
+/** Wavefront OBJ text (a widely-imported alternative to STL). */
+export function stlToObj(stl: StlValue, name = 'heightmap'): string {
+  const t = stl.triangles;
+  const n = stl.triangleCount;
+  const lines: string[] = [`# ${name} — exported by image-to-uv-tool`, `o ${name}`];
+  for (let i = 0; i < n; i++) {
+    const b = i * 9;
+    lines.push(`v ${t[b]} ${t[b + 1]} ${t[b + 2]}`);
+    lines.push(`v ${t[b + 3]} ${t[b + 4]} ${t[b + 5]}`);
+    lines.push(`v ${t[b + 6]} ${t[b + 7]} ${t[b + 8]}`);
+  }
+  for (let i = 0; i < n; i++) {
+    const a = i * 3 + 1; // OBJ indices are 1-based
+    lines.push(`f ${a} ${a + 1} ${a + 2}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
 /** Binary STL bytes (80-byte header + uint32 count + 50 bytes/triangle). */
 export function stlToBinary(stl: StlValue): Uint8Array<ArrayBuffer> {
   const n = stl.triangleCount;

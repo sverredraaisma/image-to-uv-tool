@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store/store';
 import { browserPlatform } from '../lib/canvas';
 import { downloadBlob, downloadText, previewFileName } from '../lib/download';
-import { stlToAscii, stlToBinary } from '../lib/stl';
+import { stlToAscii, stlToBinary, stlToObj } from '../lib/stl';
 import { Modal } from './Modal';
 
 export function PreviewModal() {
@@ -55,6 +55,15 @@ export function PreviewModal() {
     }
   };
 
+  const downloadObj = () => {
+    if (value.kind !== 'stl') return;
+    try {
+      downloadText(stlToObj(value), previewFileName(title, 'obj'));
+    } catch (e) {
+      addToast('error', `Download failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+    }
+  };
+
   return (
     <Modal
       title={title}
@@ -62,9 +71,16 @@ export function PreviewModal() {
       className="preview-modal"
       bodyClassName="preview-body"
       headerActions={
-        <button type="button" className="btn btn-primary" onClick={download}>
-          Download
-        </button>
+        <>
+          {value.kind === 'stl' && (
+            <button type="button" className="btn" onClick={downloadObj}>
+              OBJ
+            </button>
+          )}
+          <button type="button" className="btn btn-primary" onClick={download}>
+            {value.kind === 'stl' ? 'STL' : 'Download'}
+          </button>
+        </>
       }
     >
       {value.kind === 'image' && imageUrl && (

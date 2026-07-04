@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createImage } from './image';
-import { heightmapToMesh, heightmapToStl, stlToAscii, stlToBinary } from './stl';
+import { heightmapToMesh, heightmapToStl, stlToAscii, stlToBinary, stlToObj } from './stl';
 
 describe('heightmapToStl', () => {
   it('produces a watertight box for a single included pixel', () => {
@@ -37,6 +37,25 @@ describe('heightmapToStl', () => {
     expect(text.match(/facet normal/g)?.length ?? 0).toBe(3); // capped
     expect(text).toMatch(/# … \d+ more facets/); // truncation marker
     expect(text.trimEnd().endsWith('endsolid heightmap')).toBe(true);
+  });
+
+  it('serialises Wavefront OBJ with one vertex per corner and valid 1-based faces', () => {
+    const img = createImage(1, 1, [255, 255, 255, 255]);
+    const stl = heightmapToStl(img, { minWhite: -1, baseThickness: 0, depthRange: 10, width: 2 });
+    const obj = stlToObj(stl);
+    const verts = obj.match(/^v /gm)?.length ?? 0;
+    const faces = obj.match(/^f /gm)?.length ?? 0;
+    expect(verts).toBe(stl.triangleCount * 3);
+    expect(faces).toBe(stl.triangleCount);
+    expect(obj).not.toMatch(/NaN/);
+    // Every face index is within [1, vertexCount].
+    for (const m of obj.matchAll(/^f (\d+) (\d+) (\d+)$/gm)) {
+      for (let i = 1; i <= 3; i++) {
+        const idx = Number(m[i]);
+        expect(idx).toBeGreaterThanOrEqual(1);
+        expect(idx).toBeLessThanOrEqual(verts);
+      }
+    }
   });
 
   it('serialises binary STL with the correct size and triangle count', () => {
