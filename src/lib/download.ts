@@ -18,3 +18,14 @@ export function graphFileName(date: Date): string {
   const stamp = date.toISOString().slice(0, 16).replace(/[:T]/g, '-');
   return `node-graph-${stamp}.json`;
 }
+
+/** Slugify a preview title into a download filename, e.g. `grey-depth.png`. */
+export function previewFileName(title: string, ext: string): string {
+  const base =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'output';
+  return `${base}.${ext}`;
+}
