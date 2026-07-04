@@ -11,6 +11,7 @@ import type { ComputeResult, ConfigField, NodeDefinition, PortSpec } from '../ty
 import { platform } from '../lib/platform';
 import { downscaleToMax } from '../lib/image';
 import { runModel } from '../lib/replicate';
+import { aiCache, aiCacheKey, isCacheable } from '../lib/aiCache';
 import { str } from './helpers';
 
 /**
@@ -129,6 +130,21 @@ export function makeReplicateNode(spec: AiSpec): NodeDefinition {
         platform.encodePng(downscaleToMax(img, MAX_AI_IMAGE_DIM));
       const input = buildReplicateInput(spec.ports, scalars, config, inp, encodeForModel);
 
+      // Free re-run / reload survival for deterministic (seeded) runs: return a
+      // cached result for an identical (model, input) instead of re-billing.
+      const cacheKey = isCacheable(input) ? aiCacheKey(model, input) : null;
+      if (cacheKey) {
+        const cached = await aiCache.get(cacheKey).catch(() => null);
+        if (cached) {
+          onProgress?.('Using cached result…');
+          try {
+            return await deserializeResult(cached);
+          } catch {
+            /* corrupt cache entry — fall through to a fresh run */
+          }
+        }
+      }
+
       const modelOutput = await runModel(model, input, { apiKey, proxyUrl, signal, onProgress });
 
       // Resolve each output port to a URL/text, then download image URLs in
@@ -166,9 +182,39 @@ export function makeReplicateNode(spec: AiSpec): NodeDefinition {
       if (Object.values(result).every((v) => v == null)) {
         throw firstError ?? new Error('Model returned no usable output');
       }
+
+      // Persist the (paid) result so an identical deterministic re-run is free.
+      if (cacheKey) void aiCache.put(cacheKey, serializeResult(result)).catch(() => {});
+
       return result;
     },
   };
+}
+
+// ---- AI result cache (de)serialisation ----
+
+type CachedPort = { image: string } | { text: string } | null;
+
+function serializeResult(result: ComputeResult): string {
+  const out: Record<string, CachedPort> = {};
+  for (const [id, v] of Object.entries(result)) {
+    if (!v) out[id] = null;
+    else if (v.kind === 'text') out[id] = { text: v.text };
+    else if (v.kind === 'image') out[id] = { image: platform.encodePng(v) };
+    else out[id] = null; // stl / other kinds aren't cached
+  }
+  return JSON.stringify(out);
+}
+
+async function deserializeResult(json: string): Promise<ComputeResult> {
+  const parsed = JSON.parse(json) as Record<string, CachedPort>;
+  const result: ComputeResult = {};
+  for (const [id, v] of Object.entries(parsed)) {
+    if (!v) result[id] = undefined;
+    else if ('text' in v) result[id] = { kind: 'text', text: v.text };
+    else result[id] = await platform.decodeImage(v.image);
+  }
+  return result;
 }
 
 /** An image input port (default key "image", required). */
