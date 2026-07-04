@@ -142,6 +142,44 @@ describe('mesh orientation (H2 regression)', () => {
     }
   });
 
+  it('produces sloped surfaces, not stairs (intermediate averaged corner heights)', () => {
+    // One white pixel among black ones. The old voxel mesher only ever produced
+    // vertices at the discrete pixel heights (0 or 10) joined by vertical walls;
+    // the grid mesher averages corners, so shared corners sit at in-between
+    // heights → the top surface tilts (gentle slopes) instead of stepping.
+    const img = createImage(2, 2, [0, 0, 0, 255]);
+    img.data.set([255, 255, 255, 255], 0); // pixel (0,0) = white
+    const mesh = heightmapToMesh(img, { minWhite: -1, baseThickness: 0, depthRange: 10, width: 2 });
+    const zs = new Set<number>();
+    for (const t of mesh.tris) {
+      zs.add(t[2]);
+      zs.add(t[5]);
+      zs.add(t[8]);
+    }
+    expect([...zs].filter((z) => z > 0.01 && z < 9.99).length).toBeGreaterThan(0); // slope
+    expect(zs.has(2.5)).toBe(true); // corner of 1 white + 3 black pixels → 0.25·10
+  });
+
+  it('a masked heightmap with an interior hole stays watertight', () => {
+    // 3×3 with the centre pixel excluded → a hole the skirt must seal.
+    const img = createImage(3, 3, [255, 255, 255, 255]);
+    img.data.set([0, 0, 0, 255], (1 * 3 + 1) * 4); // centre black
+    const mesh = heightmapToMesh(img, { minWhite: 128, baseThickness: 1, depthRange: 8, width: 6 });
+    const key = (p: Vec3) => `${p[0]},${p[1]},${p[2]}`;
+    const balance = new Map<string, number>();
+    for (const { a, b, c } of meshTris(mesh)) {
+      for (const [u, v] of [
+        [a, b],
+        [b, c],
+        [c, a],
+      ] as [Vec3, Vec3][]) {
+        balance.set(`${key(u)}->${key(v)}`, (balance.get(`${key(u)}->${key(v)}`) ?? 0) + 1);
+        balance.set(`${key(v)}->${key(u)}`, (balance.get(`${key(v)}->${key(u)}`) ?? 0) - 1);
+      }
+    }
+    for (const [, bal] of balance) expect(bal).toBe(0);
+  });
+
   it('produces a watertight mesh (every directed edge has an opposite twin)', () => {
     // In a closed, consistently-wound triangle mesh each directed edge (u->v)
     // is matched by exactly one opposite (v->u). A flipped facet breaks this.

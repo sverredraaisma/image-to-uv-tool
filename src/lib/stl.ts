@@ -1,9 +1,10 @@
 // Height-map -> solid STL mesh. Pure and testable.
 //
-// Each included pixel becomes a flat-topped column: a top quad at its computed
-// height, a bottom quad at z=0, and vertical walls only where a face is exposed
-// (a taller-than-neighbour step, or a boundary with an excluded pixel / the
-// image edge). This yields a watertight solid.
+// The surface is a triangulated grid ("terrain"): each included pixel is a cell
+// whose four corner heights are the average of the included pixels meeting at
+// that corner, so the top tilts smoothly between pixels (gentle slopes) rather
+// than stepping with vertical walls. A flat base at z=0 plus a skirt along the
+// footprint boundary (outer edge + mask holes) closes it into a watertight solid.
 
 import type { RasterImage, StlValue } from '../types';
 import { luminance } from './image';
@@ -86,47 +87,79 @@ function emitQuad(
 }
 
 /**
- * Walk the heightmap geometry, calling `emit` for each triangle. Allocation-free
- * (no per-triangle JS arrays), so it can be run twice — count, then fill a
- * Float32Array directly — for large meshes without millions of throwaway arrays.
+ * Walk the heightmap as a triangulated grid (a "terrain" surface), calling
+ * `emit` for each triangle. Each included pixel is one cell whose four *corner*
+ * heights are the average of the included pixels meeting at that corner — so the
+ * surface tilts smoothly between pixels (gentle slopes) instead of stepping with
+ * vertical walls (the old voxel "staircase"). Top + bottom + a skirt only along
+ * the footprint boundary make it a watertight solid.
+ *
+ * Allocation-free (no per-triangle JS arrays), so it can be run twice — count,
+ * then fill a Float32Array directly — for large meshes without garbage.
  */
 function buildMesh(img: RasterImage, opts: HeightmapOptions, emit: EmitTri): void {
   const { width: w, height: h, data } = img;
   const ps = opts.width / w; // physical size of a pixel
 
-  const value = (x: number, y: number): number => {
+  const lum01 = (x: number, y: number): number => {
     const i = (y * w + x) * 4;
-    return luminance(data[i], data[i + 1], data[i + 2]);
+    return luminance(data[i], data[i + 1], data[i + 2]) / 255;
   };
   const included = (x: number, y: number): boolean => {
     if (x < 0 || y < 0 || x >= w || y >= h) return false;
     if (opts.minWhite < 0) return true;
-    return value(x, y) >= opts.minWhite;
+    return lum01(x, y) * 255 >= opts.minWhite;
   };
-  const heightAt = (x: number, y: number): number =>
-    opts.baseThickness + (value(x, y) / 255) * opts.depthRange;
 
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (!included(x, y)) continue;
-      const z = heightAt(x, y);
-      // Flip Y so the image appears upright (image row 0 -> max Y).
-      const x0 = x * ps;
-      const x1 = (x + 1) * ps;
-      const y0 = (h - y) * ps;
-      const y1 = (h - y - 1) * ps;
+  // Height at a pixel *corner* = average of the included pixels touching it.
+  // Averaging neighbours turns inter-pixel steps into slopes and mildly smooths.
+  const cornerZ = (ci: number, cj: number): number => {
+    let sum = 0;
+    let n = 0;
+    for (const [px, py] of [
+      [ci - 1, cj - 1],
+      [ci, cj - 1],
+      [ci - 1, cj],
+      [ci, cj],
+    ]) {
+      if (included(px, py)) {
+        sum += lum01(px, py);
+        n++;
+      }
+    }
+    return opts.baseThickness + (n ? sum / n : 0) * opts.depthRange;
+  };
 
-      // Top (normal +Z): CCW when viewed from above.
-      emitQuad(emit, x0, y1, z, x1, y1, z, x1, y0, z, x0, y0, z);
-      // Bottom (normal -Z): reverse winding.
-      emitQuad(emit, x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0);
+  // Vertical wall from a top edge p->q down to z=0, wound outward.
+  const skirt = (px: number, py: number, pz: number, qx: number, qy: number, qz: number) => {
+    emit(px, py, pz, px, py, 0, qx, qy, 0);
+    emit(px, py, pz, qx, qy, 0, qx, qy, qz);
+  };
 
-      // Walls. For an included neighbour we only emit the exposed step from the
-      // taller side; for an excluded neighbour we emit a full wall down to 0.
-      wall(emit, x0, y0, x0, y1, z, included(x - 1, y) ? heightAt(x - 1, y) : 0, included(x - 1, y), false);
-      wall(emit, x1, y1, x1, y0, z, included(x + 1, y) ? heightAt(x + 1, y) : 0, included(x + 1, y), false);
-      wall(emit, x0, y0, x1, y0, z, included(x, y - 1) ? heightAt(x, y - 1) : 0, included(x, y - 1), true);
-      wall(emit, x1, y1, x0, y1, z, included(x, y + 1) ? heightAt(x, y + 1) : 0, included(x, y + 1), true);
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      if (!included(i, j)) continue; // one cell per included pixel
+      const x0 = i * ps;
+      const x1 = (i + 1) * ps;
+      // Flip Y so image row 0 -> max Y (upright print).
+      const yT = (h - j) * ps;
+      const yB = (h - j - 1) * ps;
+      const zA = cornerZ(i, j); // A = top-left     (x0, yT)
+      const zB = cornerZ(i + 1, j); // B = top-right    (x1, yT)
+      const zC = cornerZ(i + 1, j + 1); // C = bottom-right (x1, yB)
+      const zD = cornerZ(i, j + 1); // D = bottom-left  (x0, yB)
+
+      // Top surface (+Z): sloped quad through the four corner heights (split A-C).
+      emitQuad(emit, x0, yT, zA, x0, yB, zD, x1, yB, zC, x1, yT, zB);
+      // Bottom at z=0 (-Z): reversed winding so it lines up with the skirts.
+      emitQuad(emit, x0, yT, 0, x1, yT, 0, x1, yB, 0, x0, yB, 0);
+
+      // Skirt any edge whose neighbouring pixel isn't part of the solid — this
+      // seals the outer boundary and every mask hole. Walked CCW seen from above.
+      if (!included(i - 1, j)) skirt(x0, yT, zA, x0, yB, zD); // W (A->D)
+      if (!included(i, j + 1)) skirt(x0, yB, zD, x1, yB, zC); // S (D->C)
+      if (!included(i + 1, j)) skirt(x1, yB, zC, x1, yT, zB); // E (C->B)
+      if (!included(i, j - 1)) skirt(x1, yT, zB, x0, yT, zA); // N (B->A)
     }
   }
 }
@@ -138,39 +171,6 @@ export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh 
     tris.push([ax, ay, az, bx, by, bz, cx, cy, cz]),
   );
   return { tris };
-}
-
-/**
- * Emit a vertical wall along edge p1->p2 for the exposed portion of this
- * pixel's column (top height `z`). If the neighbour is included we only emit
- * the step above the neighbour's height (and only when we are taller, so the
- * shared face isn't drawn twice). If excluded, emit the full 0..z wall.
- */
-function wall(
-  emit: EmitTri,
-  p1x: number,
-  p1y: number,
-  p2x: number,
-  p2y: number,
-  z: number,
-  neighbourHeight: number,
-  neighbourIncluded: boolean,
-  flip: boolean,
-) {
-  let zLow: number;
-  if (neighbourIncluded) {
-    if (z <= neighbourHeight) return; // neighbour draws (or flush) — skip
-    zLow = neighbourHeight;
-  } else {
-    zLow = 0;
-  }
-  if (z <= zLow) return;
-  // Quad corners: a(p1,zLow) b(p2,zLow) c(p2,z) d(p1,z).
-  // The two Y-side walls are traversed p1->p2 in the opposite screen sense to
-  // the X-side walls, so a,b,c,d there yields an inward normal — reverse the
-  // winding (a,d,c,b) for those so every wall points outward.
-  if (flip) emitQuad(emit, p1x, p1y, zLow, p1x, p1y, z, p2x, p2y, z, p2x, p2y, zLow);
-  else emitQuad(emit, p1x, p1y, zLow, p2x, p2y, zLow, p2x, p2y, z, p1x, p1y, z);
 }
 
 /** ASCII STL text (mainly for previews / debugging). */
