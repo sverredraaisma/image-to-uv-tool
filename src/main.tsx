@@ -23,9 +23,10 @@ createRoot(document.getElementById('root')!).render(
 );
 
 // Register the offline service worker in production (needs https/localhost).
+// BASE_URL keeps the path correct under a subpath deploy (GitHub Pages project).
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {
       /* offline support is best-effort */
     });
   });
