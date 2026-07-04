@@ -4,9 +4,11 @@ import type { ConfigField, NodeConfig, NodeDefinition, RasterImage } from '../ty
 import { platform } from '../lib/platform';
 import {
   alphaCleanup,
+  applyCurve,
   applyMask,
   brightnessContrast,
   channelPack,
+  curveLut,
   colorKeyMask,
   combine,
   createImage,
@@ -38,6 +40,8 @@ import {
   type AlphaCleanupMode,
   type Channel,
   type CombineMode,
+  type CurveChannel,
+  type CurvePoint,
   type MaskOp,
   type TransformOp,
 } from '../lib/image';
@@ -64,6 +68,7 @@ function singleImageOp(opts: {
   defaultConfig?: () => NodeConfig;
   op?: (img: RasterImage, config: NodeConfig) => RasterImage;
   opName?: string;
+  customEditor?: string;
 }): NodeDefinition {
   const op = opts.op ?? ((img: RasterImage, config: NodeConfig) => runHeavyOp(opts.opName!, img, config));
   return {
@@ -75,6 +80,7 @@ function singleImageOp(opts: {
     inputs: [{ id: 'in', label: 'Image', type: 'image' }],
     outputs: [{ id: 'out', label: 'Image', type: 'image' }],
     configFields: opts.configFields,
+    customEditor: opts.customEditor,
     defaultConfig: opts.defaultConfig ?? (() => ({})),
     compute: async ({ inputs, config }) => {
       const img = asImage(inputs.in);
@@ -364,6 +370,38 @@ export const histogramNode = singleImageOp({
   category: 'Adjust',
   description: 'RGB value-distribution scope — inspect the tonal range.',
   op: (img) => histogram(img),
+});
+
+export const curvesNode = singleImageOp({
+  type: 'curves',
+  label: 'Curves',
+  category: 'Adjust',
+  description: 'Remap tones with an editable curve (open the editor to drag points).',
+  configFields: [
+    {
+      kind: 'select',
+      key: 'channel',
+      label: 'Channel',
+      options: [
+        { value: 'rgb', label: 'RGB' },
+        { value: 'r', label: 'Red' },
+        { value: 'g', label: 'Green' },
+        { value: 'b', label: 'Blue' },
+      ],
+    },
+  ],
+  customEditor: 'curves',
+  defaultConfig: () => ({
+    channel: 'rgb' satisfies CurveChannel,
+    points: [
+      { x: 0, y: 0 },
+      { x: 255, y: 255 },
+    ] satisfies CurvePoint[],
+  }),
+  op: (img, config) => {
+    const points = Array.isArray(config.points) ? (config.points as CurvePoint[]) : [];
+    return applyCurve(img, curveLut(points), str(config.channel, 'rgb') as CurveChannel);
+  },
 });
 
 export const opacityNode = singleImageOp({
@@ -892,6 +930,7 @@ export const localNodes: NodeDefinition[] = [
   sharpenNode,
   normalizeNode,
   histogramNode,
+  curvesNode,
   opacityNode,
   tintNode,
   levelsNode,

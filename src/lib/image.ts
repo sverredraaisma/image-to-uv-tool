@@ -1194,3 +1194,58 @@ export function splitCompare(a: RasterImage, b: RasterImage, split: number, vert
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Tone curves (editable LUT).
+// ---------------------------------------------------------------------------
+
+export type CurveChannel = 'rgb' | 'r' | 'g' | 'b';
+export interface CurvePoint {
+  x: number;
+  y: number;
+}
+
+/** Build a 256-entry LUT from control points (input x → output y, 0..255),
+ *  linearly interpolated between sorted points. Empty points → identity. */
+export function curveLut(points: CurvePoint[]): Uint8Array {
+  const lut = new Uint8Array(256);
+  const pts = points
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p) => ({ x: Math.max(0, Math.min(255, p.x)), y: Math.max(0, Math.min(255, p.y)) }))
+    .sort((a, b) => a.x - b.x);
+  if (pts.length === 0) {
+    for (let i = 0; i < 256; i++) lut[i] = i;
+    return lut;
+  }
+  for (let i = 0; i < 256; i++) {
+    if (i <= pts[0].x) {
+      lut[i] = pts[0].y;
+      continue;
+    }
+    if (i >= pts[pts.length - 1].x) {
+      lut[i] = pts[pts.length - 1].y;
+      continue;
+    }
+    let j = 0;
+    while (j < pts.length - 1 && pts[j + 1].x <= i) j++;
+    const a = pts[j];
+    const b = pts[j + 1];
+    const t = b.x === a.x ? 0 : (i - a.x) / (b.x - a.x);
+    lut[i] = Math.round(a.y + (b.y - a.y) * t);
+  }
+  return lut;
+}
+
+/** Apply a LUT to the selected channel(s). */
+export function applyCurve(img: RasterImage, lut: Uint8Array, channel: CurveChannel): RasterImage {
+  const out = cloneImage(img);
+  const r = channel === 'rgb' || channel === 'r';
+  const g = channel === 'rgb' || channel === 'g';
+  const b = channel === 'rgb' || channel === 'b';
+  for (let i = 0; i < out.data.length; i += 4) {
+    if (r) out.data[i] = lut[img.data[i]];
+    if (g) out.data[i + 1] = lut[img.data[i + 1]];
+    if (b) out.data[i + 2] = lut[img.data[i + 2]];
+  }
+  return out;
+}

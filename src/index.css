@@ -969,3 +969,57 @@ textarea {
   align-items: center;
   flex-wrap: wrap;
 }
+
+/* ---------------- Curves editor ---------------- */
+.curves-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.curves-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.curves-stage {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.curves-svg {
+  width: 260px;
+  height: 260px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  touch-action: none;
+}
+.curves-grid {
+  stroke: var(--border);
+  stroke-width: 0.5;
+}
+.curves-diagonal {
+  stroke: var(--border-2);
+  stroke-width: 0.5;
+  stroke-dasharray: 3 3;
+}
+.curves-line {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.curves-point {
+  fill: #fff;
+  stroke: var(--accent);
+  stroke-width: 2;
+  cursor: grab;
+}
+.curves-point:hover {
+  fill: var(--accent);
+}
+.curves-preview {
+  max-width: 240px;
+  max-height: 260px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}

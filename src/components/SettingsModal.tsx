@@ -2,6 +2,7 @@ import { useStore } from '../store/store';
 import { getNodeDefSafe } from '../engine/registry';
 import { ConfigFields } from './ConfigFields';
 import { AreaPickerEditor } from './AreaPickerEditor';
+import { CurvesEditor } from './CurvesEditor';
 import { ModelSchemaHint } from './ModelSchemaHint';
 import { Modal } from './Modal';
 
@@ -34,6 +35,7 @@ export function SettingsModal() {
             config={node.config}
             collapseAdvanced
           />
+          {def.customEditor === 'curves' && <CurvesEditor nodeId={editorNodeId} />}
           {isAi && <ModelSchemaHint nodeId={editorNodeId} model={String(node.config.model ?? '')} />}
         </>
       )}
