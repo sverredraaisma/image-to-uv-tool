@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createImageWorkerPool } from './imageWorkerPool';
 import { runHeavyOp } from './heavyOps';
 import { createImage } from './image';
+import { heightmapToStl } from './stl';
 import type { NodeConfig, RasterImage } from '../types';
 
 // Reproduce exactly what imageOp.worker.ts does across the postMessage boundary:
@@ -48,8 +49,17 @@ describe('image worker offload', () => {
   });
 
   it('the pool falls back to a correct synchronous result when workers are unavailable', async () => {
-    const run = createImageWorkerPool(); // jsdom has no Worker → sync fallback
-    const out = await run('blur', img, { radius: 2 });
+    const pool = createImageWorkerPool(); // jsdom has no Worker → sync fallback
+    const out = await pool.runImageOp('blur', img, { radius: 2 });
     expect([...out.data]).toEqual([...runHeavyOp('blur', img, { radius: 2 }).data]);
+  });
+
+  it('generateStl falls back to a correct synchronous STL', async () => {
+    const pool = createImageWorkerPool();
+    const opts = { minWhite: -1, baseThickness: 1, depthRange: 8, width: 6 };
+    const stl = await pool.generateStl(img, opts);
+    const sync = heightmapToStl(img, opts);
+    expect(stl.triangleCount).toBe(sync.triangleCount);
+    expect([...stl.triangles]).toEqual([...sync.triangles]);
   });
 });

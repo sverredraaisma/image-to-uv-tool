@@ -67,10 +67,30 @@ describe('heightmapToStl', () => {
     expect(count).toBe(stl.triangleCount);
   });
 
-  it('rejects an over-large heightmap instead of freezing', () => {
-    const img = createImage(400, 400, [255, 255, 255, 255]); // 160k > 90k limit
+  it('handles a high-resolution heightmap (previously over the cap)', () => {
+    const img = createImage(400, 400, [255, 255, 255, 255]); // 160k px — was rejected before
+    const stl = heightmapToStl(img, { minWhite: -1, baseThickness: 0, depthRange: 10, width: 100 });
+    expect(stl.triangleCount).toBeGreaterThan(0);
+    expect(stl.triangles.length).toBe(stl.triangleCount * 9);
+    expect([...stl.triangles.slice(0, 90)].some(Number.isNaN)).toBe(false);
+  });
+
+  it('the two-pass build matches the (array-based) mesh builder exactly', () => {
+    const img = createImage(3, 3, [10, 10, 10, 255]);
+    img.data.set([255, 255, 255, 255], (1 * 3 + 1) * 4); // vary a height → step walls
+    const opts = { minWhite: -1, baseThickness: 1, depthRange: 8, width: 6 };
+    const stl = heightmapToStl(img, opts);
+    const mesh = heightmapToMesh(img, opts);
+    expect(stl.triangleCount).toBe(mesh.tris.length);
+    for (let i = 0; i < mesh.tris.length; i++) {
+      for (let j = 0; j < 9; j++) expect(stl.triangles[i * 9 + j]).toBeCloseTo(mesh.tris[i][j], 5);
+    }
+  });
+
+  it('rejects a heightmap above the pixel ceiling', () => {
+    const img = createImage(1001, 1001, [255, 255, 255, 255]); // 1.002M > 1M limit
     expect(() => heightmapToStl(img, { minWhite: -1, baseThickness: 0, depthRange: 10, width: 100 })).toThrow(
-      /too detailed/i,
+      /too large/i,
     );
   });
 

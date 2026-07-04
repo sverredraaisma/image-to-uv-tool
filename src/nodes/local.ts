@@ -827,8 +827,10 @@ export const heightmapStlNode: NodeDefinition = {
   type: 'heightmapStl',
   label: 'Heightmap → STL',
   category: 'Export',
-  description: 'Turn a heightmap into an STL solid (white = tall). Resize large images first.',
-  autoRun: true,
+  description:
+    'Turn a heightmap into an STL solid (white = tall). Manual: click Run — generation runs in a worker so a high-res heightmap won’t freeze the UI.',
+  // Manual: STL meshing is heavy, so only run on explicit Run (not on every edit).
+  autoRun: false,
   inputs: [{ id: 'in', label: 'Heightmap', type: 'image' }],
   outputs: [{ id: 'out', label: 'STL', type: 'stl' }],
   configFields: [
@@ -838,17 +840,19 @@ export const heightmapStlNode: NodeDefinition = {
     { kind: 'number', key: 'width', label: 'Width (units)', min: 0.0001, step: 1 },
   ],
   defaultConfig: () => ({ minWhite: 1, baseThickness: 0, depthRange: 10, width: 100 }),
-  compute: ({ inputs, config }) => {
+  compute: async ({ inputs, config, onProgress }) => {
     const img = asImage(inputs.in);
     if (!img) return { out: undefined };
-    return {
-      out: heightmapToStl(img, {
-        minWhite: num(config.minWhite, 1),
-        baseThickness: num(config.baseThickness, 0),
-        depthRange: num(config.depthRange, 10),
-        width: num(config.width, 100),
-      }),
+    const opts = {
+      minWhite: num(config.minWhite, 1),
+      baseThickness: num(config.baseThickness, 0),
+      depthRange: num(config.depthRange, 10),
+      width: num(config.width, 100),
     };
+    onProgress?.('Generating STL…');
+    // Off the main thread when a worker is available; identical sync fallback.
+    const out = platform.generateStl ? await platform.generateStl(img, opts) : heightmapToStl(img, opts);
+    return { out };
   },
 };
 

@@ -68,7 +68,8 @@ describe('real node pipeline (with fake platform)', () => {
     const stl = s.addNode('heightmapStl');
     s.updateNodeConfig(stl, { minWhite: -1, baseThickness: 0, depthRange: 5, width: 2 });
     s.addConnection({ source: input, sourceHandle: 'out', target: stl, targetHandle: 'in' });
-    await useStore.getState().processAutoRun();
+    // heightmapStl is a manual node — resolve its ancestor and run it explicitly.
+    await useStore.getState().runNode(stl);
 
     const out = useStore.getState().runtime[stl].outputs.out;
     expect(out?.kind).toBe('stl');

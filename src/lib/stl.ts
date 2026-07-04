@@ -52,20 +52,47 @@ interface Mesh {
   tris: Tri[];
 }
 
-function addTri(mesh: Mesh, a: number[], b: number[], c: number[]) {
-  mesh.tris.push([a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]]);
+/** Called for each triangle with its 9 vertex coordinates. Allocation-free. */
+type EmitTri = (
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+  cx: number,
+  cy: number,
+  cz: number,
+) => void;
+
+/** Emit a quad (a,b,c,d) as two triangles. */
+function emitQuad(
+  emit: EmitTri,
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+  cx: number,
+  cy: number,
+  cz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+) {
+  emit(ax, ay, az, bx, by, bz, cx, cy, cz);
+  emit(ax, ay, az, cx, cy, cz, dx, dy, dz);
 }
 
-/** Add a quad (a,b,c,d) as two triangles. */
-function addQuad(mesh: Mesh, a: number[], b: number[], c: number[], d: number[]) {
-  addTri(mesh, a, b, c);
-  addTri(mesh, a, c, d);
-}
-
-export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh {
+/**
+ * Walk the heightmap geometry, calling `emit` for each triangle. Allocation-free
+ * (no per-triangle JS arrays), so it can be run twice — count, then fill a
+ * Float32Array directly — for large meshes without millions of throwaway arrays.
+ */
+function buildMesh(img: RasterImage, opts: HeightmapOptions, emit: EmitTri): void {
   const { width: w, height: h, data } = img;
   const ps = opts.width / w; // physical size of a pixel
-  const mesh: Mesh = { tris: [] };
 
   const value = (x: number, y: number): number => {
     const i = (y * w + x) * 4;
@@ -84,59 +111,33 @@ export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh 
       if (!included(x, y)) continue;
       const z = heightAt(x, y);
       // Flip Y so the image appears upright (image row 0 -> max Y).
-      const x0 = x * ps,
-        x1 = (x + 1) * ps;
-      const y0 = (h - y) * ps,
-        y1 = (h - y - 1) * ps;
+      const x0 = x * ps;
+      const x1 = (x + 1) * ps;
+      const y0 = (h - y) * ps;
+      const y1 = (h - y - 1) * ps;
 
       // Top (normal +Z): CCW when viewed from above.
-      addQuad(mesh, [x0, y1, z], [x1, y1, z], [x1, y0, z], [x0, y0, z]);
+      emitQuad(emit, x0, y1, z, x1, y1, z, x1, y0, z, x0, y0, z);
       // Bottom (normal -Z): reverse winding.
-      addQuad(mesh, [x0, y0, 0], [x1, y0, 0], [x1, y1, 0], [x0, y1, 0]);
+      emitQuad(emit, x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0);
 
       // Walls. For an included neighbour we only emit the exposed step from the
       // taller side; for an excluded neighbour we emit a full wall down to 0.
-      // Left edge (x0)
-      wall(
-        mesh,
-        [x0, y0, 0],
-        [x0, y1, 0],
-        z,
-        included(x - 1, y) ? heightAt(x - 1, y) : 0,
-        included(x - 1, y),
-      );
-      // Right edge (x1)
-      wall(
-        mesh,
-        [x1, y1, 0],
-        [x1, y0, 0],
-        z,
-        included(x + 1, y) ? heightAt(x + 1, y) : 0,
-        included(x + 1, y),
-      );
-      // Top edge in image space (y0 side, towards y-1)
-      wall(
-        mesh,
-        [x0, y0, 0],
-        [x1, y0, 0],
-        z,
-        included(x, y - 1) ? heightAt(x, y - 1) : 0,
-        included(x, y - 1),
-        true,
-      );
-      // Bottom edge in image space (y1 side, towards y+1)
-      wall(
-        mesh,
-        [x1, y1, 0],
-        [x0, y1, 0],
-        z,
-        included(x, y + 1) ? heightAt(x, y + 1) : 0,
-        included(x, y + 1),
-        true,
-      );
+      wall(emit, x0, y0, x0, y1, z, included(x - 1, y) ? heightAt(x - 1, y) : 0, included(x - 1, y), false);
+      wall(emit, x1, y1, x1, y0, z, included(x + 1, y) ? heightAt(x + 1, y) : 0, included(x + 1, y), false);
+      wall(emit, x0, y0, x1, y0, z, included(x, y - 1) ? heightAt(x, y - 1) : 0, included(x, y - 1), true);
+      wall(emit, x1, y1, x0, y1, z, included(x, y + 1) ? heightAt(x, y + 1) : 0, included(x, y + 1), true);
     }
   }
-  return mesh;
+}
+
+/** Collect the mesh triangles into arrays (used by tests / small previews). */
+export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh {
+  const tris: Tri[] = [];
+  buildMesh(img, opts, (ax, ay, az, bx, by, bz, cx, cy, cz) =>
+    tris.push([ax, ay, az, bx, by, bz, cx, cy, cz]),
+  );
+  return { tris };
 }
 
 /**
@@ -146,13 +147,15 @@ export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh 
  * shared face isn't drawn twice). If excluded, emit the full 0..z wall.
  */
 function wall(
-  mesh: Mesh,
-  p1: number[],
-  p2: number[],
+  emit: EmitTri,
+  p1x: number,
+  p1y: number,
+  p2x: number,
+  p2y: number,
   z: number,
   neighbourHeight: number,
   neighbourIncluded: boolean,
-  flip = false,
+  flip: boolean,
 ) {
   let zLow: number;
   if (neighbourIncluded) {
@@ -162,15 +165,12 @@ function wall(
     zLow = 0;
   }
   if (z <= zLow) return;
-  const a = [p1[0], p1[1], zLow];
-  const b = [p2[0], p2[1], zLow];
-  const c = [p2[0], p2[1], z];
-  const d = [p1[0], p1[1], z];
+  // Quad corners: a(p1,zLow) b(p2,zLow) c(p2,z) d(p1,z).
   // The two Y-side walls are traversed p1->p2 in the opposite screen sense to
-  // the X-side walls, so emitting a,b,c,d there yields an inward-facing normal.
-  // Reverse the winding for those faces so every wall points outward.
-  if (flip) addQuad(mesh, a, d, c, b);
-  else addQuad(mesh, a, b, c, d);
+  // the X-side walls, so a,b,c,d there yields an inward normal — reverse the
+  // winding (a,d,c,b) for those so every wall points outward.
+  if (flip) emitQuad(emit, p1x, p1y, zLow, p1x, p1y, z, p2x, p2y, z, p2x, p2y, zLow);
+  else emitQuad(emit, p1x, p1y, zLow, p2x, p2y, zLow, p2x, p2y, z, p1x, p1y, z);
 }
 
 /** ASCII STL text (mainly for previews / debugging). */
@@ -256,30 +256,47 @@ export function stlToBinary(stl: StlValue): Uint8Array<ArrayBuffer> {
   return new Uint8Array(buf);
 }
 
-/** Above this many included pixels the mesh/ASCII STL gets pathologically large. */
-export const MAX_STL_PIXELS = 90_000;
+/** Sanity ceiling on input dimensions (the STL node is manual, so this is high). */
+export const MAX_STL_PIXELS = 1_000_000; // ~1000×1000
+/** Ceiling on output triangles (each is 9 floats = 36 bytes in the buffer). */
+export const MAX_STL_TRIANGLES = 8_000_000;
 
-function includedCount(img: RasterImage, opts: HeightmapOptions): number {
-  if (opts.minWhite < 0) return img.width * img.height;
-  let n = 0;
-  for (let p = 0; p < img.width * img.height; p++) {
-    const i = p * 4;
-    if (luminance(img.data[i], img.data[i + 1], img.data[i + 2]) >= opts.minWhite) n++;
-  }
-  return n;
-}
-
+/**
+ * Build a solid STL from a heightmap. Two passes over the geometry — count the
+ * triangles, then fill an exactly-sized Float32Array directly — so it scales to
+ * high-resolution heightmaps without allocating millions of throwaway arrays.
+ */
 export function heightmapToStl(img: RasterImage, opts: HeightmapOptions): StlValue {
-  // Each included pixel becomes up to 12 triangles, so a large heightmap would
-  // freeze the tab / produce hundreds of MB of ASCII STL. Guard early.
-  const included = includedCount(img, opts);
-  if (included > MAX_STL_PIXELS) {
+  const pixels = img.width * img.height;
+  if (pixels > MAX_STL_PIXELS) {
     throw new Error(
-      `Heightmap too detailed (${included} included pixels) — resize it smaller (≈300×300) before generating an STL.`,
+      `Heightmap too large (${pixels.toLocaleString()} px) — resize it below ~1000×1000 before generating an STL.`,
     );
   }
-  const mesh = heightmapToMesh(img, opts);
-  const triangles = new Float32Array(mesh.tris.length * 9);
-  for (let i = 0; i < mesh.tris.length; i++) triangles.set(mesh.tris[i], i * 9);
-  return { kind: 'stl', triangleCount: mesh.tris.length, triangles };
+  // Pass 1: count triangles (no allocation; wall count varies with the terrain).
+  let count = 0;
+  buildMesh(img, opts, () => {
+    count++;
+  });
+  if (count > MAX_STL_TRIANGLES) {
+    throw new Error(
+      `Mesh too detailed (${count.toLocaleString()} triangles) — raise "Min white" to include fewer pixels, or resize the heightmap smaller.`,
+    );
+  }
+  // Pass 2: fill the buffer directly.
+  const triangles = new Float32Array(count * 9);
+  let o = 0;
+  buildMesh(img, opts, (ax, ay, az, bx, by, bz, cx, cy, cz) => {
+    triangles[o] = ax;
+    triangles[o + 1] = ay;
+    triangles[o + 2] = az;
+    triangles[o + 3] = bx;
+    triangles[o + 4] = by;
+    triangles[o + 5] = bz;
+    triangles[o + 6] = cx;
+    triangles[o + 7] = cy;
+    triangles[o + 8] = cz;
+    o += 9;
+  });
+  return { kind: 'stl', triangleCount: count, triangles };
 }

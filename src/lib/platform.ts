@@ -2,7 +2,8 @@
 // depending directly on the DOM. The browser entry point installs the real
 // canvas-based adapter (`lib/canvas.ts`); tests can install fakes.
 
-import type { NodeConfig, RasterImage } from '../types';
+import type { NodeConfig, RasterImage, StlValue } from '../types';
+import type { HeightmapOptions } from './stl';
 
 export interface Platform {
   /** Decode a data URL / object URL / http URL into a raster image. */
@@ -19,6 +20,8 @@ export interface Platform {
   getBlob(ref: string): Promise<string | null>;
   /** Optional: run a heavy image op off the main thread (Web Worker pool). */
   runImageOp?(name: string, img: RasterImage, config: NodeConfig): Promise<RasterImage>;
+  /** Optional: build a heightmap STL off the main thread (Web Worker pool). */
+  generateStl?(img: RasterImage, opts: HeightmapOptions): Promise<StlValue>;
 }
 
 const notReady = (): never => {

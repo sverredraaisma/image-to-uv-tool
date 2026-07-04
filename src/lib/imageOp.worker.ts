@@ -1,27 +1,50 @@
-// Web Worker: runs a named heavy image op off the main thread. Receives the
-// RGBA buffer (transferred), runs the pure op, transfers the result back.
+// Web Worker: runs a heavy image op OR builds a heightmap STL off the main
+// thread. Receives the RGBA buffer (transferred), runs the pure code, transfers
+// the result buffer back.
 
 import { runHeavyOp } from './heavyOps';
+import { heightmapToStl, type HeightmapOptions } from './stl';
 
-interface Req {
+interface OpReq {
   id: number;
+  type?: 'op';
   name: string;
   width: number;
   height: number;
   buffer: ArrayBuffer;
   config: Record<string, unknown>;
 }
+interface StlReq {
+  id: number;
+  type: 'stl';
+  width: number;
+  height: number;
+  buffer: ArrayBuffer;
+  opts: HeightmapOptions;
+}
 
-self.onmessage = (e: MessageEvent<Req>) => {
-  const { id, name, width, height, buffer, config } = e.data;
+const post = (msg: unknown, transfer?: Transferable[]) =>
+  (self as unknown as Worker).postMessage(msg, transfer ?? []);
+
+self.onmessage = (e: MessageEvent<OpReq | StlReq>) => {
+  const msg = e.data;
   try {
-    const img = { kind: 'image' as const, width, height, data: new Uint8ClampedArray(buffer) };
-    const out = runHeavyOp(name, img, config);
-    const outBuf = out.data.buffer as ArrayBuffer;
-    (self as unknown as Worker).postMessage({ id, width: out.width, height: out.height, buffer: outBuf }, [
-      outBuf,
-    ]);
+    const img = {
+      kind: 'image' as const,
+      width: msg.width,
+      height: msg.height,
+      data: new Uint8ClampedArray(msg.buffer),
+    };
+    if (msg.type === 'stl') {
+      const stl = heightmapToStl(img, msg.opts);
+      const buf = stl.triangles.buffer as ArrayBuffer;
+      post({ id: msg.id, triangleCount: stl.triangleCount, buffer: buf }, [buf]);
+    } else {
+      const out = runHeavyOp(msg.name, img, msg.config);
+      const buf = out.data.buffer as ArrayBuffer;
+      post({ id: msg.id, width: out.width, height: out.height, buffer: buf }, [buf]);
+    }
   } catch (err) {
-    (self as unknown as Worker).postMessage({ id, error: err instanceof Error ? err.message : String(err) });
+    post({ id: msg.id, error: err instanceof Error ? err.message : String(err) });
   }
 };

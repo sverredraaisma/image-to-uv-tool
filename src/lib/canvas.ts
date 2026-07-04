@@ -7,7 +7,7 @@ import { createBlobStore, indexedDbBackend } from './blobStore';
 import { createImageWorkerPool } from './imageWorkerPool';
 
 const blobStore = createBlobStore(indexedDbBackend());
-const runImageOp = createImageWorkerPool();
+const workerPool = createImageWorkerPool();
 
 function rasterToCanvas(img: RasterImage): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
@@ -88,5 +88,6 @@ export const browserPlatform: Platform = {
   fetchImage,
   putBlob: (dataUrl) => blobStore.put(dataUrl),
   getBlob: (ref) => blobStore.get(ref),
-  runImageOp,
+  runImageOp: workerPool.runImageOp,
+  generateStl: workerPool.generateStl,
 };
