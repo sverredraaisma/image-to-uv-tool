@@ -87,6 +87,17 @@ export function Canvas() {
 
   return (
     <div className={`canvas ${pending ? 'connecting' : ''}`}>
+      {storeNodes.length === 0 && (
+        <div className="canvas-empty">
+          <div className="canvas-empty-card">
+            <div className="canvas-empty-title">Start building</div>
+            <div>Add a node from the top-right menu, then wire outputs into inputs.</div>
+            <div className="canvas-empty-sub">
+              Paste your Replicate / OpenRouter key (top-left) to use the AI nodes.
+            </div>
+          </div>
+        </div>
+      )}
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}

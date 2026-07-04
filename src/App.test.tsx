@@ -32,4 +32,12 @@ describe('App smoke test', () => {
     const canvas = document.querySelector('.react-flow') as HTMLElement;
     expect(within(canvas).getByText('Prompt Input')).toBeInTheDocument();
   });
+
+  it('shows an empty-state hint until the first node is added', async () => {
+    render(<App />);
+    expect(screen.getByText('Start building')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('+ Add node'));
+    await userEvent.click(screen.getByText('Prompt Input'));
+    expect(screen.queryByText('Start building')).not.toBeInTheDocument();
+  });
 });
