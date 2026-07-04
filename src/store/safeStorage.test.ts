@@ -55,4 +55,62 @@ describe('createSafeStorage', () => {
       vi.useRealTimers();
     }
   });
+
+  it('does not drop a second key written within the debounce window', () => {
+    vi.useFakeTimers();
+    try {
+      const store = new Map<string, string>();
+      const backend: StorageLike = {
+        getItem: (k) => store.get(k) ?? null,
+        setItem: (k, v) => void store.set(k, v),
+        removeItem: (k) => void store.delete(k),
+      };
+      const s = createSafeStorage(backend, { debounceMs: 300 });
+      s.setItem('a', '1');
+      s.setItem('b', '2');
+      vi.advanceTimersByTime(300);
+      expect(store.get('a')).toBe('1'); // both keys survived the shared window
+      expect(store.get('b')).toBe('2');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('removeItem only cancels its own key, not another pending write', () => {
+    vi.useFakeTimers();
+    try {
+      const store = new Map<string, string>();
+      const backend: StorageLike = {
+        getItem: (k) => store.get(k) ?? null,
+        setItem: (k, v) => void store.set(k, v),
+        removeItem: (k) => void store.delete(k),
+      };
+      const s = createSafeStorage(backend, { debounceMs: 300 });
+      s.setItem('a', '1');
+      s.removeItem('b'); // must not cancel the pending write to 'a'
+      vi.advanceTimersByTime(300);
+      expect(store.get('a')).toBe('1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-notifies on a later failure after a successful write', () => {
+    let fail = true;
+    const backend: StorageLike = {
+      getItem: () => null,
+      setItem: () => {
+        if (fail) throw new DOMException('quota', 'QuotaExceededError');
+      },
+      removeItem: () => {},
+    };
+    const onError = vi.fn();
+    const s = createSafeStorage(backend, { onError });
+    s.setItem('a', 'x'); // fails -> notify (1)
+    fail = false;
+    s.setItem('a', 'y'); // succeeds -> re-arm
+    fail = true;
+    s.setItem('a', 'z'); // fails again -> notify (2)
+    expect(onError).toHaveBeenCalledTimes(2);
+  });
 });

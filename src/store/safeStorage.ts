@@ -27,22 +27,29 @@ export function createSafeStorage(backend: StorageLike, options: SafeStorageOpti
   const { onError, debounceMs = 0 } = options;
   let notified = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let pending: { name: string; value: string } | null = null;
+  // Keyed by name so a second key's write in the debounce window can't drop the
+  // first, and removeItem only cancels its own key's pending write.
+  const pending = new Map<string, string>();
 
   const flush = () => {
     if (timer) {
       clearTimeout(timer);
       timer = null;
     }
-    if (!pending) return;
-    const { name, value } = pending;
-    pending = null;
-    try {
-      backend.setItem(name, value);
-    } catch {
-      if (!notified) {
-        notified = true;
-        onError?.();
+    if (!pending.size) return;
+    const entries = [...pending];
+    pending.clear();
+    for (const [name, value] of entries) {
+      try {
+        backend.setItem(name, value);
+        // A successful write means storage isn't full right now, so re-arm the
+        // notification for a future failure (the user may have freed space).
+        notified = false;
+      } catch {
+        if (!notified) {
+          notified = true;
+          onError?.();
+        }
       }
     }
   };
@@ -60,7 +67,7 @@ export function createSafeStorage(backend: StorageLike, options: SafeStorageOpti
       }
     },
     setItem: (name, value) => {
-      pending = { name, value };
+      pending.set(name, value);
       if (debounceMs <= 0) {
         flush();
         return;
@@ -69,11 +76,7 @@ export function createSafeStorage(backend: StorageLike, options: SafeStorageOpti
       timer = setTimeout(flush, debounceMs);
     },
     removeItem: (name) => {
-      pending = null;
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
+      pending.delete(name);
       try {
         backend.removeItem(name);
       } catch {
