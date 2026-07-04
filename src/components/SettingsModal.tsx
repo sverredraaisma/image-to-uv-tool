@@ -2,6 +2,7 @@ import { useStore } from '../store/store';
 import { getNodeDefSafe } from '../engine/registry';
 import { ConfigFields } from './ConfigFields';
 import { AreaPickerEditor } from './AreaPickerEditor';
+import { Modal } from './Modal';
 
 export function SettingsModal() {
   const editorNodeId = useStore((s) => s.editorNodeId);
@@ -15,30 +16,22 @@ export function SettingsModal() {
   const isAreaPicker = def.customEditor === 'areaPicker';
 
   return (
-    <div className="modal-backdrop" onClick={() => close(null)}>
-      <div
-        className={`modal settings-modal ${isAreaPicker ? 'modal-wide' : ''}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <span>{def.label} · settings</span>
-          <button type="button" className="icon-btn" onClick={() => close(null)}>
-            ✕
-          </button>
-        </div>
-        <div className="modal-body">
-          {isAreaPicker ? (
-            <AreaPickerEditor nodeId={editorNodeId} />
-          ) : (
-            <ConfigFields
-              nodeId={editorNodeId}
-              fields={def.configFields ?? []}
-              config={node.config}
-              collapseAdvanced
-            />
-          )}
-        </div>
-      </div>
-    </div>
+    <Modal
+      title={`${def.label} · settings`}
+      onClose={() => close(null)}
+      className="settings-modal"
+      wide={isAreaPicker}
+    >
+      {isAreaPicker ? (
+        <AreaPickerEditor nodeId={editorNodeId} />
+      ) : (
+        <ConfigFields
+          nodeId={editorNodeId}
+          fields={def.configFields ?? []}
+          config={node.config}
+          collapseAdvanced
+        />
+      )}
+    </Modal>
   );
 }

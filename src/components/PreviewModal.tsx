@@ -3,6 +3,7 @@ import { useStore } from '../store/store';
 import { rasterToDataUrl, browserPlatform } from '../lib/canvas';
 import { downloadBlob, downloadText, previewFileName } from '../lib/download';
 import { stlToAscii, stlToBinary } from '../lib/stl';
+import { Modal } from './Modal';
 
 export function PreviewModal() {
   const preview = useStore((s) => s.preview);
@@ -39,39 +40,32 @@ export function PreviewModal() {
   };
 
   return (
-    <div className="modal-backdrop" onClick={close}>
-      <div className="modal preview-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <span>{title}</span>
-          <div className="modal-header-actions">
-            <button type="button" className="btn btn-primary" onClick={download}>
-              Download
-            </button>
-            <button type="button" className="icon-btn" onClick={close}>
-              ✕
-            </button>
-          </div>
+    <Modal
+      title={title}
+      onClose={close}
+      className="preview-modal"
+      bodyClassName="preview-body"
+      headerActions={
+        <button type="button" className="btn btn-primary" onClick={download}>
+          Download
+        </button>
+      }
+    >
+      {value.kind === 'image' && imageUrl && (
+        <img src={imageUrl} alt={title} className="preview-full checker" />
+      )}
+      {value.kind === 'image' && (
+        <div className="preview-meta">
+          {value.width} × {value.height} px
         </div>
-        <div className="modal-body preview-body">
-          {value.kind === 'image' && imageUrl && (
-            <img src={imageUrl} alt={title} className="preview-full checker" />
-          )}
-          {value.kind === 'image' && (
-            <div className="preview-meta">
-              {value.width} × {value.height} px
-            </div>
-          )}
-          {value.kind === 'text' && <pre className="preview-textfull">{value.text}</pre>}
-          {value.kind === 'stl' && (
-            <>
-              <div className="preview-meta">
-                {value.triangleCount} triangles — downloads as binary STL
-              </div>
-              <pre className="preview-textfull">{stlToAscii(value, 'heightmap', 40)}</pre>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+      )}
+      {value.kind === 'text' && <pre className="preview-textfull">{value.text}</pre>}
+      {value.kind === 'stl' && (
+        <>
+          <div className="preview-meta">{value.triangleCount} triangles — downloads as binary STL</div>
+          <pre className="preview-textfull">{stlToAscii(value, 'heightmap', 40)}</pre>
+        </>
+      )}
+    </Modal>
   );
 }
