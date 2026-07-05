@@ -120,6 +120,44 @@ describe('new local nodes', () => {
     const out = useStore.getState().runtime[apply].outputs.out as RasterImage;
     expect(out.data[3]).toBe(0); // black mask -> alpha 0
   });
+
+  it('runs the gloss print-prep tail (highlight extract → auto threshold → despeckle)', async () => {
+    const s = useStore.getState();
+    const src = s.addNode('solidColor');
+    s.updateNodeConfig(src, { width: 8, height: 8, color: '#808080' });
+    const hl = s.addNode('highlightExtract');
+    const at = s.addNode('autoThreshold');
+    const dsp = s.addNode('despeckle');
+    s.addConnection({ source: src, sourceHandle: 'out', target: hl, targetHandle: 'in' });
+    s.addConnection({ source: hl, sourceHandle: 'out', target: at, targetHandle: 'in' });
+    s.addConnection({ source: at, sourceHandle: 'out', target: dsp, targetHandle: 'in' });
+    await useStore.getState().processAutoRun();
+    const rt = useStore.getState().runtime[dsp];
+    expect(rt.status).toBe('upToDate');
+    const out = rt.outputs.out as RasterImage;
+    expect(out.kind).toBe('image');
+    // Binarised, opaque output — every pixel is pure black or pure white.
+    for (let i = 0; i < out.data.length; i += 4) {
+      expect(out.data[i] === 0 || out.data[i] === 255).toBe(true);
+      expect(out.data[i + 3]).toBe(255);
+    }
+  });
+
+  it('gloss preview simulates a print and reports coverage', async () => {
+    const s = useStore.getState();
+    const art = s.addNode('solidColor');
+    s.updateNodeConfig(art, { width: 4, height: 4, color: '#646464' });
+    const gloss = s.addNode('solidColor');
+    s.updateNodeConfig(gloss, { width: 4, height: 4, color: '#ffffff' });
+    const gp = s.addNode('glossPreview');
+    s.addConnection({ source: art, sourceHandle: 'out', target: gp, targetHandle: 'art' });
+    s.addConnection({ source: gloss, sourceHandle: 'out', target: gp, targetHandle: 'gloss' });
+    await useStore.getState().processAutoRun();
+    const rt = useStore.getState().runtime[gp];
+    expect(rt.outputs.preview?.kind).toBe('image');
+    expect(rt.outputs.stats?.kind).toBe('text');
+    if (rt.outputs.stats?.kind === 'text') expect(rt.outputs.stats.text).toMatch(/100\.0%/);
+  });
 });
 
 describe('LLM + image-to-text (with stubbed fetch)', () => {

@@ -1,5 +1,7 @@
-// Built-in example workflows for the empty state. All use local, auto-run nodes
-// (no API key needed) so they compute and show results the moment they load.
+// Built-in example workflows for the empty state. Most use local, auto-run
+// nodes (no API key needed) so they compute and show results the moment they
+// load; a couple start from an Image Input you upload into, and the "materials"
+// gloss recipe includes one manual Replicate (AI) segmentation step.
 
 import type { SavedGraph } from '../types';
 
@@ -15,6 +17,20 @@ const edge = (source: string, target: string): SavedGraph['edges'][number] => ({
   sourceHandle: 'out',
   target,
   targetHandle: 'in',
+});
+
+/** Edge between explicit ports (for multi-input/output nodes). */
+const wire = (
+  source: string,
+  target: string,
+  sourceHandle = 'out',
+  targetHandle = 'in',
+): SavedGraph['edges'][number] => ({
+  id: `${source}.${sourceHandle}-${target}.${targetHandle}`,
+  source,
+  sourceHandle,
+  target,
+  targetHandle,
 });
 
 export const EXAMPLES: Example[] = [
@@ -74,6 +90,223 @@ export const EXAMPLES: Example[] = [
         { id: 'hist', type: 'histogram', position: { x: 640, y: 140 }, config: {} },
       ],
       edges: [edge('grad', 'vig'), edge('vig', 'hist')],
+    },
+  },
+  {
+    name: 'Spot gloss — painted highlights',
+    description:
+      'Varnish where the artist painted a glint: Highlight Extract → print-prep tail → simulated gloss print. Upload art into the Image Input.',
+    graph: {
+      version: 1,
+      nodes: [
+        { id: 'img', type: 'imageInput', position: { x: 60, y: 200 }, config: { maxSize: 0 } },
+        {
+          id: 'hl',
+          type: 'highlightExtract',
+          position: { x: 320, y: 120 },
+          config: { radius: 24, gain: 1, bias: 4, satRejection: 2 },
+        },
+        { id: 'blur', type: 'blur', position: { x: 560, y: 120 }, config: { radius: 1 } },
+        {
+          id: 'at',
+          type: 'autoThreshold',
+          position: { x: 760, y: 120 },
+          config: { mode: 'otsu', percentile: 20, invert: false },
+        },
+        {
+          id: 'dsp',
+          type: 'despeckle',
+          position: { x: 980, y: 120 },
+          config: { minArea: 9, minHoleArea: 0, threshold: 128 },
+        },
+        { id: 'erode', type: 'erode', position: { x: 1200, y: 120 }, config: { radius: 1 } },
+        {
+          id: 'gp',
+          type: 'glossPreview',
+          position: { x: 1420, y: 200 },
+          config: { azimuth: 135, elevation: 45, shininess: 32, intensity: 1, matte: 0.1, heightStrength: 2 },
+        },
+      ],
+      edges: [
+        edge('img', 'hl'),
+        edge('hl', 'blur'),
+        edge('blur', 'at'),
+        edge('at', 'dsp'),
+        edge('dsp', 'erode'),
+        wire('erode', 'gp', 'out', 'gloss'),
+        wire('img', 'gp', 'out', 'art'),
+      ],
+    },
+  },
+  {
+    name: 'Spot gloss — relief peaks',
+    description:
+      'Gloss the raised areas of a heightmap so peaks read shiny and valleys matte. Uses a gradient as a stand-in heightmap — computes instantly.',
+    graph: {
+      version: 1,
+      nodes: [
+        {
+          id: 'grad',
+          type: 'gradient',
+          position: { x: 60, y: 200 },
+          config: { width: 256, height: 256, from: '#000000', to: '#ffffff', direction: 'horizontal' },
+        },
+        {
+          id: 'at',
+          type: 'autoThreshold',
+          position: { x: 380, y: 120 },
+          config: { mode: 'percentile', percentile: 20, invert: false },
+        },
+        {
+          id: 'dsp',
+          type: 'despeckle',
+          position: { x: 620, y: 120 },
+          config: { minArea: 9, minHoleArea: 0, threshold: 128 },
+        },
+        {
+          id: 'gp',
+          type: 'glossPreview',
+          position: { x: 900, y: 200 },
+          config: {
+            azimuth: 135,
+            elevation: 45,
+            shininess: 24,
+            intensity: 1,
+            matte: 0.15,
+            heightStrength: 3,
+          },
+        },
+      ],
+      edges: [
+        edge('grad', 'at'),
+        edge('at', 'dsp'),
+        wire('dsp', 'gp', 'out', 'gloss'),
+        wire('grad', 'gp', 'out', 'art'),
+        wire('grad', 'gp', 'out', 'heightmap'),
+      ],
+    },
+  },
+  {
+    name: 'Spot gloss — linework',
+    description:
+      'Gloss the linework and lettering of a flat illustration: Edge Detect → Dilate → Auto Threshold. A good fallback when there are no painted highlights.',
+    graph: {
+      version: 1,
+      nodes: [
+        { id: 'img', type: 'imageInput', position: { x: 60, y: 200 }, config: { maxSize: 0 } },
+        { id: 'ed', type: 'edgeDetect', position: { x: 320, y: 120 }, config: {} },
+        { id: 'dil', type: 'dilate', position: { x: 540, y: 120 }, config: { radius: 1 } },
+        {
+          id: 'at',
+          type: 'autoThreshold',
+          position: { x: 760, y: 120 },
+          config: { mode: 'otsu', percentile: 20, invert: false },
+        },
+        {
+          id: 'gp',
+          type: 'glossPreview',
+          position: { x: 1020, y: 200 },
+          config: { azimuth: 135, elevation: 45, shininess: 32, intensity: 1, matte: 0.1, heightStrength: 2 },
+        },
+      ],
+      edges: [
+        edge('img', 'ed'),
+        edge('ed', 'dil'),
+        edge('dil', 'at'),
+        wire('at', 'gp', 'out', 'gloss'),
+        wire('img', 'gp', 'out', 'art'),
+      ],
+    },
+  },
+  {
+    name: 'Spot gloss — materials (AI)',
+    description:
+      'Text-prompt the materials to varnish — "eyes, metal, glass, water" — with Grounded SAM, then clean into a gloss mask. Needs a Replicate key; press Run on the AI node.',
+    graph: {
+      version: 1,
+      nodes: [
+        { id: 'img', type: 'imageInput', position: { x: 60, y: 200 }, config: { maxSize: 0 } },
+        {
+          id: 'gs',
+          type: 'groundedSam',
+          position: { x: 320, y: 120 },
+          config: { mask_prompt: 'eyes, metal, glass, water', adjustment_factor: 0 },
+        },
+        {
+          id: 'at',
+          type: 'autoThreshold',
+          position: { x: 640, y: 120 },
+          config: { mode: 'otsu', percentile: 20, invert: false },
+        },
+        {
+          id: 'dsp',
+          type: 'despeckle',
+          position: { x: 860, y: 120 },
+          config: { minArea: 9, minHoleArea: 0, threshold: 128 },
+        },
+        {
+          id: 'gp',
+          type: 'glossPreview',
+          position: { x: 1120, y: 200 },
+          config: { azimuth: 135, elevation: 45, shininess: 32, intensity: 1, matte: 0.1, heightStrength: 2 },
+        },
+      ],
+      edges: [
+        wire('img', 'gs', 'out', 'image'),
+        wire('gs', 'at', 'mask', 'in'),
+        edge('at', 'dsp'),
+        wire('dsp', 'gp', 'out', 'gloss'),
+        wire('img', 'gp', 'out', 'art'),
+      ],
+    },
+  },
+  {
+    name: 'Spot gloss — dark luxury',
+    description:
+      'Varnish the deep blacks — a classic premium-print move: Greyscale → Invert → Auto Threshold (brightest 10%). Uses a gradient source, computes instantly.',
+    graph: {
+      version: 1,
+      nodes: [
+        {
+          id: 'grad',
+          type: 'gradient',
+          position: { x: 60, y: 200 },
+          config: { width: 256, height: 256, from: '#000000', to: '#ffffff', direction: 'horizontal' },
+        },
+        { id: 'gray', type: 'grayscale', position: { x: 360, y: 120 }, config: {} },
+        {
+          id: 'inv',
+          type: 'invert',
+          position: { x: 560, y: 120 },
+          config: { r: true, g: true, b: true, a: false },
+        },
+        {
+          id: 'at',
+          type: 'autoThreshold',
+          position: { x: 760, y: 120 },
+          config: { mode: 'percentile', percentile: 10, invert: false },
+        },
+        {
+          id: 'gp',
+          type: 'glossPreview',
+          position: { x: 1020, y: 200 },
+          config: {
+            azimuth: 135,
+            elevation: 45,
+            shininess: 48,
+            intensity: 1,
+            matte: 0.25,
+            heightStrength: 2,
+          },
+        },
+      ],
+      edges: [
+        edge('grad', 'gray'),
+        edge('gray', 'inv'),
+        edge('inv', 'at'),
+        wire('at', 'gp', 'out', 'gloss'),
+        wire('grad', 'gp', 'out', 'art'),
+      ],
     },
   },
 ];

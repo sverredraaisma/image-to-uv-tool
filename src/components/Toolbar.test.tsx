@@ -47,6 +47,17 @@ describe('Toolbar', () => {
     expect(useStore.getState().nodes[0].type.toLowerCase()).toContain('flux');
   });
 
+  it('loads an example workflow from the Examples menu (no confirm on an empty canvas)', async () => {
+    render(<Toolbar />);
+    expect(useStore.getState().nodes).toHaveLength(0);
+    await userEvent.click(screen.getByText('Examples ▾'));
+    await userEvent.click(screen.getByText('Spot gloss — relief peaks'));
+    // The example graph replaced the (empty) workspace with its nodes.
+    const types = useStore.getState().nodes.map((n) => n.type);
+    expect(types).toContain('glossPreview');
+    expect(types).toContain('autoThreshold');
+  });
+
   it('loading a graph with an invalid node reports the dropped count', async () => {
     const { container } = render(<Toolbar />);
     const graph = {

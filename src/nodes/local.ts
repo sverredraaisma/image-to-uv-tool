@@ -16,6 +16,7 @@ import {
   downscaleToMax,
   extractChannel,
   flatten,
+  glossPreview,
   gradientMap,
   grayscale,
   hexToRgba,
@@ -38,11 +39,13 @@ import {
   transform,
   whiteBalance,
   type AlphaCleanupMode,
+  type AutoThresholdMode,
   type Channel,
   type CombineMode,
   type CurveChannel,
   type CurvePoint,
   type MaskOp,
+  type MorphOp,
   type TransformOp,
 } from '../lib/image';
 import { magicWandMask, type Point } from '../lib/magicWand';
@@ -316,6 +319,29 @@ export const thresholdNode = singleImageOp({
   ],
   defaultConfig: () => ({ level: 128, invert: false }),
   op: (img, config) => threshold(img, num(config.level, 128), bool(config.invert, false)),
+});
+
+export const autoThresholdNode = singleImageOp({
+  type: 'autoThreshold',
+  label: 'Auto Threshold',
+  category: 'Adjust',
+  description:
+    'Binarise at a level chosen from the histogram (Otsu valley, or brightest N%) — robust on dark or pale art. Invert for dark-luxury gloss.',
+  configFields: [
+    {
+      kind: 'select',
+      key: 'mode',
+      label: 'Mode',
+      options: [
+        { value: 'otsu', label: 'Otsu (auto valley)' },
+        { value: 'percentile', label: 'Percentile (brightest N%)' },
+      ],
+    },
+    { kind: 'number', key: 'percentile', label: 'Top %', min: 0, max: 100, step: 1 },
+    { kind: 'boolean', key: 'invert', label: 'Invert' },
+  ],
+  defaultConfig: () => ({ mode: 'otsu' satisfies AutoThresholdMode, percentile: 20, invert: false }),
+  opName: 'autoThreshold',
 });
 
 export const blurNode = singleImageOp({
@@ -720,11 +746,30 @@ export const extractChannelNode = singleImageOp({
         { value: 'g', label: 'Green' },
         { value: 'b', label: 'Blue' },
         { value: 'a', label: 'Alpha' },
+        { value: 'sat', label: 'Saturation (HSV)' },
+        { value: 'val', label: 'Value (HSV)' },
+        { value: 'hue', label: 'Hue (HSV)' },
       ],
     },
   ],
   defaultConfig: () => ({ channel: 'lum' satisfies Channel }),
   op: (img, config) => extractChannel(img, str(config.channel, 'lum') as Channel),
+});
+
+export const highlightExtractNode = singleImageOp({
+  type: 'highlightExtract',
+  label: 'Highlight Extract',
+  category: 'Mask',
+  description:
+    'Extract painted speculars (locally bright + desaturated) as a greyscale gloss signal — where the artist put a glint. Big radius keeps skies/whites out.',
+  configFields: [
+    { kind: 'number', key: 'radius', label: 'Local radius (px)', min: 1, max: 200, step: 1 },
+    { kind: 'number', key: 'gain', label: 'Gain', min: 0, max: 10, step: 0.1 },
+    { kind: 'number', key: 'bias', label: 'Bias', min: 0, max: 255, step: 1 },
+    { kind: 'number', key: 'satRejection', label: 'Saturation rejection', min: 0, max: 8, step: 0.5 },
+  ],
+  defaultConfig: () => ({ radius: 24, gain: 1, bias: 4, satRejection: 2 }),
+  opName: 'highlightExtract',
 });
 
 export const chromaKeyNode: NodeDefinition = {
@@ -821,6 +866,43 @@ export const erodeNode = singleImageOp({
   opName: 'erode',
 });
 
+export const openCloseNode = singleImageOp({
+  type: 'openClose',
+  label: 'Open / Close',
+  category: 'Mask',
+  description:
+    'Morphological open (remove bright specks) or close (fill dark pinholes) in one step — seals gloss shapes before the choke.',
+  configFields: [
+    {
+      kind: 'select',
+      key: 'op',
+      label: 'Operation',
+      options: [
+        { value: 'close', label: 'Close (fill pinholes)' },
+        { value: 'open', label: 'Open (remove specks)' },
+      ],
+    },
+    { kind: 'number', key: 'radius', label: 'Radius', min: 0, max: 50, step: 1 },
+  ],
+  defaultConfig: () => ({ op: 'close' satisfies MorphOp, radius: 2 }),
+  opName: 'morphology',
+});
+
+export const despeckleNode = singleImageOp({
+  type: 'despeckle',
+  label: 'Despeckle',
+  category: 'Mask',
+  description:
+    'Enforce a minimum feature size: drop white islands below Min area and optionally fill enclosed pinholes below Min hole area. Outputs a clean B/W mask.',
+  configFields: [
+    { kind: 'number', key: 'minArea', label: 'Min area (px²)', min: 0, step: 1 },
+    { kind: 'number', key: 'minHoleArea', label: 'Min hole area (px²)', min: 0, step: 1 },
+    { kind: 'number', key: 'threshold', label: 'On threshold', min: 0, max: 255, step: 1, advanced: true },
+  ],
+  defaultConfig: () => ({ minArea: 9, minHoleArea: 0, threshold: 128 }),
+  opName: 'despeckle',
+});
+
 export const areaPickerNode: NodeDefinition = {
   type: 'areaPicker',
   label: 'Area Picker',
@@ -889,6 +971,66 @@ export const normalMapNode = singleImageOp({
   opName: 'normalMap',
 });
 
+export const glossPreviewNode: NodeDefinition = {
+  type: 'glossPreview',
+  label: 'Gloss Preview',
+  category: 'UV',
+  description:
+    'Simulate a spot-gloss (varnish) print: shiny where the gloss mask is on, using heightmap relief if wired. Reports gloss coverage % (aim 5–30%). Open the editor for an interactive 3D view.',
+  autoRun: true,
+  customEditor: 'gloss3d',
+  inputs: [
+    { id: 'art', label: 'Art', type: 'image' },
+    { id: 'gloss', label: 'Gloss mask', type: 'mask' },
+    { id: 'heightmap', label: 'Heightmap', type: 'image' },
+  ],
+  outputs: [
+    { id: 'preview', label: 'Preview', type: 'image' },
+    { id: 'stats', label: 'Stats', type: 'text' },
+  ],
+  configFields: [
+    { kind: 'number', key: 'azimuth', label: 'Light azimuth (°)', min: 0, max: 360, step: 5 },
+    { kind: 'number', key: 'elevation', label: 'Light elevation (°)', min: 0, max: 90, step: 5 },
+    { kind: 'number', key: 'shininess', label: 'Shininess', min: 1, max: 200, step: 1 },
+    { kind: 'number', key: 'intensity', label: 'Intensity', min: 0, max: 4, step: 0.1 },
+    { kind: 'number', key: 'matte', label: 'Matte darkening', min: 0, max: 1, step: 0.05 },
+    {
+      kind: 'number',
+      key: 'heightStrength',
+      label: 'Relief strength',
+      min: 0,
+      max: 10,
+      step: 0.5,
+      advanced: true,
+    },
+  ],
+  defaultConfig: () => ({
+    azimuth: 135,
+    elevation: 45,
+    shininess: 32,
+    intensity: 1,
+    matte: 0,
+    heightStrength: 2,
+  }),
+  compute: ({ inputs, config }) => {
+    const art = asImage(inputs.art);
+    if (!art) return { preview: undefined, stats: undefined };
+    const { image, coverage } = glossPreview(art, asImage(inputs.gloss), asImage(inputs.heightmap), {
+      azimuth: num(config.azimuth, 135),
+      elevation: num(config.elevation, 45),
+      shininess: num(config.shininess, 32),
+      intensity: num(config.intensity, 1),
+      matte: num(config.matte, 0),
+      heightStrength: num(config.heightStrength, 2),
+    });
+    const pct = (coverage * 100).toFixed(1);
+    return {
+      preview: image,
+      stats: { kind: 'text', text: `Gloss coverage ${pct}% (aim 5–30%)` },
+    };
+  },
+};
+
 export const channelPackNode: NodeDefinition = {
   type: 'channelPack',
   label: 'Channel Pack',
@@ -951,6 +1093,7 @@ export const localNodes: NodeDefinition[] = [
   grayscaleNode,
   brightnessContrastNode,
   thresholdNode,
+  autoThresholdNode,
   blurNode,
   sharpenNode,
   normalizeNode,
@@ -974,14 +1117,18 @@ export const localNodes: NodeDefinition[] = [
   padNode,
   transformNode,
   extractChannelNode,
+  highlightExtractNode,
   chromaKeyNode,
   removeColorNode,
   maskCombineNode,
   dilateNode,
   erodeNode,
+  openCloseNode,
+  despeckleNode,
   areaPickerNode,
   noiseNode,
   normalMapNode,
+  glossPreviewNode,
   channelPackNode,
   seamlessTileNode,
   heightmapStlNode,

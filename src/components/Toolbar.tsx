@@ -4,6 +4,7 @@ import { downloadText, graphFileName } from '../lib/download';
 import { encodeGraphToHash } from '../lib/shareLink';
 import { NodePicker } from './NodePicker';
 import { ProjectsMenu } from './ProjectsMenu';
+import { EXAMPLES, type Example } from './examples';
 import type { SavedGraph } from '../types';
 
 function AddNodeMenu() {
@@ -26,6 +27,51 @@ function AddNodeMenu() {
         <>
           <div className="menu-backdrop" onClick={close} />
           <NodePicker onPick={pick} onClose={close} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function ExamplesMenu() {
+  const loadGraph = useStore((s) => s.loadGraph);
+  const nodeCount = useStore((s) => s.nodes.length);
+  const [open, setOpen] = useState(false);
+
+  const close = () => setOpen(false);
+  const pick = (ex: Example) => {
+    // Loading replaces the whole graph — confirm first if there's work to lose.
+    if (nodeCount > 0 && !confirm(`Replace the current workspace with “${ex.name}”?`)) return;
+    loadGraph(ex.graph);
+    close();
+  };
+
+  return (
+    <div className="add-node">
+      <button
+        type="button"
+        className="btn"
+        onClick={() => setOpen((o) => !o)}
+        title="Load an example workflow"
+      >
+        Examples ▾
+      </button>
+      {open && (
+        <>
+          <div className="menu-backdrop" onClick={close} />
+          <div className="add-node-menu" role="menu">
+            {EXAMPLES.map((ex) => (
+              <button
+                key={ex.name}
+                type="button"
+                className="menu-item"
+                title={ex.description}
+                onClick={() => pick(ex)}
+              >
+                {ex.name}
+              </button>
+            ))}
+          </div>
         </>
       )}
     </div>
@@ -136,6 +182,7 @@ export function Toolbar() {
           ↷
         </button>
         <AddNodeMenu />
+        <ExamplesMenu />
         <ProjectsMenu />
         <button type="button" className="btn" onClick={() => void onSave()}>
           Save

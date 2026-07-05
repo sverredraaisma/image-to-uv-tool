@@ -75,54 +75,59 @@ settling with a stale result.
 
 ## Node catalog
 
-| Node                           | Category        | Runs   | Description                                                                                                                                         |
-| ------------------------------ | --------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Image Input                    | Input           | auto   | Upload an image; it becomes an output.                                                                                                              |
-| Prompt Input                   | Input           | auto   | A text prompt as an output.                                                                                                                         |
-| Solid Colour                   | Input           | auto   | Generate a solid colour image of a given size.                                                                                                      |
-| Gradient                       | Input           | auto   | Generate a linear two-colour gradient.                                                                                                              |
-| Combine                        | Compose         | auto   | Blend a base image **A** with a secondary image **B** (A over B, B over A, max, multiply, subtract, screen…).                                       |
-| Apply Mask                     | Mask            | auto   | Use a mask's luminance as the image's alpha.                                                                                                        |
-| Flatten                        | Compose         | auto   | Composite over a solid background colour (removes transparency).                                                                                    |
-| Invert                         | Adjust          | auto   | Invert selected R/G/B/A channels.                                                                                                                   |
-| Greyscale                      | Adjust          | auto   | Desaturate to luminance.                                                                                                                            |
-| Brightness / Contrast          | Adjust          | auto   | Adjust brightness and contrast.                                                                                                                     |
-| Threshold                      | Adjust          | auto   | Binarise by luminance to black/white.                                                                                                               |
-| Box Blur                       | Adjust          | auto   | Blur by an adjustable pixel radius.                                                                                                                 |
-| Sharpen                        | Adjust          | auto   | Unsharp-mask sharpening.                                                                                                                            |
-| Auto Contrast                  | Adjust          | auto   | Stretch each channel to the full 0–255 range.                                                                                                       |
-| Opacity                        | Adjust          | auto   | Fade the image by scaling its alpha.                                                                                                                |
-| Tint                           | Adjust          | auto   | Multiply the image by a colour.                                                                                                                     |
-| Levels                         | Adjust          | auto   | Remap tones with black/white points and midtone gamma.                                                                                              |
-| Gradient Map                   | Adjust          | auto   | Map luminance to a two-colour gradient.                                                                                                             |
-| Edge Detect                    | Adjust          | auto   | Sobel edge detection (white edges on black — feeds ControlNet).                                                                                     |
-| Pixelate                       | Adjust          | auto   | Mosaic / blocky pixelation.                                                                                                                         |
-| Vignette                       | Adjust          | auto   | Darken towards the corners.                                                                                                                         |
-| Hue / Saturation               | Adjust          | auto   | Shift hue and scale saturation.                                                                                                                     |
-| Posterize                      | Adjust          | auto   | Reduce each colour channel to a limited number of levels.                                                                                           |
-| Outline                        | Adjust          | auto   | Coloured outline of an adjustable thickness around non-transparent pixels.                                                                          |
-| Alpha Cleanup                  | Adjust          | auto   | Snap pixels below an alpha threshold to transparent / black / white.                                                                                |
-| Crop                           | Transform       | auto   | Crop a rectangle from the image.                                                                                                                    |
-| Resize                         | Transform       | auto   | Resize to a target width/height (nearest-neighbour).                                                                                                |
-| Pad                            | Transform       | auto   | Extend the canvas with a transparent border (e.g. for outpainting).                                                                                 |
-| Rotate / Flip                  | Transform       | auto   | Rotate by 90° steps or flip.                                                                                                                        |
-| Extract Channel                | Mask            | auto   | Pull one channel (or luminance) out as a greyscale image.                                                                                           |
-| Dilate / Erode                 | Mask            | auto   | Grow / shrink bright (white) mask regions by a radius — pairs with the segmentation masks.                                                          |
-| Combine Masks                  | Mask            | auto   | Boolean-combine two masks (AND / OR / A−B / XOR).                                                                                                   |
-| Chroma Key                     | Mask            | auto   | Mask pixels near a target colour (within tolerance).                                                                                                |
-| Remove Colour                  | Mask            | auto   | Make pixels near a colour transparent (local background key-out).                                                                                   |
-| Area Picker                    | Mask            | auto   | Click points on the image (large editor); a magic-wand flood-fill from those points (adjustable tolerance) produces a white mask. Points are saved. |
-| Heightmap → STL                | Export          | auto   | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width.                             |
-| **Generate** (text→image)      | AI (Replicate)  | manual | Flux Schnell, SDXL Lightning, Flux Dev, SDXL, SD 3.5, Recraft v3, Ideogram v2.                                                                      |
-| **Edit** (image + prompt/mask) | AI (Replicate)  | manual | Instruct Pix2Pix, Flux Kontext, Relight (IC-Light), SD Inpainting, Flux Fill, Remove Object (LaMa), Flux ControlNet (Canny).                        |
-| **Stylize**                    | AI (Replicate)  | manual | AnimeGAN v2, Style Transfer (reference image + prompt), Face to Sticker.                                                                            |
-| **Depth**                      | AI (Replicate)  | manual | Depth Anything v2 (grey + colour outputs), Marigold.                                                                                                |
-| **Segment**                    | AI (Replicate)  | manual | SAM 2, SAM 3 (concept), Grounded SAM (mask / inverted / annotated / neg-annotated outputs).                                                         |
-| **Background removal**         | AI (Replicate)  | manual | BiRefNet, rembg / IS-Net, Bria RMBG 2.0.                                                                                                            |
-| **Restore & upscale**          | AI (Replicate)  | manual | Real-ESRGAN, GFPGAN, CodeFormer, SUPIR, NAFNet (deblur), Colorize (DDColor), Clarity Upscaler.                                                      |
-| **Describe** (image→text)      | AI (Replicate)  | manual | Image Caption (BLIP), Moondream (VLM), LLaVA (VLM), CLIP Interrogator, OCR (text extract).                                                          |
-| **Custom**                     | AI (Replicate)  | manual | Replicate (custom) — any model: set the slug, wire images/prompt, add anything else via JSON.                                                       |
-| **LLMs**                       | AI (OpenRouter) | manual | Llama 3.1 8B, Gemini Flash, GPT-4o mini, Claude 3.5 Haiku, custom — a prompt plus optional wired text input → text.                                 |
+| Node                           | Category        | Runs   | Description                                                                                                                                                                                                                |
+| ------------------------------ | --------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Image Input                    | Input           | auto   | Upload an image; it becomes an output.                                                                                                                                                                                     |
+| Prompt Input                   | Input           | auto   | A text prompt as an output.                                                                                                                                                                                                |
+| Solid Colour                   | Input           | auto   | Generate a solid colour image of a given size.                                                                                                                                                                             |
+| Gradient                       | Input           | auto   | Generate a linear two-colour gradient.                                                                                                                                                                                     |
+| Combine                        | Compose         | auto   | Blend a base image **A** with a secondary image **B** (A over B, B over A, max, multiply, subtract, screen…).                                                                                                              |
+| Apply Mask                     | Mask            | auto   | Use a mask's luminance as the image's alpha.                                                                                                                                                                               |
+| Flatten                        | Compose         | auto   | Composite over a solid background colour (removes transparency).                                                                                                                                                           |
+| Invert                         | Adjust          | auto   | Invert selected R/G/B/A channels.                                                                                                                                                                                          |
+| Greyscale                      | Adjust          | auto   | Desaturate to luminance.                                                                                                                                                                                                   |
+| Brightness / Contrast          | Adjust          | auto   | Adjust brightness and contrast.                                                                                                                                                                                            |
+| Threshold                      | Adjust          | auto   | Binarise by luminance to black/white.                                                                                                                                                                                      |
+| Auto Threshold                 | Adjust          | auto   | Binarise at a histogram-chosen level (Otsu valley or brightest N%) — robust on dark/pale art; invert for dark-luxury gloss.                                                                                                |
+| Box Blur                       | Adjust          | auto   | Blur by an adjustable pixel radius.                                                                                                                                                                                        |
+| Sharpen                        | Adjust          | auto   | Unsharp-mask sharpening.                                                                                                                                                                                                   |
+| Auto Contrast                  | Adjust          | auto   | Stretch each channel to the full 0–255 range.                                                                                                                                                                              |
+| Opacity                        | Adjust          | auto   | Fade the image by scaling its alpha.                                                                                                                                                                                       |
+| Tint                           | Adjust          | auto   | Multiply the image by a colour.                                                                                                                                                                                            |
+| Levels                         | Adjust          | auto   | Remap tones with black/white points and midtone gamma.                                                                                                                                                                     |
+| Gradient Map                   | Adjust          | auto   | Map luminance to a two-colour gradient.                                                                                                                                                                                    |
+| Edge Detect                    | Adjust          | auto   | Sobel edge detection (white edges on black — feeds ControlNet).                                                                                                                                                            |
+| Pixelate                       | Adjust          | auto   | Mosaic / blocky pixelation.                                                                                                                                                                                                |
+| Vignette                       | Adjust          | auto   | Darken towards the corners.                                                                                                                                                                                                |
+| Hue / Saturation               | Adjust          | auto   | Shift hue and scale saturation.                                                                                                                                                                                            |
+| Posterize                      | Adjust          | auto   | Reduce each colour channel to a limited number of levels.                                                                                                                                                                  |
+| Outline                        | Adjust          | auto   | Coloured outline of an adjustable thickness around non-transparent pixels.                                                                                                                                                 |
+| Alpha Cleanup                  | Adjust          | auto   | Snap pixels below an alpha threshold to transparent / black / white.                                                                                                                                                       |
+| Crop                           | Transform       | auto   | Crop a rectangle from the image.                                                                                                                                                                                           |
+| Resize                         | Transform       | auto   | Resize to a target width/height (nearest-neighbour).                                                                                                                                                                       |
+| Pad                            | Transform       | auto   | Extend the canvas with a transparent border (e.g. for outpainting).                                                                                                                                                        |
+| Rotate / Flip                  | Transform       | auto   | Rotate by 90° steps or flip.                                                                                                                                                                                               |
+| Extract Channel                | Mask            | auto   | Pull one channel — RGBA, luminance, or an HSV component (saturation / value / hue) — out as a greyscale image.                                                                                                             |
+| Highlight Extract              | Mask            | auto   | Extract painted speculars (locally bright + desaturated) as a greyscale gloss signal — where the artist put a glint.                                                                                                       |
+| Dilate / Erode                 | Mask            | auto   | Grow / shrink bright (white) mask regions by a radius — pairs with the segmentation masks.                                                                                                                                 |
+| Open / Close                   | Mask            | auto   | Morphological open (remove bright specks) / close (fill dark pinholes) in one node.                                                                                                                                        |
+| Despeckle                      | Mask            | auto   | Enforce a minimum feature size and optionally fill enclosed pinholes (connected-component cleanup) → clean B/W mask.                                                                                                       |
+| Combine Masks                  | Mask            | auto   | Boolean-combine two masks (AND / OR / A−B / XOR).                                                                                                                                                                          |
+| Chroma Key                     | Mask            | auto   | Mask pixels near a target colour (within tolerance).                                                                                                                                                                       |
+| Remove Colour                  | Mask            | auto   | Make pixels near a colour transparent (local background key-out).                                                                                                                                                          |
+| Area Picker                    | Mask            | auto   | Click points on the image (large editor); a magic-wand flood-fill from those points (adjustable tolerance) produces a white mask. Points are saved.                                                                        |
+| Heightmap → STL                | Export          | auto   | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width.                                                                                                    |
+| Gloss Preview                  | UV              | auto   | Simulate a spot-gloss (varnish) print: Blinn-Phong specular from heightmap relief (flat if none), masked by a gloss map; reports coverage %. Open the editor for an interactive **3D view** you can orbit under the light. |
+| **Generate** (text→image)      | AI (Replicate)  | manual | Flux Schnell, SDXL Lightning, Flux Dev, SDXL, SD 3.5, Recraft v3, Ideogram v2.                                                                                                                                             |
+| **Edit** (image + prompt/mask) | AI (Replicate)  | manual | Instruct Pix2Pix, Flux Kontext, Relight (IC-Light), SD Inpainting, Flux Fill, Remove Object (LaMa), Flux ControlNet (Canny).                                                                                               |
+| **Stylize**                    | AI (Replicate)  | manual | AnimeGAN v2, Style Transfer (reference image + prompt), Face to Sticker.                                                                                                                                                   |
+| **Depth**                      | AI (Replicate)  | manual | Depth Anything v2 (grey + colour outputs), Marigold.                                                                                                                                                                       |
+| **Segment**                    | AI (Replicate)  | manual | SAM 2, SAM 3 (concept), Grounded SAM (mask / inverted / annotated / neg-annotated outputs).                                                                                                                                |
+| **Background removal**         | AI (Replicate)  | manual | BiRefNet, rembg / IS-Net, Bria RMBG 2.0.                                                                                                                                                                                   |
+| **Restore & upscale**          | AI (Replicate)  | manual | Real-ESRGAN, GFPGAN, CodeFormer, SUPIR, NAFNet (deblur), Colorize (DDColor), Clarity Upscaler.                                                                                                                             |
+| **Describe** (image→text)      | AI (Replicate)  | manual | Image Caption (BLIP), Moondream (VLM), LLaVA (VLM), CLIP Interrogator, OCR (text extract).                                                                                                                                 |
+| **Custom**                     | AI (Replicate)  | manual | Replicate (custom) — any model: set the slug, wire images/prompt, add anything else via JSON.                                                                                                                              |
+| **LLMs**                       | AI (OpenRouter) | manual | Llama 3.1 8B, Gemini Flash, GPT-4o mini, Claude 3.5 Haiku, custom — a prompt plus optional wired text input → text.                                                                                                        |
 
 AI models are grouped by capability in the **+ Add node** menu, which is
 sorted and has a live search filter.
@@ -152,6 +157,72 @@ independently. All image outputs are downloaded in parallel.
 > and everything is editable. If a call fails with a 404, fix the slug; if it
 > fails with a 422/"unknown input", adjust the input keys or the Extra-inputs
 > JSON to match the model's current schema on its Replicate page.
+
+## Gloss / spot-varnish maps
+
+A **spot-gloss (varnish) map** for UV printing is a deposition mask: shiny where a
+designer would want it, matte everywhere else. It is derived from the artwork with
+classical image processing — **no generative AI** — the same composable-graph
+approach as the heightmap flow. Stay greyscale while you shape and mix the signal,
+then binarise at print resolution as the very last step.
+
+**Why the print-prep steps exist** (print-shop practice, and the node that enforces each):
+
+| Rule                                   | Why                                                  | Node                                                    |
+| -------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
+| Land gloss on _meaningful_ features    | Random gloss reads as a printing error               | the signal (see below)                                  |
+| Minimum feature size ≈ 0.5–1 mm        | Sub-droplet speckles read as dirt and don't jet well | **Despeckle** (`minArea`)                               |
+| No pinholes inside gloss shapes        | Tiny matte holes look like defects                   | **Open / Close** (close), **Despeckle** (`minHoleArea`) |
+| Choke gloss 1–2 px inside colour edges | Registration slop otherwise leaves a shiny halo      | **Erode** (1 px)                                        |
+| Hard edges, not anti-aliased           | Grey edges dither into scattered varnish dots        | binarise **last** (**Auto Threshold**)                  |
+| Coverage roughly 5–30 %                | Contrast with matte _is_ the effect                  | **Gloss Preview** coverage %                            |
+
+**The shared print-prep tail** — every recipe ends the same way:
+
+```
+greyscale gloss signal
+  → Curves           (shape the response)
+  → Box Blur 1–2 px  (so the threshold cuts a clean contour)
+  → Auto Threshold   (binarise — Otsu or percentile, robust across images)
+  → Despeckle        (min feature size, fill pinholes)
+  → Open / Close     (close — seal remaining holes)
+  → Erode 1 px       (registration choke)
+  = final gloss map (binary, print resolution)
+```
+
+For printers that accept **multi-level gloss** (variable varnish density), swap
+Auto Threshold for **Posterize** to a few levels and skip the choke.
+
+**Where the gloss goes** — pick one signal, or blend several with `Combine (max)`:
+
+- **Painted highlights** ⭐ — **Highlight Extract**: real varnish exactly on the
+  glints the artist painted (eyes, metal, wet surfaces, rim light), so the printed
+  highlight moves under real light. Locally bright + desaturated; big radius keeps
+  skies/whites out.
+- **Tone bands** — **Auto Threshold** on the brightest (or, inverted, the darkest —
+  "dark luxury") N% of luminance.
+- **Vivid colour** — **Extract Channel → Saturation** → tail, to make inks pop.
+- **Materials** — **Grounded SAM** text-prompted with `eyes, metal, glass, water`,
+  masks OR-combined. Segmentation of what's in the image, not generation.
+- **Relief peaks** — feed the heightmap (or a **Depth Anything** map) through
+  **Auto Threshold (top ~20 %)** so the raised areas of a tactile print read shiny.
+- **Linework / type** — **Edge Detect → Dilate** → tail, for flat illustrations.
+
+Gate any signal with the subject mask (`Extract Channel (alpha) → Combine Masks
+(AND)`) so the background stays matte, and use **Area Picker** (+ `Combine Masks
+(A−B)`) as a manual add/subtract override.
+
+**Preview, don't guess.** End every graph in **Gloss Preview**: it simulates the
+print (Blinn-Phong specular over the art, using heightmap relief if wired) and
+reports **gloss coverage %** so you can keep it in the 5–30 % sweet spot. Click
+**Open editor…** on the node for an **interactive 3D preview** — a WebGL render
+of the print you can **drag to orbit** so the varnish flashes and travels across
+the relief as the surface tilts under a fixed light (scroll to zoom). Switch the
+drag mode to **Move light** to reposition the highlight; that choice is saved
+back to the node's azimuth/elevation so the flat preview and any export match.
+(No WebGL? The editor falls back to the flat preview.) The five **Spot gloss**
+entries in the empty-state examples (painted highlights, relief peaks, linework,
+materials, dark luxury) are ready-made starting points.
 
 ## Replicate & CORS
 

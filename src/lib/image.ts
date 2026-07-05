@@ -460,17 +460,24 @@ export function applyMask(img: RasterImage, mask: RasterImage): RasterImage {
   return out;
 }
 
-export type Channel = 'r' | 'g' | 'b' | 'a' | 'lum';
+export type Channel = 'r' | 'g' | 'b' | 'a' | 'lum' | 'sat' | 'val' | 'hue';
 
-/** Extract one channel (or luminance) as a greyscale, opaque image. */
+/** Extract one channel (luminance or an HSV component) as a greyscale, opaque image. */
 export function extractChannel(img: RasterImage, channel: Channel): RasterImage {
   const out = createImage(img.width, img.height, [0, 0, 0, 255]);
-  const offset = { r: 0, g: 1, b: 2, a: 3 }[channel === 'lum' ? 'r' : channel];
+  const rgbOffset = channel === 'r' || channel === 'g' || channel === 'b' || channel === 'a';
+  const offset = { r: 0, g: 1, b: 2, a: 3 }[rgbOffset ? (channel as 'r' | 'g' | 'b' | 'a') : 'r'];
   for (let i = 0; i < img.data.length; i += 4) {
-    const v =
-      channel === 'lum'
-        ? Math.round(luminance(img.data[i], img.data[i + 1], img.data[i + 2]))
-        : img.data[i + offset];
+    let v: number;
+    if (rgbOffset) {
+      v = img.data[i + offset];
+    } else if (channel === 'lum') {
+      v = Math.round(luminance(img.data[i], img.data[i + 1], img.data[i + 2]));
+    } else {
+      const [h, s, val] = rgbToHsv(img.data[i], img.data[i + 1], img.data[i + 2]);
+      const comp = channel === 'sat' ? s : channel === 'val' ? val : h;
+      v = Math.round(comp * 255);
+    }
     out.data[i] = v;
     out.data[i + 1] = v;
     out.data[i + 2] = v;
@@ -580,12 +587,20 @@ function blurPass(img: RasterImage, r: number, horizontal: boolean): RasterImage
   return out;
 }
 
-export type MorphOp = 'dilate' | 'erode';
+export type MorphOp = 'dilate' | 'erode' | 'open' | 'close';
+type BasicMorphOp = 'dilate' | 'erode';
+
+/** Separable two-pass dilate/erode at a fixed radius. */
+function morphBasic(img: RasterImage, r: number, op: BasicMorphOp): RasterImage {
+  return morphPass(morphPass(img, r, op, true), r, op, false);
+}
 
 /**
  * Greyscale morphology with a square structuring element (separable). `dilate`
  * grows bright regions (per-channel local max); `erode` shrinks them (local
- * min). On a white-on-black mask these grow / shrink the selection.
+ * min). `open` = erode-then-dilate (removes bright specks); `close` =
+ * dilate-then-erode (fills dark pinholes). On a white-on-black mask these grow /
+ * shrink / clean the selection.
  */
 export function morphology(img: RasterImage, radius: number, op: MorphOp): RasterImage {
   // Cap the radius at the largest dimension: beyond that the whole image is
@@ -593,10 +608,17 @@ export function morphology(img: RasterImage, radius: number, op: MorphOp): Raste
   // O(w·h·r) and would lock the main thread.
   const r = Math.min(Math.max(0, Math.floor(radius)), Math.max(img.width, img.height));
   if (r === 0) return cloneImage(img);
-  return morphPass(morphPass(img, r, op, true), r, op, false);
+  switch (op) {
+    case 'open':
+      return morphBasic(morphBasic(img, r, 'erode'), r, 'dilate');
+    case 'close':
+      return morphBasic(morphBasic(img, r, 'dilate'), r, 'erode');
+    default:
+      return morphBasic(img, r, op);
+  }
 }
 
-function morphPass(img: RasterImage, r: number, op: MorphOp, horizontal: boolean): RasterImage {
+function morphPass(img: RasterImage, r: number, op: BasicMorphOp, horizontal: boolean): RasterImage {
   const { width: w, height: h } = img;
   const out = createImage(w, h);
   const lines = horizontal ? h : w;
@@ -689,6 +711,29 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
     h /= 6;
   }
   return [h, s, l];
+}
+
+/**
+ * RGB (0–255) → HSV, each component in [0,1). Shared by the channel extractor
+ * and the highlight detector (dichromatic model: speculars are desaturated).
+ */
+export function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const v = max;
+  const d = max - min;
+  const s = max === 0 ? 0 : d / max;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+  }
+  return [h, s, v];
 }
 
 function hue2rgb(p: number, q: number, t: number): number {
@@ -1248,4 +1293,314 @@ export function applyCurve(img: RasterImage, lut: Uint8Array, channel: CurveChan
     if (b) out.data[i + 2] = lut[img.data[i + 2]];
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Gloss / spot-varnish map generation. A gloss map is a deposition mask: derive
+// a greyscale "glossiness" signal from the art (highlight extract), condition it
+// for the printer (auto threshold + despeckle), and simulate the print (gloss
+// preview). See GLOSS-MAP-PLAN.md.
+// ---------------------------------------------------------------------------
+
+export interface HighlightExtractOptions {
+  /** Local scale of the high-pass, px. Larger ⇒ only small, sharp glints score. */
+  radius: number;
+  /** 0 = off; higher rejects vivid flat colours (speculars are desaturated). */
+  satRejection: number;
+  /** Amplify the specular residual. */
+  gain: number;
+  /** Subtract before clamping (0–255) to kill faint texture. */
+  bias: number;
+}
+
+/**
+ * Painted-highlight extractor (dichromatic reflection model): speculars are
+ * *locally* bright and *desaturated*. Returns a greyscale, opaque "glossiness"
+ * map — a positive local high-pass of luminance, weighted down where the pixel
+ * is saturated. Reuses `boxBlur` for the local base level; O(n).
+ */
+export function highlightExtract(
+  img: RasterImage,
+  { radius, satRejection, gain, bias }: HighlightExtractOptions,
+): RasterImage {
+  const { width: w, height: h } = img;
+  const n = w * h;
+  // Opaque luminance image so the box blur's premultiply can't dim edges.
+  const lumImg = createImage(w, h, [0, 0, 0, 255]);
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    const l = luminance(img.data[i], img.data[i + 1], img.data[i + 2]);
+    lumImg.data[i] = l;
+    lumImg.data[i + 1] = l;
+    lumImg.data[i + 2] = l;
+  }
+  const base = boxBlur(lumImg, Math.max(0, Math.floor(radius)));
+  const out = createImage(w, h, [0, 0, 0, 255]);
+  const k = Math.max(0, satRejection);
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    let spec = (lumImg.data[i] - base.data[i] - bias) * gain;
+    if (spec < 0) spec = 0;
+    if (k > 0 && spec > 0) {
+      const [, s] = rgbToHsv(img.data[i], img.data[i + 1], img.data[i + 2]);
+      spec *= Math.pow(1 - s, k);
+    }
+    const v = spec > 255 ? 255 : spec;
+    out.data[i] = v;
+    out.data[i + 1] = v;
+    out.data[i + 2] = v;
+  }
+  return out;
+}
+
+export type AutoThresholdMode = 'otsu' | 'percentile';
+
+/**
+ * Compute the binarisation level (0–255) an Auto Threshold would pick — either
+ * the Otsu histogram valley or the level that leaves the brightest
+ * `percentile`% of pixels above it. Fully-transparent pixels are ignored.
+ */
+export function autoThresholdLevel(img: RasterImage, mode: AutoThresholdMode, percentile: number): number {
+  const hist = new Float64Array(256);
+  let total = 0;
+  for (let i = 0; i < img.data.length; i += 4) {
+    if (img.data[i + 3] === 0) continue;
+    hist[Math.round(luminance(img.data[i], img.data[i + 1], img.data[i + 2]))]++;
+    total++;
+  }
+  if (total === 0) return 128;
+  if (mode === 'percentile') {
+    const frac = Math.max(0, Math.min(100, percentile)) / 100;
+    const want = frac * total;
+    let acc = 0;
+    for (let v = 255; v >= 0; v--) {
+      acc += hist[v];
+      if (acc >= want) return v;
+    }
+    return 0;
+  }
+  // Otsu: maximise between-class variance over the histogram. `t` is the last
+  // background bin; since binarisation is `luminance >= level`, the cut sits one
+  // bin above it so the darker class stays off.
+  let sum = 0;
+  for (let v = 0; v < 256; v++) sum += v * hist[v];
+  let sumB = 0;
+  let wB = 0;
+  let maxVar = -1;
+  let t = 127;
+  for (let v = 0; v < 256; v++) {
+    wB += hist[v];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+    sumB += v * hist[v];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > maxVar) {
+      maxVar = between;
+      t = v;
+    }
+  }
+  return Math.min(255, t + 1);
+}
+
+export interface AutoThresholdOptions {
+  mode: AutoThresholdMode;
+  /** For 'percentile': the brightest N% become white. */
+  percentile: number;
+  invert: boolean;
+}
+
+/**
+ * Binarise at a level chosen from the actual histogram, so it survives dark or
+ * pale art where a fixed 0–255 threshold would break.
+ */
+export function autoThreshold(
+  img: RasterImage,
+  { mode, percentile, invert }: AutoThresholdOptions,
+): RasterImage {
+  return threshold(img, autoThresholdLevel(img, mode, percentile), invert);
+}
+
+/** Flip connected components of `on`-pixels equal to `value` that are too small
+ *  (and, when `enclosedOnly`, don't touch the image border). 4-connected. */
+function filterComponents(
+  on: Uint8Array,
+  w: number,
+  h: number,
+  value: number,
+  minSize: number,
+  enclosedOnly: boolean,
+): void {
+  const n = w * h;
+  const visited = new Uint8Array(n);
+  const stack: number[] = [];
+  const comp: number[] = [];
+  for (let start = 0; start < n; start++) {
+    if (visited[start] || on[start] !== value) continue;
+    stack.length = 0;
+    comp.length = 0;
+    stack.push(start);
+    visited[start] = 1;
+    let touchesBorder = false;
+    const push = (q: number) => {
+      if (!visited[q] && on[q] === value) {
+        visited[q] = 1;
+        stack.push(q);
+      }
+    };
+    while (stack.length) {
+      const p = stack.pop()!;
+      comp.push(p);
+      const x = p % w;
+      const y = (p - x) / w;
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touchesBorder = true;
+      if (x > 0) push(p - 1);
+      if (x < w - 1) push(p + 1);
+      if (y > 0) push(p - w);
+      if (y < h - 1) push(p + w);
+    }
+    if (comp.length < minSize && !(enclosedOnly && touchesBorder)) {
+      const flip = value === 1 ? 0 : 1;
+      for (const q of comp) on[q] = flip;
+    }
+  }
+}
+
+export interface DespeckleOptions {
+  /** Remove white islands smaller than this (px²) — the min-feature-size rule. */
+  minArea: number;
+  /** Fill enclosed black holes smaller than this (px²); 0 = off. */
+  minHoleArea: number;
+  /** Luminance cut for what counts as "on" (white). */
+  threshold: number;
+}
+
+/**
+ * Clean a (near-)binary mask: drop sub-minimum white specks and optionally fill
+ * interior pinholes, via a connected-component pass. Returns an opaque B/W mask.
+ */
+export function despeckle(
+  img: RasterImage,
+  { minArea, minHoleArea, threshold: t }: DespeckleOptions,
+): RasterImage {
+  const { width: w, height: h } = img;
+  const n = w * h;
+  const on = new Uint8Array(n);
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    on[p] = luminance(img.data[i], img.data[i + 1], img.data[i + 2]) >= t ? 1 : 0;
+  }
+  if (minArea > 1) filterComponents(on, w, h, 1, Math.floor(minArea), false);
+  if (minHoleArea > 0) filterComponents(on, w, h, 0, Math.floor(minHoleArea), true);
+  const out = createImage(w, h, [0, 0, 0, 255]);
+  for (let p = 0; p < n; p++) {
+    if (on[p]) {
+      out.data[p * 4] = 255;
+      out.data[p * 4 + 1] = 255;
+      out.data[p * 4 + 2] = 255;
+    }
+  }
+  return out;
+}
+
+export interface GlossPreviewOptions {
+  /** Light direction azimuth, degrees. */
+  azimuth: number;
+  /** Light elevation above the surface, degrees. */
+  elevation: number;
+  /** Blinn-Phong specular exponent (higher = tighter highlight). */
+  shininess: number;
+  /** Specular strength multiplier. */
+  intensity: number;
+  /** 0–1: darken non-gloss areas to suggest matte. */
+  matte: number;
+  /** Relief strength when a heightmap is supplied. */
+  heightStrength: number;
+}
+
+export interface GlossPreviewResult {
+  image: RasterImage;
+  /** Fraction 0–1 of pixels the gloss mask turns on (luminance ≥ 128). */
+  coverage: number;
+}
+
+/**
+ * Simulate a spot-gloss print: Blinn-Phong specular (from heightmap normals, or
+ * flat if none) screened over the artwork wherever the gloss mask is on, with an
+ * optional matte darkening of the rest. Also reports gloss coverage. Deterministic.
+ */
+export function glossPreview(
+  art: RasterImage,
+  gloss: RasterImage | undefined,
+  heightmap: RasterImage | undefined,
+  { azimuth, elevation, shininess, intensity, matte, heightStrength }: GlossPreviewOptions,
+): GlossPreviewResult {
+  const { width: w, height: h } = art;
+  const n = w * h;
+  const g = gloss ? (gloss.width === w && gloss.height === h ? gloss : resize(gloss, w, h)) : undefined;
+  const hm = heightmap
+    ? heightmap.width === w && heightmap.height === h
+      ? heightmap
+      : resize(heightmap, w, h)
+    : undefined;
+
+  const el = (elevation * Math.PI) / 180;
+  const az = (azimuth * Math.PI) / 180;
+  const Lx = Math.cos(el) * Math.cos(az);
+  const Ly = Math.cos(el) * Math.sin(az);
+  const Lz = Math.sin(el);
+  // Half-vector between the light and the (0,0,1) view direction.
+  let Hx = Lx;
+  let Hy = Ly;
+  let Hz = Lz + 1;
+  const hLen = Math.hypot(Hx, Hy, Hz) || 1;
+  Hx /= hLen;
+  Hy /= hLen;
+  Hz /= hLen;
+
+  const heightAt = hm
+    ? (x: number, y: number) => {
+        const cx = x < 0 ? 0 : x > w - 1 ? w - 1 : x;
+        const cy = y < 0 ? 0 : y > h - 1 ? h - 1 : y;
+        const i = (cy * w + cx) * 4;
+        return luminance(hm.data[i], hm.data[i + 1], hm.data[i + 2]) / 255;
+      }
+    : null;
+
+  const out = createImage(w, h);
+  let onCount = 0;
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    const x = p % w;
+    const y = (p - x) / w;
+    let nx = 0;
+    let ny = 0;
+    let nz = 1;
+    if (heightAt) {
+      const dx = (heightAt(x + 1, y) - heightAt(x - 1, y)) * heightStrength;
+      const dy = (heightAt(x, y + 1) - heightAt(x, y - 1)) * heightStrength;
+      nx = -dx;
+      ny = -dy;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len;
+      ny /= len;
+      nz /= len;
+    }
+    const nDotH = Math.max(0, nx * Hx + ny * Hy + nz * Hz);
+    const spec = Math.pow(nDotH, shininess) * intensity;
+    const gv = g ? luminance(g.data[i], g.data[i + 1], g.data[i + 2]) / 255 : 0;
+    if (gv >= 0.5) onCount++;
+    let specWhite = spec * gv;
+    if (specWhite < 0) specWhite = 0;
+    else if (specWhite > 1) specWhite = 1;
+    const mf = 1 - matte * (1 - gv);
+    for (let c = 0; c < 3; c++) {
+      const base = art.data[i + c] * mf;
+      out.data[i + c] = base + (255 - base) * specWhite;
+    }
+    out.data[i + 3] = art.data[i + 3];
+  }
+  return { image: out, coverage: n > 0 ? onCount / n : 0 };
 }
