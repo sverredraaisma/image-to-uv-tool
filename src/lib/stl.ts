@@ -24,6 +24,15 @@ export interface HeightmapOptions {
   /** Gaussian blur radius (σ, in pixels) applied to the heights before meshing,
    *  for a smoother surface. 0/undefined = off. The include mask is unaffected. */
   smooth?: number;
+  /**
+   * Merge same-height neighbours into large flat plateaus (greedy meshing) so
+   * simple art produces a tiny mesh. Trades the smooth per-pixel slopes for a
+   * blocky, quantised surface; ideal for posters / flat illustrations.
+   */
+  optimize?: boolean;
+  /** Optimize mode: number of discrete height bands (2–256). Fewer = more
+   *  merging = smaller mesh but chunkier relief. Default 16. */
+  heightLevels?: number;
 }
 
 type Tri = [number, number, number, number, number, number, number, number, number];
@@ -220,6 +229,186 @@ function buildMesh(img: RasterImage, opts: HeightmapOptions, emit: EmitTri, heig
   }
 }
 
+/**
+ * Optimized "flat plateau" mesher: quantises heights into bands, then greedy-
+ * meshes the top, bottom and vertical walls so runs of equal-height pixels
+ * collapse into a few large rectangles. A uniform block becomes 12 triangles
+ * regardless of resolution, so large-but-simple images produce tiny meshes.
+ *
+ * The surface has no holes (it slices/prints cleanly); greedy merging can leave
+ * T-junctions where a big face meets several small ones, which slicers handle.
+ * Allocation-light (one visited buffer, reused) so it runs twice for count+fill.
+ */
+function buildOptimizedMesh(
+  img: RasterImage,
+  opts: HeightmapOptions,
+  emit: EmitTri,
+  heightField: Float32Array,
+): void {
+  const { width: w, height: h, data } = img;
+  const ps = opts.width / w;
+  const N = Math.max(2, Math.min(256, Math.floor(opts.heightLevels ?? 16)));
+  const steps = N - 1;
+
+  // Per-pixel quantised level (from the possibly-smoothed height field).
+  const level = new Int16Array(w * h);
+  for (let p = 0; p < w * h; p++) {
+    const f = Math.max(0, Math.min(1, heightField[p]));
+    level[p] = Math.round(f * steps);
+  }
+
+  const included = (x: number, y: number): boolean => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return false;
+    if (opts.minWhite < 0) return true;
+    const i = (y * w + x) * 4;
+    return luminance(data[i], data[i + 1], data[i + 2]) >= opts.minWhite;
+  };
+  const zLevel = (lvl: number) => opts.baseThickness + (lvl / steps) * opts.depthRange;
+  // Top height of a column (0 for empty cells — used for wall spans).
+  const colTop = (x: number, y: number): number => (included(x, y) ? zLevel(level[y * w + x]) : 0);
+  const yTop = (row: number) => (h - row) * ps; // world Y at the top edge of `row`
+
+  const visited = new Uint8Array(w * h);
+
+  // --- Top faces: maximal same-level rectangles (+Z). ---
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      if (visited[j * w + i] || !included(i, j)) continue;
+      const lvl = level[j * w + i];
+      let wi = 1;
+      while (i + wi < w && !visited[j * w + i + wi] && included(i + wi, j) && level[j * w + i + wi] === lvl)
+        wi++;
+      let hj = 1;
+      grow: while (j + hj < h) {
+        for (let k = 0; k < wi; k++) {
+          const c = (j + hj) * w + (i + k);
+          if (visited[c] || !included(i + k, j + hj) || level[c] !== lvl) break grow;
+        }
+        hj++;
+      }
+      for (let b = 0; b < hj; b++) for (let a = 0; a < wi; a++) visited[(j + b) * w + (i + a)] = 1;
+      const x0 = i * ps;
+      const x1 = (i + wi) * ps;
+      const yT = yTop(j);
+      const yB = yTop(j + hj);
+      const z = zLevel(lvl);
+      emitQuad(emit, x0, yT, z, x0, yB, z, x1, yB, z, x1, yT, z);
+    }
+  }
+
+  // --- Bottom faces: maximal included rectangles at z=0 (−Z, reversed). ---
+  visited.fill(0);
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      if (visited[j * w + i] || !included(i, j)) continue;
+      let wi = 1;
+      while (i + wi < w && !visited[j * w + i + wi] && included(i + wi, j)) wi++;
+      let hj = 1;
+      growB: while (j + hj < h) {
+        for (let k = 0; k < wi; k++) {
+          const c = (j + hj) * w + (i + k);
+          if (visited[c] || !included(i + k, j + hj)) break growB;
+        }
+        hj++;
+      }
+      for (let b = 0; b < hj; b++) for (let a = 0; a < wi; a++) visited[(j + b) * w + (i + a)] = 1;
+      const x0 = i * ps;
+      const x1 = (i + wi) * ps;
+      const yT = yTop(j);
+      const yB = yTop(j + hj);
+      emitQuad(emit, x0, yT, 0, x1, yT, 0, x1, yB, 0, x0, yB, 0);
+    }
+  }
+
+  // Vertical wall (top edge p→q at zTop, down to zBot); skirt winding → outward.
+  const wall = (px: number, py: number, qx: number, qy: number, zTop: number, zBot: number) => {
+    emit(px, py, zTop, px, py, zBot, qx, qy, zBot);
+    emit(px, py, zTop, qx, qy, zBot, qx, qy, zTop);
+  };
+
+  // --- Vertical walls at each x-boundary, merged along Y. ---
+  for (let xb = 0; xb <= w; xb++) {
+    const x = xb * ps;
+    let dir = 0;
+    let zLo = 0;
+    let zHi = 0;
+    let jStart = 0;
+    const flush = (jEnd: number) => {
+      if (dir === 0) return;
+      const yHi = yTop(jStart); // larger Y (top of first row)
+      const yLo = yTop(jEnd); // smaller Y (bottom of last row)
+      // dir>0: left column taller ⇒ face exposed +X, wound +Y (low→high Y).
+      // dir<0: right column taller ⇒ face exposed −X, wound −Y (high→low Y).
+      if (dir > 0) wall(x, yLo, x, yHi, zHi, zLo);
+      else wall(x, yHi, x, yLo, zHi, zLo);
+    };
+    for (let j = 0; j < h; j++) {
+      const lz = colTop(xb - 1, j);
+      const rz = colTop(xb, j);
+      let d = 0;
+      let lo = 0;
+      let hi = 0;
+      if (lz > rz) {
+        d = 1;
+        lo = rz;
+        hi = lz;
+      } else if (rz > lz) {
+        d = -1;
+        lo = lz;
+        hi = rz;
+      }
+      if (d === dir && d !== 0 && lo === zLo && hi === zHi) continue; // extend run
+      flush(j);
+      dir = d;
+      zLo = lo;
+      zHi = hi;
+      jStart = j;
+    }
+    flush(h);
+  }
+
+  // --- Horizontal walls at each y-boundary, merged along X. ---
+  for (let yb = 0; yb <= h; yb++) {
+    const yw = yTop(yb);
+    let dir = 0;
+    let zLo = 0;
+    let zHi = 0;
+    let iStart = 0;
+    const flush = (iEnd: number) => {
+      if (dir === 0) return;
+      const xL = iStart * ps;
+      const xR = iEnd * ps;
+      // dir>0: upper row (larger Y) taller ⇒ face exposed −Y, wound +X (L→R).
+      // dir<0: lower row taller ⇒ face exposed +Y, wound −X (R→L).
+      if (dir > 0) wall(xL, yw, xR, yw, zHi, zLo);
+      else wall(xR, yw, xL, yw, zHi, zLo);
+    };
+    for (let i = 0; i < w; i++) {
+      const uz = colTop(i, yb - 1); // upper row (image row yb-1 = larger Y)
+      const dz = colTop(i, yb); // lower row
+      let d = 0;
+      let lo = 0;
+      let hi = 0;
+      if (uz > dz) {
+        d = 1;
+        lo = dz;
+        hi = uz;
+      } else if (dz > uz) {
+        d = -1;
+        lo = uz;
+        hi = dz;
+      }
+      if (d === dir && d !== 0 && lo === zLo && hi === zHi) continue;
+      flush(i);
+      dir = d;
+      zLo = lo;
+      zHi = hi;
+      iStart = i;
+    }
+    flush(w);
+  }
+}
+
 /** Collect the mesh triangles into arrays (used by tests / small previews). */
 export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh {
   const field = computeHeightField(img, opts);
@@ -318,6 +507,8 @@ export function stlToBinary(stl: StlValue): Uint8Array<ArrayBuffer> {
 
 /** Sanity ceiling on input dimensions (the STL node is manual, so this is high). */
 export const MAX_STL_PIXELS = 1_000_000; // ~1000×1000
+/** Optimize mode collapses flat regions, so it can take much larger images. */
+export const MAX_STL_PIXELS_OPTIMIZED = 6_000_000; // ~2450×2450
 /** Ceiling on output triangles (each is 9 floats = 36 bytes in the buffer). */
 export const MAX_STL_TRIANGLES = 8_000_000;
 
@@ -328,16 +519,21 @@ export const MAX_STL_TRIANGLES = 8_000_000;
  */
 export function heightmapToStl(img: RasterImage, opts: HeightmapOptions): StlValue {
   const pixels = img.width * img.height;
-  if (pixels > MAX_STL_PIXELS) {
+  // Optimize mode merges flat regions, so it can accept much larger images; the
+  // smooth per-pixel mesher keeps the tighter cap.
+  const cap = opts.optimize ? MAX_STL_PIXELS_OPTIMIZED : MAX_STL_PIXELS;
+  if (pixels > cap) {
+    const limit = opts.optimize ? '~2400×2400' : '~1000×1000';
     throw new Error(
-      `Heightmap too large (${pixels.toLocaleString()} px) — resize it below ~1000×1000 before generating an STL.`,
+      `Heightmap too large (${pixels.toLocaleString()} px) — resize it below ${limit} before generating an STL.`,
     );
   }
   // Smooth the height field once (if requested); reused by both passes.
   const field = computeHeightField(img, opts);
+  const build = opts.optimize ? buildOptimizedMesh : buildMesh;
   // Pass 1: count triangles (no allocation; wall count varies with the terrain).
   let count = 0;
-  buildMesh(
+  build(
     img,
     opts,
     () => {
@@ -347,13 +543,13 @@ export function heightmapToStl(img: RasterImage, opts: HeightmapOptions): StlVal
   );
   if (count > MAX_STL_TRIANGLES) {
     throw new Error(
-      `Mesh too detailed (${count.toLocaleString()} triangles) — raise "Min white" to include fewer pixels, or resize the heightmap smaller.`,
+      `Mesh too detailed (${count.toLocaleString()} triangles) — raise "Min white" to include fewer pixels${opts.optimize ? ', lower "Height levels",' : ''} or resize the heightmap smaller.`,
     );
   }
   // Pass 2: fill the buffer directly.
   const triangles = new Float32Array(count * 9);
   let o = 0;
-  buildMesh(
+  build(
     img,
     opts,
     (ax, ay, az, bx, by, bz, cx, cy, cz) => {

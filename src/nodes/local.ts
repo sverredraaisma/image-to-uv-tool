@@ -929,7 +929,7 @@ export const heightmapStlNode: NodeDefinition = {
   label: 'Heightmap → STL',
   category: 'Export',
   description:
-    'Turn a heightmap into an STL solid (white = tall). Manual: click Run — generation runs in a worker so a high-res heightmap won’t freeze the UI.',
+    'Turn a heightmap into an STL solid (white = tall). Manual: click Run — generation runs in a worker so a high-res heightmap won’t freeze the UI. Enable “Merge flat areas” to collapse equal-height regions into a much smaller mesh (great for simple art / big images).',
   // Manual: STL meshing is heavy, so only run on explicit Run (not on every edit).
   autoRun: false,
   inputs: [{ id: 'in', label: 'Heightmap', type: 'image' }],
@@ -940,8 +940,26 @@ export const heightmapStlNode: NodeDefinition = {
     { kind: 'number', key: 'depthRange', label: 'Depth range', min: 0, step: 0.1 },
     { kind: 'number', key: 'width', label: 'Width (units)', min: 0.0001, step: 1 },
     { kind: 'number', key: 'smooth', label: 'Smoothing (σ px, 0 = off)', min: 0, max: 10, step: 0.5 },
+    { kind: 'boolean', key: 'optimize', label: 'Merge flat areas (smaller mesh)' },
+    {
+      kind: 'number',
+      key: 'heightLevels',
+      label: 'Height levels (merge mode)',
+      min: 2,
+      max: 256,
+      step: 1,
+      advanced: true,
+    },
   ],
-  defaultConfig: () => ({ minWhite: 1, baseThickness: 0, depthRange: 10, width: 100, smooth: 0 }),
+  defaultConfig: () => ({
+    minWhite: 1,
+    baseThickness: 0,
+    depthRange: 10,
+    width: 100,
+    smooth: 0,
+    optimize: false,
+    heightLevels: 16,
+  }),
   compute: async ({ inputs, config, onProgress }) => {
     const img = asImage(inputs.in);
     if (!img) return { out: undefined };
@@ -951,6 +969,8 @@ export const heightmapStlNode: NodeDefinition = {
       depthRange: num(config.depthRange, 10),
       width: num(config.width, 100),
       smooth: num(config.smooth, 0),
+      optimize: bool(config.optimize, false),
+      heightLevels: num(config.heightLevels, 16),
     };
     onProgress?.('Generating STL…');
     // Off the main thread when a worker is available; identical sync fallback.

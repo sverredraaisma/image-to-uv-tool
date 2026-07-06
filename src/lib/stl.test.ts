@@ -218,3 +218,111 @@ describe('mesh orientation (H2 regression)', () => {
     for (const [, balance] of edges) expect(balance).toBe(0);
   });
 });
+
+// --- Optimize mode: greedy meshing of equal-height regions -------------------
+
+const stlToMesh = (stl: ReturnType<typeof heightmapToStl>): { tris: number[][] } => {
+  const tris: number[][] = [];
+  for (let i = 0; i < stl.triangleCount; i++) tris.push([...stl.triangles.slice(i * 9, i * 9 + 9)]);
+  return { tris };
+};
+
+describe('heightmapToStl optimize (greedy meshing)', () => {
+  it('collapses a uniform block to a 12-triangle box at any resolution', () => {
+    for (const n of [4, 40, 200]) {
+      const img = createImage(n, n, [255, 255, 255, 255]);
+      const stl = heightmapToStl(img, {
+        minWhite: -1,
+        baseThickness: 0,
+        depthRange: 10,
+        width: n,
+        optimize: true,
+      });
+      // top(2) + bottom(2) + 4 merged walls(2 each) = 12, independent of n.
+      expect(stl.triangleCount).toBe(12);
+    }
+  });
+
+  it('the merged box is watertight and outward-wound', () => {
+    const img = createImage(8, 8, [255, 255, 255, 255]);
+    const stl = heightmapToStl(img, {
+      minWhite: -1,
+      baseThickness: 3,
+      depthRange: 7,
+      width: 8,
+      optimize: true,
+    });
+    const mesh = stlToMesh(stl);
+    // Every directed edge has an opposite twin (closed, consistent winding).
+    const key = (p: Vec3) => `${p[0]},${p[1]},${p[2]}`;
+    const edges = new Map<string, number>();
+    for (const { a, b, c } of meshTris(mesh)) {
+      for (const [u, v] of [
+        [a, b],
+        [b, c],
+        [c, a],
+      ] as [Vec3, Vec3][]) {
+        edges.set(`${key(u)}->${key(v)}`, (edges.get(`${key(u)}->${key(v)}`) ?? 0) + 1);
+        edges.set(`${key(v)}->${key(u)}`, (edges.get(`${key(v)}->${key(u)}`) ?? 0) - 1);
+      }
+    }
+    for (const [, bal] of edges) expect(bal).toBe(0);
+    // Outward normals from the box centre.
+    const centre: Vec3 = [4, 4, (3 + 7) / 2];
+    for (const { a, b, c } of meshTris(mesh)) {
+      const n = triNormal(a, b, c);
+      const cen: Vec3 = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
+      const dot = n[0] * (cen[0] - centre[0]) + n[1] * (cen[1] - centre[1]) + n[2] * (cen[2] - centre[2]);
+      expect(dot).toBeGreaterThan(0);
+    }
+  });
+
+  it('is dramatically smaller than the smooth mesher on flat art', () => {
+    const img = createImage(60, 60, [255, 255, 255, 255]);
+    const opts = { minWhite: -1, baseThickness: 1, depthRange: 10, width: 60 };
+    const smooth = heightmapToStl(img, opts);
+    const merged = heightmapToStl(img, { ...opts, optimize: true });
+    expect(merged.triangleCount).toBe(12);
+    expect(smooth.triangleCount).toBeGreaterThan(merged.triangleCount * 100);
+    expect([...merged.triangles].some(Number.isNaN)).toBe(false);
+  });
+
+  it('meshes a two-level split without NaN and stays compact', () => {
+    // Left half low, right half high.
+    const img = createImage(20, 20, [40, 40, 40, 255]);
+    for (let y = 0; y < 20; y++)
+      for (let x = 10; x < 20; x++) img.data.set([220, 220, 220, 255], (y * 20 + x) * 4);
+    const stl = heightmapToStl(img, {
+      minWhite: -1,
+      baseThickness: 1,
+      depthRange: 10,
+      width: 20,
+      optimize: true,
+      heightLevels: 8,
+    });
+    expect(stl.triangleCount).toBeGreaterThan(0);
+    expect(stl.triangleCount).toBeLessThan(60); // two plateaus + a seam, not per-pixel
+    expect([...stl.triangles].some(Number.isNaN)).toBe(false);
+  });
+
+  it('fewer height levels merge more (never more triangles) on a gradient', () => {
+    const img = createImage(64, 8);
+    for (let y = 0; y < 8; y++)
+      for (let x = 0; x < 64; x++) {
+        const v = Math.round((x / 63) * 255);
+        img.data.set([v, v, v, 255], (y * 64 + x) * 4);
+      }
+    const opts = { minWhite: -1, baseThickness: 0, depthRange: 10, width: 64, optimize: true };
+    const coarse = heightmapToStl(img, { ...opts, heightLevels: 4 });
+    const fine = heightmapToStl(img, { ...opts, heightLevels: 64 });
+    expect(coarse.triangleCount).toBeLessThanOrEqual(fine.triangleCount);
+  });
+
+  it('accepts a heightmap larger than the smooth-mode cap when optimizing', () => {
+    const img = createImage(1100, 1000, [255, 255, 255, 255]); // 1.1M px > 1M smooth cap
+    const opts = { minWhite: -1, baseThickness: 0, depthRange: 10, width: 100 };
+    expect(() => heightmapToStl(img, opts)).toThrow(/too large/i); // smooth rejects
+    const merged = heightmapToStl(img, { ...opts, optimize: true });
+    expect(merged.triangleCount).toBe(12); // optimize accepts and collapses it
+  });
+});
