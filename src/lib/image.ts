@@ -389,6 +389,43 @@ export function crop(img: RasterImage, x: number, y: number, w: number, h: numbe
   return out;
 }
 
+/**
+ * Alpha-composite `overlay` over a copy of `base` with its top-left at (x, y)
+ * (source-over). The overlay is clipped to the base bounds and `base` is not
+ * mutated. Pairs with `crop` + resize to drop a processed region back onto an
+ * image at a known position.
+ */
+export function pasteImage(base: RasterImage, overlay: RasterImage, x: number, y: number): RasterImage {
+  const out = cloneImage(base);
+  const ox = Math.round(x);
+  const oy = Math.round(y);
+  for (let j = 0; j < overlay.height; j++) {
+    const by = oy + j;
+    if (by < 0 || by >= base.height) continue;
+    for (let i = 0; i < overlay.width; i++) {
+      const bx = ox + i;
+      if (bx < 0 || bx >= base.width) continue;
+      const si = (j * overlay.width + i) * 4;
+      const di = (by * base.width + bx) * 4;
+      const sa = overlay.data[si + 3] / 255;
+      if (sa <= 0) continue; // fully transparent source — leave base untouched
+      const da = out.data[di + 3] / 255;
+      const outA = sa + da * (1 - sa);
+      if (outA <= 0) {
+        out.data[di + 3] = 0;
+        continue;
+      }
+      for (let c = 0; c < 3; c++) {
+        const s = overlay.data[si + c];
+        const d = out.data[di + c];
+        out.data[di + c] = Math.round((s * sa + d * da * (1 - sa)) / outA);
+      }
+      out.data[di + 3] = Math.round(outA * 255);
+    }
+  }
+  return out;
+}
+
 /** Extend the canvas by `amount` px on every side with transparent padding. */
 export function pad(img: RasterImage, amount: number): RasterImage {
   const a = Math.max(0, Math.floor(amount));

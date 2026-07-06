@@ -29,6 +29,7 @@ import {
   normalize,
   opacity,
   pad,
+  pasteImage,
   removeColor,
   resize,
   resizeBilinear,
@@ -52,7 +53,8 @@ import { magicWandMask, type Point } from '../lib/magicWand';
 import { heightmapToStl } from '../lib/stl';
 import { isBlobRef } from '../lib/blobStore';
 import { runHeavyOp } from '../lib/heavyOps';
-import { asImage, bool, num, str } from './helpers';
+import { formatRegion, parseRegion } from '../lib/region';
+import { asImage, asText, bool, num, str } from './helpers';
 
 /**
  * Helper for the very common single-image-in / single-image-out, auto-run node.
@@ -576,6 +578,79 @@ export const cropNode = singleImageOp({
       num(config.height, img.height),
     ),
 });
+
+export const splitRegionNode: NodeDefinition = {
+  type: 'splitRegion',
+  label: 'Split Region',
+  category: 'Transform',
+  description:
+    'Cut a rectangular region out as its own image, plus its coordinates + size. Wire "Coords" into Place Image to composite the (processed) region back exactly where it came from.',
+  autoRun: true,
+  inputs: [{ id: 'in', label: 'Image', type: 'image' }],
+  outputs: [
+    { id: 'out', label: 'Region', type: 'image' },
+    { id: 'coords', label: 'Coords', type: 'text' },
+  ],
+  configFields: [
+    { kind: 'number', key: 'x', label: 'X', min: 0, step: 1 },
+    { kind: 'number', key: 'y', label: 'Y', min: 0, step: 1 },
+    { kind: 'number', key: 'width', label: 'Width', min: 1, step: 1 },
+    { kind: 'number', key: 'height', label: 'Height', min: 1, step: 1 },
+  ],
+  defaultConfig: () => ({ x: 0, y: 0, width: 256, height: 256 }),
+  compute: ({ inputs, config }) => {
+    const img = asImage(inputs.in);
+    if (!img) return { out: undefined, coords: undefined };
+    const rx = Math.max(0, Math.floor(num(config.x, 0)));
+    const ry = Math.max(0, Math.floor(num(config.y, 0)));
+    const cropped = crop(img, rx, ry, num(config.width, img.width), num(config.height, img.height));
+    // Report the ACTUAL (clamped) rectangle — its size matches the cropped
+    // image, so Place Image can put it back at exactly this spot.
+    const region = { x: rx, y: ry, width: cropped.width, height: cropped.height };
+    return { out: cropped, coords: { kind: 'text', text: formatRegion(region) } };
+  },
+};
+
+export const placeImageNode: NodeDefinition = {
+  type: 'placeImage',
+  label: 'Place Image',
+  category: 'Compose',
+  description:
+    'Composite an overlay onto a base image at given coordinates + size. Wire "Coords" from Split Region to drop a processed region back where it came from; the overlay is scaled to the coords size.',
+  autoRun: true,
+  inputs: [
+    { id: 'base', label: 'Base', type: 'image', required: true },
+    { id: 'overlay', label: 'Overlay', type: 'image', required: true },
+    { id: 'coords', label: 'Coords', type: 'text' },
+  ],
+  outputs: [{ id: 'out', label: 'Image', type: 'image' }],
+  configFields: [
+    { kind: 'number', key: 'x', label: 'X', step: 1 },
+    { kind: 'number', key: 'y', label: 'Y', step: 1 },
+    { kind: 'number', key: 'width', label: 'Width (0 = overlay size)', min: 0, step: 1 },
+    { kind: 'number', key: 'height', label: 'Height (0 = overlay size)', min: 0, step: 1 },
+  ],
+  defaultConfig: () => ({ x: 0, y: 0, width: 0, height: 0 }),
+  compute: ({ inputs, config }) => {
+    const base = asImage(inputs.base);
+    const overlay = asImage(inputs.overlay);
+    if (!base || !overlay) return { out: undefined };
+    // A wired, valid Coords value overrides the manual x/y/width/height.
+    const coordsText = asText(inputs.coords);
+    const region = coordsText ? parseRegion(coordsText) : null;
+    const x = region ? region.x : num(config.x, 0);
+    const y = region ? region.y : num(config.y, 0);
+    // width/height of 0 means "keep the overlay's own size".
+    let w = region ? region.width : num(config.width, 0);
+    let h = region ? region.height : num(config.height, 0);
+    if (w <= 0) w = overlay.width;
+    if (h <= 0) h = overlay.height;
+    w = Math.max(1, Math.round(w));
+    h = Math.max(1, Math.round(h));
+    const scaled = w === overlay.width && h === overlay.height ? overlay : resizeBilinear(overlay, w, h);
+    return { out: pasteImage(base, scaled, x, y) };
+  },
+};
 
 export const resizeNode = singleImageOp({
   type: 'resize',
@@ -1132,6 +1207,8 @@ export const localNodes: NodeDefinition[] = [
   outlineNode,
   alphaCleanupNode,
   cropNode,
+  splitRegionNode,
+  placeImageNode,
   resizeNode,
   rotateAngleNode,
   padNode,
