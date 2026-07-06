@@ -42,7 +42,17 @@ export interface AiSpec {
   output?: 'image' | 'text';
   /** Expose a first-class "seed" input (blank = random) for reproducibility. */
   seed?: boolean;
+  /** Override the group-derived generative-AI classification. */
+  genAI?: boolean;
 }
+
+/**
+ * Capability groups that synthesise brand-new imagery (vs. analysing/enhancing
+ * an existing one). Nodes in these groups are flagged `genAI` so the header
+ * "Gen AI" toggle can hide them. Utility groups — Segment, Depth, Background
+ * removal, Restore & upscale, Describe — are not generative and stay visible.
+ */
+const GENERATIVE_GROUPS = new Set(['Generate', 'Edit', 'Stylize', 'Custom']);
 
 /** A seed scalar: blank omits it (random), a number makes the run reproducible. */
 const SEED_SCALAR: AiScalar = {
@@ -116,6 +126,7 @@ export function makeReplicateNode(spec: AiSpec): NodeDefinition {
     category: 'AI (Replicate)',
     group: spec.group,
     description: spec.description,
+    genAI: spec.genAI ?? GENERATIVE_GROUPS.has(spec.group),
     autoRun: false,
     inputs,
     outputs: outputPorts.map((o) => ({ id: o.id, label: o.label, type: o.type })),

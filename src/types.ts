@@ -117,6 +117,12 @@ export interface NodeDefinition {
   compute: (ctx: ComputeContext) => Promise<ComputeResult> | ComputeResult;
   /** Node exposes a large custom editor popup (e.g. the area picker). */
   customEditor?: string;
+  /**
+   * Uses generative AI to synthesise new imagery/text (as opposed to analysing
+   * or enhancing an existing image). Drives the header "Gen AI" toggle (hides
+   * these from the menus) and shows a badge on the node.
+   */
+  genAI?: boolean;
 }
 
 // ---------------------------------------------------------------------------

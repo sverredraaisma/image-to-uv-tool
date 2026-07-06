@@ -19,6 +19,8 @@ function makeLlmNode(spec: LlmSpec): NodeDefinition {
     label: spec.label,
     category: 'AI (OpenRouter)',
     description: spec.description,
+    // LLMs synthesise new text — generative AI, so the toggle can hide them.
+    genAI: true,
     autoRun: false,
     inputs: [{ id: 'text', label: 'Text', type: 'text' }],
     outputs: [{ id: 'out', label: 'Text', type: 'text' }],

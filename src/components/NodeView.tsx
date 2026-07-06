@@ -134,6 +134,11 @@ export function NodeView({ id, selected }: NodeProps) {
           {statusMeta.icon}
         </span>
         <span className="node-title">{def.label}</span>
+        {def.genAI && (
+          <span className="genai-badge" title="Generative AI node">
+            ✦
+          </span>
+        )}
         <span className="node-actions">
           <button
             type="button"

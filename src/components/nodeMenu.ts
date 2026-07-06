@@ -8,6 +8,8 @@ export interface MenuNode {
   description?: string;
   category: string;
   group?: string;
+  /** Generative-AI node — hidden when the "Gen AI" toggle is off. */
+  genAI?: boolean;
 }
 
 export interface MenuGroup {
@@ -54,12 +56,14 @@ const orderedKeys = (values: Iterable<string>, order: string[]): string[] =>
 
 /**
  * Build the grouped, sorted, filtered menu structure. `test.*` node types are
- * excluded. An empty query returns everything.
+ * excluded. An empty query returns everything. When `showGenAI` is false,
+ * generative-AI nodes are hidden.
  */
-export function buildNodeMenu(nodes: MenuNode[], query = ''): MenuCategory[] {
+export function buildNodeMenu(nodes: MenuNode[], query = '', showGenAI = true): MenuCategory[] {
   const q = query.trim().toLowerCase();
   const visible = nodes.filter((n) => {
     if (n.type.startsWith('test.')) return false;
+    if (!showGenAI && n.genAI) return false;
     if (!q) return true;
     return `${n.label} ${n.description ?? ''} ${n.category} ${n.group ?? ''}`.toLowerCase().includes(q);
   });

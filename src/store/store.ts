@@ -128,6 +128,8 @@ export interface StoreState {
   apiKey: string;
   openRouterKey: string;
   proxyUrl: string;
+  /** When false, generative-AI nodes are hidden from the add-node menus. */
+  showGenAI: boolean;
 
   pendingConnection: PendingConnection | null;
   selectedNodeId: string | null;
@@ -157,6 +159,7 @@ export interface StoreState {
   setApiKey: (key: string) => void;
   setOpenRouterKey: (key: string) => void;
   setProxyUrl: (url: string) => void;
+  setShowGenAI: (show: boolean) => void;
 
   // graph mutation
   addNode: (type: string, position?: { x: number; y: number }) => string;
@@ -250,6 +253,7 @@ export const useStore = create<StoreState>()(
       apiKey: '',
       openRouterKey: '',
       proxyUrl: '',
+      showGenAI: true,
       pendingConnection: null,
       selectedNodeId: null,
       selectedNodeIds: [],
@@ -264,6 +268,7 @@ export const useStore = create<StoreState>()(
       setApiKey: (key) => set({ apiKey: key }),
       setOpenRouterKey: (key) => set({ openRouterKey: key }),
       setProxyUrl: (url) => set({ proxyUrl: url }),
+      setShowGenAI: (show) => set({ showGenAI: show }),
 
       addNode: (type, position) => {
         get()._snapshot();
@@ -939,6 +944,7 @@ export const useStore = create<StoreState>()(
         apiKey: s.apiKey,
         openRouterKey: s.openRouterKey,
         proxyUrl: s.proxyUrl,
+        showGenAI: s.showGenAI,
       }),
       // Sanitize the rehydrated graph the same way loadGraph does, so a
       // corrupt/partially-written localStorage entry can't crash on startup.
@@ -956,6 +962,8 @@ export const useStore = create<StoreState>()(
           apiKey: asString(p.apiKey),
           openRouterKey: asString(p.openRouterKey),
           proxyUrl: asString(p.proxyUrl),
+          // Default to visible (true) if the persisted value isn't a boolean.
+          showGenAI: typeof p.showGenAI === 'boolean' ? p.showGenAI : true,
         };
       },
     },

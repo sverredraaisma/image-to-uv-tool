@@ -94,6 +94,8 @@ export function Toolbar() {
   const redo = useStore((s) => s.redo);
   const canUndo = useStore((s) => s.history.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
+  const showGenAI = useStore((s) => s.showGenAI);
+  const setShowGenAI = useStore((s) => s.setShowGenAI);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onSave = async () => {
@@ -180,6 +182,22 @@ export function Toolbar() {
         </button>
         <button type="button" className="btn" onClick={redo} disabled={!canRedo} title="Redo">
           ↷
+        </button>
+        <button
+          type="button"
+          className={`btn btn-toggle ${showGenAI ? 'btn-toggle-on' : ''}`}
+          onClick={() => setShowGenAI(!showGenAI)}
+          aria-pressed={showGenAI}
+          title={
+            showGenAI
+              ? 'Generative AI nodes are shown — click to hide them'
+              : 'Generative AI nodes are hidden — click to show them'
+          }
+        >
+          <span className="genai-badge" aria-hidden="true">
+            ✦
+          </span>
+          Gen AI {showGenAI ? 'on' : 'off'}
         </button>
         <AddNodeMenu />
         <ExamplesMenu />

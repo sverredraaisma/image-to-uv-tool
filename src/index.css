@@ -181,6 +181,29 @@ textarea {
   color: var(--error);
 }
 
+/* "Gen AI" header toggle + node badge. */
+.btn-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-toggle-on {
+  border-color: #a175f5;
+  color: #c7acff;
+}
+.genai-badge {
+  color: #b18cf5;
+  font-size: 11px;
+  line-height: 1;
+  flex: none;
+}
+.btn-toggle:not(.btn-toggle-on) .genai-badge {
+  opacity: 0.5;
+}
+.node-header .genai-badge {
+  margin-left: -2px;
+}
+
 /* ---------------- Add-node menu ---------------- */
 .add-node {
   position: relative;

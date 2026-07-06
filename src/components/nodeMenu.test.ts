@@ -17,6 +17,11 @@ const nodes: MenuNode[] = [
   { type: 'test.thing', label: 'Test', category: 'test' },
 ];
 
+// The generative-AI subset (Flux) carries the genAI flag; utilities don't.
+const nodesWithGenAI: MenuNode[] = nodes.map((n) =>
+  n.type === 'flux' ? { ...n, genAI: true } : n,
+);
+
 describe('buildNodeMenu', () => {
   it('orders categories by priority and excludes test nodes', () => {
     const menu = buildNodeMenu(nodes);
@@ -43,5 +48,22 @@ describe('buildNodeMenu', () => {
     // group name match
     expect(buildNodeMenu(nodes, 'segment')[0].groups[0].items[0].label).toBe('SAM 2');
     expect(buildNodeMenu(nodes, 'nomatch')).toHaveLength(0);
+  });
+
+  it('hides generative-AI nodes when showGenAI is false, keeps AI utilities', () => {
+    const menu = buildNodeMenu(nodesWithGenAI, '', false);
+    const ai = menu.find((c) => c.category === 'AI (Replicate)');
+    const labels = ai?.groups.flatMap((g) => g.items.map((i) => i.label)) ?? [];
+    expect(labels).not.toContain('Flux'); // generative — hidden
+    expect(labels).toEqual(expect.arrayContaining(['SAM 2', 'BLIP'])); // utilities — kept
+    // Non-AI nodes are unaffected.
+    expect(menu.some((c) => c.category === 'Adjust')).toBe(true);
+  });
+
+  it('shows generative-AI nodes when showGenAI is true (default)', () => {
+    const labels = buildNodeMenu(nodesWithGenAI, '', true)
+      .flatMap((c) => c.groups)
+      .flatMap((g) => g.items.map((i) => i.label));
+    expect(labels).toContain('Flux');
   });
 });

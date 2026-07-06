@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { allNodeDefs } from '../engine/registry';
+import { useStore } from '../store/store';
 import { buildNodeMenu, type MenuCategory } from './nodeMenu';
 
 /** Searchable, multi-layered node menu shared by the toolbar "Add node" button
@@ -8,8 +9,9 @@ import { buildNodeMenu, type MenuCategory } from './nodeMenu';
 export function NodePicker({ onPick, onClose }: { onPick: (type: string) => void; onClose: () => void }) {
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const showGenAI = useStore((s) => s.showGenAI);
   const nodes = useMemo(() => allNodeDefs(), []);
-  const menu = buildNodeMenu(nodes, query);
+  const menu = buildNodeMenu(nodes, query, showGenAI);
   const searching = query.trim().length > 0;
 
   const countItems = (cat: MenuCategory) => cat.groups.reduce((n, g) => n + g.items.length, 0);
