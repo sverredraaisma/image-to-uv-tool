@@ -133,6 +133,18 @@ export interface StoreState {
   selectedNodeId: string | null;
   /** Full multi-selection from the canvas (for group duplicate / delete). */
   selectedNodeIds: string[];
+  /**
+   * One-shot request for the canvas to select exactly these nodes (e.g. a
+   * freshly added / pasted node), then clear it. Runtime-only, never persisted.
+   */
+  pendingSelectIds: string[];
+  /**
+   * Installed by the canvas (which lives inside the React Flow provider) so
+   * out-of-provider UI — the toolbar "Add node" menu — can drop a node at the
+   * current viewport centre instead of a fixed off-screen spot. Null until the
+   * canvas mounts. Runtime-only, never persisted.
+   */
+  viewportCenter: (() => { x: number; y: number }) | null;
   editorNodeId: string | null;
   preview: PreviewState | null;
   toasts: Toast[];
@@ -172,6 +184,8 @@ export interface StoreState {
   // selection / editor / preview
   selectNode: (id: string | null) => void;
   setSelection: (ids: string[]) => void;
+  clearPendingSelect: () => void;
+  setViewportCenter: (fn: (() => { x: number; y: number }) | null) => void;
   openEditor: (id: string | null) => void;
   openPreview: (value: DataValue, title: string) => void;
   closePreview: () => void;
@@ -239,6 +253,8 @@ export const useStore = create<StoreState>()(
       pendingConnection: null,
       selectedNodeId: null,
       selectedNodeIds: [],
+      pendingSelectIds: [],
+      viewportCenter: null,
       editorNodeId: null,
       preview: null,
       toasts: [],
@@ -253,15 +269,16 @@ export const useStore = create<StoreState>()(
         get()._snapshot();
         const def = getNodeDef(type);
         const id = genId('n');
-        const node: GraphNode = {
-          id,
-          type,
-          position: position ?? { x: 120, y: 120 },
-          config: def.defaultConfig(),
-        };
+        // No explicit position (e.g. the toolbar menu) → drop it at the current
+        // viewport centre so it's never placed off-screen. Falls back to a fixed
+        // spot before the canvas has installed its centre getter.
+        const pos = position ?? get().viewportCenter?.() ?? { x: 120, y: 120 };
+        const node: GraphNode = { id, type, position: pos, config: def.defaultConfig() };
         set((s) => ({
           nodes: [...s.nodes, node],
           runtime: { ...s.runtime, [id]: defaultRuntime() },
+          // Ask the canvas to select the new node so it's easy to spot.
+          pendingSelectIds: [id],
         }));
         void get().processAutoRun();
         return id;
@@ -279,7 +296,11 @@ export const useStore = create<StoreState>()(
           // config is JSON-serialisable (it is persisted), so a clone is safe.
           config: JSON.parse(JSON.stringify(src.config)),
         };
-        set((s) => ({ nodes: [...s.nodes, node], runtime: { ...s.runtime, [newId]: defaultRuntime() } }));
+        set((s) => ({
+          nodes: [...s.nodes, node],
+          runtime: { ...s.runtime, [newId]: defaultRuntime() },
+          pendingSelectIds: [newId],
+        }));
         void get().processAutoRun();
         return newId;
       },
@@ -299,6 +320,7 @@ export const useStore = create<StoreState>()(
             ...s.runtime,
             ...Object.fromEntries(newNodes.map((n) => [n.id, defaultRuntime()])),
           },
+          pendingSelectIds: newNodes.map((n) => n.id),
         }));
         void get().processAutoRun();
         return newNodes.map((n) => n.id);
@@ -336,6 +358,7 @@ export const useStore = create<StoreState>()(
           },
           selectedNodeIds: newNodes.map((n) => n.id),
           selectedNodeId: newNodes.length === 1 ? newNodes[0].id : null,
+          pendingSelectIds: newNodes.map((n) => n.id),
         }));
         void get().processAutoRun();
         return newNodes.map((n) => n.id);
@@ -572,6 +595,8 @@ export const useStore = create<StoreState>()(
 
       selectNode: (id) => set({ selectedNodeId: id, selectedNodeIds: id ? [id] : [] }),
       setSelection: (ids) => set({ selectedNodeIds: ids, selectedNodeId: ids.length === 1 ? ids[0] : null }),
+      clearPendingSelect: () => set((s) => (s.pendingSelectIds.length ? { pendingSelectIds: [] } : s)),
+      setViewportCenter: (fn) => set({ viewportCenter: fn }),
       openEditor: (id) => set({ editorNodeId: id }),
       openPreview: (value, title) => set({ preview: { value, title } }),
       closePreview: () => set({ preview: null }),
@@ -816,6 +841,7 @@ export const useStore = create<StoreState>()(
           pendingConnection: null,
           selectedNodeId: null,
           selectedNodeIds: [],
+          pendingSelectIds: [],
           editorNodeId: null,
           preview: null,
           toasts: [],

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -46,6 +46,9 @@ function FlowCanvas() {
   const removeEdge = useStore((s) => s.removeEdge);
   const selectNode = useStore((s) => s.selectNode);
   const setSelection = useStore((s) => s.setSelection);
+  const pendingSelectIds = useStore((s) => s.pendingSelectIds);
+  const clearPendingSelect = useStore((s) => s.clearPendingSelect);
+  const setViewportCenter = useStore((s) => s.setViewportCenter);
   const addNode = useStore((s) => s.addNode);
   const updateNodeConfig = useStore((s) => s.updateNodeConfig);
   const loadGraph = useStore((s) => s.loadGraph);
@@ -55,7 +58,22 @@ function FlowCanvas() {
   const addToast = useStore((s) => s.addToast);
 
   const { screenToFlowPosition } = useReactFlow();
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  // Expose the current viewport centre (in flow coords) so the toolbar's
+  // "Add node" menu — which lives outside the React Flow provider — can drop a
+  // node where the user is actually looking. The small offset roughly centres
+  // the node body rather than its top-left corner.
+  useEffect(() => {
+    setViewportCenter(() => {
+      const rect = wrapperRef.current?.getBoundingClientRect();
+      if (!rect) return { x: 120, y: 120 };
+      const p = screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+      return { x: p.x - 110, y: p.y - 40 };
+    });
+    return () => setViewportCenter(null);
+  }, [screenToFlowPosition, setViewportCenter]);
 
   // Nodes live in local React Flow state for smooth dragging; only the final
   // dropped position is written back to the (persisted) store.
@@ -100,6 +118,23 @@ function FlowCanvas() {
     );
   }, [storeEdges, setRfEdges]);
 
+  // One-shot: select exactly the nodes the store just asked for (a freshly
+  // added / duplicated / pasted node), deselecting the rest, then clear the
+  // request. Runs after the storeNodes sync above, so the new node already
+  // exists in rfNodes by the time this maps over it.
+  useEffect(() => {
+    if (!pendingSelectIds.length) return;
+    const want = new Set(pendingSelectIds);
+    setRfNodes((prev) =>
+      prev.map((n) => {
+        const sel = want.has(n.id);
+        return n.selected === sel ? n : { ...n, selected: sel };
+      }),
+    );
+    setSelection(pendingSelectIds);
+    clearPendingSelect();
+  }, [pendingSelectIds, setRfNodes, setSelection, clearPendingSelect]);
+
   const handleNodesChange = (changes: NodeChange<Node>[]) => {
     onNodesChange(changes); // keep local state smooth (drag, select…)
     // Batch a multi-selection delete into one store mutation (single undo step).
@@ -139,6 +174,7 @@ function FlowCanvas() {
 
   return (
     <div
+      ref={wrapperRef}
       className={`canvas ${pending ? 'connecting' : ''}`}
       onDrop={(e) => void onDrop(e)}
       onDragOver={(e) => e.preventDefault()}

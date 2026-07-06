@@ -9,12 +9,12 @@ import type { SavedGraph } from '../types';
 
 function AddNodeMenu() {
   const addNode = useStore((s) => s.addNode);
-  const nodeCount = useStore((s) => s.nodes.length);
   const [open, setOpen] = useState(false);
 
   const close = () => setOpen(false);
   const pick = (type: string) => {
-    addNode(type, { x: 60 + (nodeCount % 8) * 34, y: 90 + (nodeCount % 8) * 34 });
+    // No position → the store drops it at the current viewport centre.
+    addNode(type);
     close();
   };
 
