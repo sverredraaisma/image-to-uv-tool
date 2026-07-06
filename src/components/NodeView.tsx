@@ -48,6 +48,7 @@ export function NodeView({ id, selected }: NodeProps) {
   const removeNode = useStore((s) => s.removeNode);
   const openEditor = useStore((s) => s.openEditor);
   const openPreview = useStore((s) => s.openPreview);
+  const requestPreview = useStore((s) => s.requestPreview);
   const updateNodeConfig = useStore((s) => s.updateNodeConfig);
   const enterPipeline = useStore((s) => s.enterPipeline);
   const editingPipeline = useStore((s) => s.editStack.length > 0);
@@ -120,7 +121,8 @@ export function NodeView({ id, selected }: NodeProps) {
         </span>
         <ValuePreview
           value={value}
-          onClick={() => value && openPreview(value, `${def.label} · ${port.label}`)}
+          renderable
+          onClick={() => void requestPreview(id, port.id, `${def.label} · ${port.label}`)}
         />
         <Handle type="source" position={Position.Right} id={port.id} className="rf-handle" />
       </div>

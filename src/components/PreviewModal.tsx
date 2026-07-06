@@ -17,7 +17,7 @@ export function PreviewModal() {
   // ~1.33× the bytes as a base64 string. The URL is revoked on change/unmount.
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (preview?.value.kind !== 'image') {
+    if (preview?.value?.kind !== 'image') {
       setImageUrl(null);
       return;
     }
@@ -40,9 +40,10 @@ export function PreviewModal() {
   }, [preview]);
 
   if (!preview) return null;
-  const { value, title } = preview;
+  const { value, title, loading, error } = preview;
 
   const download = async () => {
+    if (!value) return;
     try {
       if (value.kind === 'image') {
         const blob = await browserPlatform.encodePngBlob(value);
@@ -58,7 +59,7 @@ export function PreviewModal() {
   };
 
   const downloadObj = () => {
-    if (value.kind !== 'stl') return;
+    if (value?.kind !== 'stl') return;
     try {
       downloadText(stlToObj(value), previewFileName(title, 'obj'));
     } catch (e) {
@@ -67,7 +68,7 @@ export function PreviewModal() {
   };
 
   const download3mf = () => {
-    if (value.kind !== 'stl') return;
+    if (value?.kind !== 'stl') return;
     try {
       const bytes = stlToThreeMf(value);
       downloadBlob(new Blob([bytes], { type: 'model/3mf' }), previewFileName(title, '3mf'));
@@ -83,35 +84,44 @@ export function PreviewModal() {
       className="preview-modal"
       bodyClassName="preview-body"
       headerActions={
-        <>
-          {value.kind === 'stl' && (
-            <>
-              <button type="button" className="btn" onClick={download3mf}>
-                3MF
-              </button>
-              <button type="button" className="btn" onClick={downloadObj}>
-                OBJ
-              </button>
-            </>
-          )}
-          <button type="button" className="btn btn-primary" onClick={download}>
-            {value.kind === 'stl' ? 'STL' : 'Download'}
-          </button>
-        </>
+        value ? (
+          <>
+            {value.kind === 'stl' && (
+              <>
+                <button type="button" className="btn" onClick={download3mf}>
+                  3MF
+                </button>
+                <button type="button" className="btn" onClick={downloadObj}>
+                  OBJ
+                </button>
+              </>
+            )}
+            <button type="button" className="btn btn-primary" onClick={download}>
+              {value.kind === 'stl' ? 'STL' : 'Download'}
+            </button>
+          </>
+        ) : null
       }
     >
-      {value.kind === 'image' && imageUrl && (
+      {loading && (
+        <div className="preview-loading">
+          <span className="preview-spinner" aria-hidden="true" />
+          <span>Rendering full resolution…</span>
+        </div>
+      )}
+      {error && <div className="preview-loading preview-error">{error}</div>}
+      {value?.kind === 'image' && imageUrl && (
         <PanZoom className="preview-panzoom" fitKey={imageUrl}>
           <img src={imageUrl} alt={title} className="checker" />
         </PanZoom>
       )}
-      {value.kind === 'image' && (
+      {value?.kind === 'image' && (
         <div className="preview-meta">
           {value.width} × {value.height} px · scroll to zoom, drag to pan
         </div>
       )}
-      {value.kind === 'text' && <pre className="preview-textfull">{value.text}</pre>}
-      {value.kind === 'stl' && (
+      {value?.kind === 'text' && <pre className="preview-textfull">{value.text}</pre>}
+      {value?.kind === 'stl' && (
         <>
           <div className="preview-meta">{value.triangleCount} triangles — downloads as binary STL</div>
           <pre className="preview-textfull">{stlToAscii(value, 'heightmap', 40)}</pre>

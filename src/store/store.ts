@@ -71,6 +71,10 @@ const SANITIZE_OPTIONS: SanitizeOptions = {
 // In-app clipboard for copy/paste (module-scoped; survives selection changes).
 let clipboard: GraphSnapshot | null = null;
 
+// Guards an in-flight on-demand preview render against being superseded by a
+// newer request or the modal closing.
+let previewToken = 0;
+
 // Abort controllers for in-flight node runs, so long/hung runs can be cancelled.
 const runControllers = new Map<string, AbortController>();
 
@@ -99,8 +103,13 @@ export interface PendingConnection {
 }
 
 export interface PreviewState {
-  value: DataValue;
   title: string;
+  /** The full-resolution value, once rendered. Absent while loading/errored. */
+  value?: DataValue;
+  /** True while the full-resolution output is being (re)rendered on demand. */
+  loading?: boolean;
+  /** Set if the preview could not be rendered (e.g. an unrun manual upstream). */
+  error?: string;
 }
 
 export type ToastType = 'error' | 'success' | 'info';
@@ -271,6 +280,15 @@ export interface StoreState {
   setViewportCenter: (fn: (() => { x: number; y: number }) | null) => void;
   openEditor: (id: string | null) => void;
   openPreview: (value: DataValue, title: string) => void;
+  /**
+   * Preview a node's output at full resolution. If it's already up to date the
+   * cached value is shown immediately; otherwise a spinner shows while the
+   * pipeline is re-run up to that node (auto nodes only — no AI token spend).
+   */
+  requestPreview: (nodeId: string, portId: string, title: string) => Promise<void>;
+  /** Re-run the out-of-date auto ancestors of a node (and the node itself) at
+   *  full resolution, reusing cached manual/up-to-date outputs. */
+  renderNodeOutput: (id: string) => Promise<void>;
   closePreview: () => void;
 
   // toasts
@@ -708,8 +726,65 @@ export const useStore = create<StoreState>()(
       clearPendingSelect: () => set((s) => (s.pendingSelectIds.length ? { pendingSelectIds: [] } : s)),
       setViewportCenter: (fn) => set({ viewportCenter: fn }),
       openEditor: (id) => set({ editorNodeId: id }),
-      openPreview: (value, title) => set({ preview: { value, title } }),
-      closePreview: () => set({ preview: null }),
+      openPreview: (value, title) => {
+        previewToken++; // supersede any pending on-demand render
+        set({ preview: { value, title } });
+      },
+
+      requestPreview: async (nodeId, portId, title) => {
+        const rt = get().runtime[nodeId];
+        const cached = rt?.outputs?.[portId];
+        // Up to date → the cached value is the full-resolution result already.
+        if (cached && rt?.status === 'upToDate') {
+          previewToken++;
+          set({ preview: { value: cached, title } });
+          return;
+        }
+        // Otherwise render on demand, showing a spinner meanwhile.
+        const token = ++previewToken;
+        set({ preview: { title, loading: true } });
+        try {
+          await get().renderNodeOutput(nodeId);
+        } catch {
+          /* fall through — treat as nothing to show */
+        }
+        if (previewToken !== token) return; // superseded or the modal was closed
+        const fresh = get().runtime[nodeId]?.outputs?.[portId];
+        if (fresh) {
+          set({ preview: { value: fresh, title } });
+        } else {
+          set({
+            preview: {
+              title,
+              error: 'Nothing to preview yet — run any upstream manual (AI) nodes first.',
+            },
+          });
+        }
+      },
+
+      renderNodeOutput: async (id) => {
+        const { edges } = get();
+        let order: string[];
+        try {
+          order = topoSort(new Set([id, ...ancestors(id, edges)]), edges);
+        } catch {
+          return; // cycle — nothing safe to render
+        }
+        for (const n of order) {
+          const node = get().nodes.find((x) => x.id === n);
+          if (!node) continue;
+          if (statusOf(get().runtime, n) === 'upToDate') continue; // reuse cached output
+          const def = getNodeDefSafe(node.type);
+          const isAuto = node.bypassed === true || (def?.autoRun ?? false);
+          if (!isAuto) continue; // never auto-run a manual (AI) node — no token spend
+          await get()._executeNode(n);
+        }
+      },
+
+      closePreview: () => {
+        previewToken++; // drop the result of any in-flight render
+        set({ preview: null });
+      },
 
       addToast: (type, message) =>
         // Keep only the most recent toasts so an error flood can't grow the

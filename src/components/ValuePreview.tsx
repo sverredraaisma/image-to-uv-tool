@@ -7,10 +7,13 @@ export function ValuePreview({
   value,
   onClick,
   size = 46,
+  renderable = false,
 }: {
   value: DataValue | undefined;
   onClick?: () => void;
   size?: number;
+  /** Allow clicking even without a cached value (to render it on demand). */
+  renderable?: boolean;
 }) {
   const thumb = useMemo(() => {
     if (value?.kind === 'image') {
@@ -44,8 +47,8 @@ export function ValuePreview({
       className="value-preview"
       style={style}
       onClick={onClick}
-      disabled={!value}
-      title={value ? 'Click to enlarge' : 'No value yet'}
+      disabled={!value && !renderable}
+      title={value ? 'Click to enlarge' : renderable ? 'Click to render preview' : 'No value yet'}
     >
       {inner}
     </button>
