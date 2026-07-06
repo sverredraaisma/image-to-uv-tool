@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/store';
 import { platform } from '../lib/platform';
 import { getNodeDefSafe } from '../engine/registry';
+import { nodePorts } from '../engine/ports';
 import type { ConnectionSide } from '../store/store';
 import type { DataValue, PortSpec } from '../types';
 import { ConfigFields } from './ConfigFields';
@@ -27,8 +28,9 @@ export function NodeView({ id, selected }: NodeProps) {
   const inputValues = useStore(
     useShallow((s) => {
       const map: Record<string, DataValue | undefined> = {};
-      if (def) {
-        for (const port of def.inputs) {
+      const nd = s.nodes.find((n) => n.id === id);
+      if (nd && def) {
+        for (const port of nodePorts(nd, def).inputs) {
           const edge = s.edges.find((e) => e.target === id && e.targetHandle === port.id);
           map[port.id] = edge ? s.runtime[edge.source]?.outputs?.[edge.sourceHandle] : undefined;
         }
@@ -59,6 +61,7 @@ export function NodeView({ id, selected }: NodeProps) {
 
   const status = rt?.status ?? 'outOfDate';
   const statusMeta = STATUS_ICON[status];
+  const ports = nodePorts(node, def);
   const inlineFields = (def.configFields ?? []).filter((f) => !f.advanced);
   const hasPopup = (def.configFields ?? []).some((f) => f.advanced) || !!def.customEditor;
 
@@ -127,7 +130,7 @@ export function NodeView({ id, selected }: NodeProps) {
       className={`node cat-${def.category.replace(/\W+/g, '')} ${selected ? 'node-selected' : ''} ${
         node.bypassed ? 'node-bypassed' : ''
       }`}
-      style={{ width: nodeWidth(def) }}
+      style={{ width: nodeWidth({ inputs: ports.inputs, outputs: ports.outputs, configFields: def.configFields }) }}
     >
       <div className="node-header">
         <span className={`status-icon ${statusMeta.cls}`} title={rt?.error ?? statusMeta.title}>
@@ -237,8 +240,8 @@ export function NodeView({ id, selected }: NodeProps) {
       </div>
 
       <div className="node-ports">
-        <div className="ports-in">{def.inputs.map(renderInput)}</div>
-        <div className="ports-out">{def.outputs.map(renderOutput)}</div>
+        <div className="ports-in">{ports.inputs.map(renderInput)}</div>
+        <div className="ports-out">{ports.outputs.map(renderOutput)}</div>
       </div>
     </div>
   );

@@ -3,11 +3,13 @@ import { wouldCreateCycle } from './graph';
 
 export interface SanitizeOptions {
   /**
-   * Resolve a node type's ports so edges can be validated the same way
-   * `addConnection` validates them. Return null for an unknown type (its edges
-   * are then only checked structurally, so unknown/plugin nodes stay loadable).
+   * Resolve a node's ports so edges can be validated the same way
+   * `addConnection` validates them. Receives the whole node (not just its type)
+   * so per-instance ports — a Pipeline's derived inputs/outputs — validate
+   * correctly. Return null for an unknown type (its edges are then only checked
+   * structurally, so unknown/plugin nodes stay loadable).
    */
-  getPorts?: (type: string) => { inputs: PortSpec[]; outputs: PortSpec[] } | null;
+  getPorts?: (node: GraphNode) => { inputs: PortSpec[]; outputs: PortSpec[] } | null;
   /** Port-type compatibility (defaults to exact-match when omitted). */
   isCompatible?: (from: PortType, to: PortType) => boolean;
 }
@@ -88,8 +90,8 @@ export function sanitizeGraph(
     if (wouldCreateCycle(e.source, e.target, edges)) continue;
 
     // Semantic validation when the node types are known.
-    const outPorts = getPorts?.(srcNode.type);
-    const inPorts = getPorts?.(tgtNode.type);
+    const outPorts = getPorts?.(srcNode);
+    const inPorts = getPorts?.(tgtNode);
     if (outPorts) {
       const outPort = outPorts.outputs.find((p) => p.id === e.sourceHandle);
       if (!outPort) continue; // nonexistent output handle

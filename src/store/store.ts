@@ -21,6 +21,7 @@ import {
 } from '../engine/graph';
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
+import { nodePorts } from '../engine/ports';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { CURRENT_GRAPH_VERSION, migrateSavedGraph } from '../engine/migrate';
 import { reconcileRuntime } from '../engine/reconcile';
@@ -56,9 +57,11 @@ let autoRunPending = false;
 // Validate imported/rehydrated edges against the real node definitions, so a
 // file import is held to the same invariants as live editing (see sanitizeGraph).
 const SANITIZE_OPTIONS: SanitizeOptions = {
-  getPorts: (type) => {
-    const def = getNodeDefSafe(type);
-    return def ? { inputs: def.inputs, outputs: def.outputs } : null;
+  getPorts: (node) => {
+    const def = getNodeDefSafe(node.type);
+    // Unknown type → null (structural-only checks). Known type → resolved ports,
+    // which for a Pipeline are its per-instance derived ports.
+    return def ? nodePorts(node, def) : null;
   },
   isCompatible,
 };
@@ -231,8 +234,8 @@ function checkConnection(nodes: GraphNode[], edges: GraphEdge[], conn: Connectio
   const srcNode = nodes.find((n) => n.id === source);
   const tgtNode = nodes.find((n) => n.id === target);
   if (!srcNode || !tgtNode) return { ok: false };
-  const outPort = getNodeDefSafe(srcNode.type)?.outputs.find((p) => p.id === sourceHandle);
-  const inPort = getNodeDefSafe(tgtNode.type)?.inputs.find((p) => p.id === targetHandle);
+  const outPort = nodePorts(srcNode, getNodeDefSafe(srcNode.type)).outputs.find((p) => p.id === sourceHandle);
+  const inPort = nodePorts(tgtNode, getNodeDefSafe(tgtNode.type)).inputs.find((p) => p.id === targetHandle);
   if (!outPort || !inPort) return { ok: false };
   if (!isCompatible(outPort.type, inPort.type)) {
     return { ok: false, reason: `Incompatible: ${outPort.type} → ${inPort.type}` };
@@ -670,12 +673,13 @@ export const useStore = create<StoreState>()(
 
         try {
           const s = get();
-          const inputs = gatherInputs(def.inputs, s.edges, s.runtime, id);
+          const ports = nodePorts(node, def);
+          const inputs = gatherInputs(ports.inputs, s.edges, s.runtime, id);
           // A muted node acts as a wire: forward a compatible input to its
           // outputs instead of computing (no compute, no network, no token spend).
           let result: ComputeResult;
           if (node.bypassed) {
-            result = bypassOutputs(def.inputs, def.outputs, inputs);
+            result = bypassOutputs(ports.inputs, ports.outputs, inputs);
           } else {
             const ctx: ComputeContext = {
               inputs,

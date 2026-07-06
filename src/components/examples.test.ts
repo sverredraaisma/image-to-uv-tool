@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest';
 import '../nodes'; // register built-ins
 import { EXAMPLES } from './examples';
 import { getNodeDefSafe } from '../engine/registry';
+import { nodePorts } from '../engine/ports';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { isCompatible } from '../engine/compatibility';
 
 const opts: SanitizeOptions = {
-  getPorts: (t) => {
-    const d = getNodeDefSafe(t);
-    return d ? { inputs: d.inputs, outputs: d.outputs } : null;
+  getPorts: (node) => {
+    const d = getNodeDefSafe(node.type);
+    return d ? nodePorts(node, d) : null;
   },
   isCompatible,
 };

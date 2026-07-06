@@ -19,7 +19,7 @@ const PORTS: Record<string, { inputs: PortSpec[]; outputs: PortSpec[] }> = {
   },
 };
 const opts: SanitizeOptions = {
-  getPorts: (t) => PORTS[t] ?? null,
+  getPorts: (node) => PORTS[node.type] ?? null,
   isCompatible: (a, b) => a === b,
 };
 
