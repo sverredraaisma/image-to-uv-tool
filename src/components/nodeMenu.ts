@@ -30,6 +30,7 @@ export const CATEGORY_ORDER = [
   'Mask',
   'UV',
   'Export',
+  'Pipeline',
   'AI (Replicate)',
   'AI (OpenRouter)',
 ];

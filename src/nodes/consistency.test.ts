@@ -4,6 +4,9 @@ import { allNodeDefs } from '../engine/registry';
 
 const defs = allNodeDefs().filter((d) => !d.type.startsWith('test.'));
 const VALID_PORT_TYPES = new Set(['image', 'mask', 'text', 'stl']);
+// Pipeline nodes resolve their ports per-instance (from config) via nodePorts,
+// so their static definition ports are intentionally empty.
+const DYNAMIC_PORT_TYPES = new Set(['pipeline', 'pipelineInput', 'pipelineOutput']);
 
 // A meta-test guarding every node definition — catches mistakes when adding
 // nodes (typos, missing defaults, duplicate ids) before they reach the UI.
@@ -18,8 +21,10 @@ describe('node registry consistency', () => {
     expect(dupes).toEqual([]);
   });
 
-  it('every node has at least one output', () => {
-    expect(defs.filter((d) => d.outputs.length === 0).map((d) => d.type)).toEqual([]);
+  it('every node has at least one output (except dynamic-port pipeline nodes)', () => {
+    expect(
+      defs.filter((d) => !DYNAMIC_PORT_TYPES.has(d.type) && d.outputs.length === 0).map((d) => d.type),
+    ).toEqual([]);
   });
 
   it('text→image generation nodes expose a first-class seed field with a random default', () => {
