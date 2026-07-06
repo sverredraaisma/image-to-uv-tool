@@ -57,8 +57,9 @@ function FlowCanvas() {
   const cancelPending = useStore((s) => s.cancelPendingConnection);
   const addToast = useStore((s) => s.addToast);
 
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const arrangeNonce = useStore((s) => s.arrangeNonce);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   // Expose the current viewport centre (in flow coords) so the toolbar's
@@ -117,6 +118,14 @@ function FlowCanvas() {
       }),
     );
   }, [storeEdges, setRfEdges]);
+
+  // After an auto-format, wait a frame for React Flow to ingest the new node
+  // positions, then fit the whole graph into view so the user sees the result.
+  useEffect(() => {
+    if (!arrangeNonce) return;
+    const raf = requestAnimationFrame(() => void fitView({ padding: 0.2, duration: 400 }));
+    return () => cancelAnimationFrame(raf);
+  }, [arrangeNonce, fitView]);
 
   // One-shot: select exactly the nodes the store just asked for (a freshly
   // added / duplicated / pasted node), deselecting the rest, then clear the

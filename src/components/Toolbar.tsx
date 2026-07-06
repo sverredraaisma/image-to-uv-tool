@@ -89,6 +89,8 @@ export function Toolbar() {
   const exportGraphInlined = useStore((s) => s.exportGraphInlined);
   const loadGraph = useStore((s) => s.loadGraph);
   const clearGraph = useStore((s) => s.clearGraph);
+  const autoFormat = useStore((s) => s.autoFormat);
+  const nodeCount = useStore((s) => s.nodes.length);
   const addToast = useStore((s) => s.addToast);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
@@ -200,6 +202,15 @@ export function Toolbar() {
           Gen AI {showGenAI ? 'on' : 'off'}
         </button>
         <AddNodeMenu />
+        <button
+          type="button"
+          className="btn"
+          onClick={autoFormat}
+          disabled={nodeCount === 0}
+          title="Arrange all nodes tidily based on their connections"
+        >
+          Auto-format
+        </button>
         <ExamplesMenu />
         <ProjectsMenu />
         <button type="button" className="btn" onClick={() => void onSave()}>

@@ -25,6 +25,7 @@ import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { CURRENT_GRAPH_VERSION, migrateSavedGraph } from '../engine/migrate';
 import { reconcileRuntime } from '../engine/reconcile';
 import { cloneFragment } from '../engine/clone';
+import { autoLayout } from '../engine/autoLayout';
 import { bypassOutputs, findReadyAutoNodes, gatherInputs } from '../engine/schedule';
 import { platform } from '../lib/platform';
 import { isBlobRef } from '../lib/blobStore';
@@ -150,6 +151,8 @@ export interface StoreState {
   editorNodeId: string | null;
   preview: PreviewState | null;
   toasts: Toast[];
+  /** Bumped by autoFormat so the canvas can re-fit the view. Runtime-only. */
+  arrangeNonce: number;
 
   // undo/redo history of structural graph changes
   history: GraphSnapshot[];
@@ -171,6 +174,7 @@ export interface StoreState {
   removeNodes: (ids: string[]) => void;
   setNodePosition: (id: string, position: { x: number; y: number }) => void;
   setNodePositions: (updates: { id: string; position: { x: number; y: number } }[]) => void;
+  autoFormat: () => void;
   updateNodeConfig: (id: string, patch: NodeConfig) => void;
   toggleBypass: (id: string) => void;
   addConnection: (conn: ConnectionInput) => boolean;
@@ -262,6 +266,7 @@ export const useStore = create<StoreState>()(
       editorNodeId: null,
       preview: null,
       toasts: [],
+      arrangeNonce: 0,
       history: [],
       future: [],
 
@@ -418,6 +423,19 @@ export const useStore = create<StoreState>()(
         const byId = new Map(moved.map((u) => [u.id, u.position]));
         set((s) => ({
           nodes: s.nodes.map((n) => (byId.has(n.id) ? { ...n, position: byId.get(n.id)! } : n)),
+        }));
+      },
+
+      // Re-arrange every node into a tidy layered layout from the connections
+      // (one undo step). Bumps arrangeNonce so the canvas re-fits the view.
+      autoFormat: () => {
+        const { nodes, edges } = get();
+        if (!nodes.length) return;
+        const pos = autoLayout(nodes, edges, { originX: 80, originY: 80 });
+        get()._snapshot();
+        set((s) => ({
+          nodes: s.nodes.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)),
+          arrangeNonce: s.arrangeNonce + 1,
         }));
       },
 
