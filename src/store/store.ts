@@ -9,6 +9,7 @@ import type {
   GraphNode,
   NodeConfig,
   NodeRuntime,
+  PortSpec,
   SavedGraph,
 } from '../types';
 import {
@@ -21,7 +22,7 @@ import {
 } from '../engine/graph';
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
-import { nodePorts } from '../engine/ports';
+import { nodePorts, asPortType } from '../engine/ports';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { CURRENT_GRAPH_VERSION, migrateSavedGraph } from '../engine/migrate';
 import { reconcileRuntime } from '../engine/reconcile';
@@ -120,6 +121,69 @@ interface GraphSnapshot {
   edges: GraphEdge[];
 }
 
+/** Parent-graph state saved while the user edits a pipeline's subgraph. */
+export interface PipelineFrame {
+  pipelineNodeId: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  runtime: Record<string, NodeRuntime>;
+  epochs: Record<string, number>;
+  selectedNodeId: string | null;
+  selectedNodeIds: string[];
+}
+
+const namedPort = (config: NodeConfig, fallback: string): string => {
+  const n = config.name;
+  return typeof n === 'string' && n.trim() ? n : fallback;
+};
+
+/**
+ * The pipeline node's ports derived from the Input/Output markers in its
+ * subgraph. Each marker's node id becomes the port id (stable across renames),
+ * ordered top-to-bottom so ports read in a sensible order.
+ */
+function derivePipelinePorts(nodes: GraphNode[]): { inputs: PortSpec[]; outputs: PortSpec[] } {
+  const byPos = (a: GraphNode, b: GraphNode) => a.position.y - b.position.y || a.position.x - b.position.x;
+  const inputs = nodes
+    .filter((n) => n.type === 'pipelineInput')
+    .sort(byPos)
+    .map((n) => ({ id: n.id, label: namedPort(n.config, 'Input'), type: asPortType(n.config.type) }));
+  const outputs = nodes
+    .filter((n) => n.type === 'pipelineOutput')
+    .sort(byPos)
+    .map((n) => ({ id: n.id, label: namedPort(n.config, 'Output'), type: asPortType(n.config.type) }));
+  return { inputs, outputs };
+}
+
+/**
+ * The root graph as it should be persisted / exported. When editing a pipeline
+ * the store's active nodes/edges are the subgraph, so fold them back into the
+ * pipeline node (updating its embedded graph + derived ports) and drop any
+ * parent edge that referenced a port the edit removed.
+ */
+function foldRootGraph(state: {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  editStack: PipelineFrame[];
+}): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  if (!state.editStack.length) return { nodes: state.nodes, edges: state.edges };
+  const frame = state.editStack[state.editStack.length - 1];
+  const subgraph = { nodes: state.nodes, edges: state.edges };
+  const { inputs, outputs } = derivePipelinePorts(state.nodes);
+  const nodes = frame.nodes.map((n) =>
+    n.id === frame.pipelineNodeId
+      ? { ...n, config: { ...n.config, graph: subgraph, inputs, outputs } }
+      : n,
+  );
+  const handles = new Set([...inputs, ...outputs].map((p) => p.id));
+  const edges = frame.edges.filter(
+    (e) =>
+      (e.source !== frame.pipelineNodeId || handles.has(e.sourceHandle)) &&
+      (e.target !== frame.pipelineNodeId || handles.has(e.targetHandle)),
+  );
+  return { nodes, edges };
+}
+
 const HISTORY_LIMIT = 50;
 const MAX_TOASTS = 6;
 
@@ -156,6 +220,14 @@ export interface StoreState {
   toasts: Toast[];
   /** Bumped by autoFormat so the canvas can re-fit the view. Runtime-only. */
   arrangeNonce: number;
+  /**
+   * Non-empty while editing a pipeline's subgraph: the active nodes/edges are
+   * the subgraph and this holds the saved parent graph(s). Runtime-only.
+   */
+  editStack: PipelineFrame[];
+  /** Values fed to the Input markers while editing (from the pipeline node's
+   *  own inputs), so the subgraph previews with real data. Runtime-only. */
+  pipelineTestInputs: Record<string, DataValue | undefined>;
 
   // undo/redo history of structural graph changes
   history: GraphSnapshot[];
@@ -211,6 +283,10 @@ export interface StoreState {
   bringUpToDate: (id: string) => Promise<void>;
   processAutoRun: () => Promise<void>;
   _executeNode: (id: string) => Promise<void>;
+
+  // pipeline sub-canvas editing
+  enterPipeline: (pipelineNodeId: string) => void;
+  exitPipeline: () => void;
 
   // persistence / lifecycle
   init: () => void;
@@ -270,6 +346,8 @@ export const useStore = create<StoreState>()(
       preview: null,
       toasts: [],
       arrangeNonce: 0,
+      editStack: [],
+      pipelineTestInputs: {},
       history: [],
       future: [],
 
@@ -678,7 +756,12 @@ export const useStore = create<StoreState>()(
           // A muted node acts as a wire: forward a compatible input to its
           // outputs instead of computing (no compute, no network, no token spend).
           let result: ComputeResult;
-          if (node.bypassed) {
+          if (node.type === 'pipelineInput') {
+            // While editing a pipeline, an Input marker emits the value fed into
+            // the pipeline node from the parent graph, so the subgraph previews
+            // with real data.
+            result = { out: get().pipelineTestInputs[id] };
+          } else if (node.bypassed) {
             result = bypassOutputs(ports.inputs, ports.outputs, inputs);
           } else {
             const ctx: ComputeContext = {
@@ -854,6 +937,96 @@ export const useStore = create<StoreState>()(
         }
       },
 
+      enterPipeline: (pipelineNodeId) => {
+        const s = get();
+        if (s.editStack.length) {
+          s.addToast('info', 'Close this pipeline before opening another.');
+          return;
+        }
+        const pnode = s.nodes.find((n) => n.id === pipelineNodeId);
+        if (!pnode || pnode.type !== 'pipeline') return;
+        // Seed the Input markers with the pipeline node's current resolved inputs
+        // so the subgraph previews with real data as you edit.
+        const ports = nodePorts(pnode, getNodeDefSafe(pnode.type));
+        const resolved = gatherInputs(ports.inputs, s.edges, s.runtime, pipelineNodeId);
+        const testInputs: Record<string, DataValue | undefined> = {};
+        for (const p of ports.inputs) {
+          const v = resolved[p.id];
+          testInputs[p.id] = Array.isArray(v) ? v[0] : v;
+        }
+        const raw = pnode.config.graph as { nodes?: GraphNode[]; edges?: GraphEdge[] } | undefined;
+        const frame: PipelineFrame = {
+          pipelineNodeId,
+          nodes: s.nodes,
+          edges: s.edges,
+          runtime: s.runtime,
+          epochs: s.epochs,
+          selectedNodeId: s.selectedNodeId,
+          selectedNodeIds: s.selectedNodeIds,
+        };
+        abortAllRuns();
+        set({
+          editStack: [frame],
+          pipelineTestInputs: testInputs,
+          nodes: Array.isArray(raw?.nodes) ? structuredClone(raw!.nodes) : [],
+          edges: Array.isArray(raw?.edges) ? structuredClone(raw!.edges) : [],
+          runtime: {},
+          epochs: {},
+          selectedNodeId: null,
+          selectedNodeIds: [],
+          pendingSelectIds: [],
+          editorNodeId: null,
+          pendingConnection: null,
+          preview: null,
+          history: [],
+          future: [],
+          arrangeNonce: s.arrangeNonce + 1, // fit the subgraph into view
+        });
+        void get().processAutoRun();
+      },
+
+      exitPipeline: () => {
+        const s = get();
+        if (!s.editStack.length) return;
+        const frame = s.editStack[s.editStack.length - 1];
+        const subgraph = { nodes: s.nodes, edges: s.edges };
+        const { inputs, outputs } = derivePipelinePorts(s.nodes);
+        const handles = new Set([...inputs, ...outputs].map((p) => p.id));
+        abortAllRuns();
+        const parentNodes = frame.nodes.map((n) =>
+          n.id === frame.pipelineNodeId
+            ? { ...n, config: { ...n.config, graph: subgraph, inputs, outputs } }
+            : n,
+        );
+        // Drop parent edges that referenced a pipeline port the edit removed.
+        const parentEdges = frame.edges.filter(
+          (e) =>
+            (e.source !== frame.pipelineNodeId || handles.has(e.sourceHandle)) &&
+            (e.target !== frame.pipelineNodeId || handles.has(e.targetHandle)),
+        );
+        set({
+          editStack: s.editStack.slice(0, -1),
+          pipelineTestInputs: {},
+          nodes: parentNodes,
+          edges: parentEdges,
+          runtime: frame.runtime,
+          epochs: frame.epochs,
+          selectedNodeId: frame.selectedNodeId,
+          selectedNodeIds: frame.selectedNodeIds,
+          pendingSelectIds: [frame.pipelineNodeId],
+          editorNodeId: null,
+          pendingConnection: null,
+          preview: null,
+          history: [],
+          future: [],
+          arrangeNonce: s.arrangeNonce + 1,
+        });
+        // Its contents changed → the pipeline and everything downstream is stale.
+        get().markOutOfDate(frame.pipelineNodeId);
+        for (const d of descendants(frame.pipelineNodeId, parentEdges)) get().markOutOfDate(d);
+        void get().processAutoRun();
+      },
+
       init: () => {
         void get().processAutoRun();
       },
@@ -872,6 +1045,8 @@ export const useStore = create<StoreState>()(
           editorNodeId: null,
           preview: null,
           toasts: [],
+          editStack: [],
+          pipelineTestInputs: {},
           history: [],
           future: [],
         });
@@ -880,7 +1055,8 @@ export const useStore = create<StoreState>()(
       exportGraph: () => {
         // Deep-clone so callers can't mutate live store state through the
         // exported object (config objects are otherwise shared by reference).
-        const { nodes, edges } = get();
+        // Fold any in-progress pipeline edit back into its node first.
+        const { nodes, edges } = foldRootGraph(get());
         return { version: 1, nodes: structuredClone(nodes), edges: structuredClone(edges) };
       },
 
@@ -913,8 +1089,11 @@ export const useStore = create<StoreState>()(
           pendingConnection: null,
           selectedNodeId: null,
           selectedNodeIds: [],
+          pendingSelectIds: [],
           editorNodeId: null,
           preview: null,
+          editStack: [],
+          pipelineTestInputs: {},
         });
         void get().processAutoRun();
       },
@@ -931,7 +1110,10 @@ export const useStore = create<StoreState>()(
           pendingConnection: null,
           selectedNodeId: null,
           selectedNodeIds: [],
+          pendingSelectIds: [],
           editorNodeId: null,
+          editStack: [],
+          pipelineTestInputs: {},
         });
       },
     }),
@@ -960,14 +1142,19 @@ export const useStore = create<StoreState>()(
         }),
       ),
       // Persist the graph + settings, but never the (regenerable) runtime.
-      partialize: (s) => ({
-        nodes: s.nodes,
-        edges: s.edges,
-        apiKey: s.apiKey,
-        openRouterKey: s.openRouterKey,
-        proxyUrl: s.proxyUrl,
-        showGenAI: s.showGenAI,
-      }),
+      partialize: (s) => {
+        // Persist the ROOT graph even while a pipeline is being edited (the
+        // active nodes/edges are the subgraph), so a reload restores correctly.
+        const { nodes, edges } = foldRootGraph(s);
+        return {
+          nodes,
+          edges,
+          apiKey: s.apiKey,
+          openRouterKey: s.openRouterKey,
+          proxyUrl: s.proxyUrl,
+          showGenAI: s.showGenAI,
+        };
+      },
       // Sanitize the rehydrated graph the same way loadGraph does, so a
       // corrupt/partially-written localStorage entry can't crash on startup.
       // Only the whitelisted persisted keys are merged (and settings validated

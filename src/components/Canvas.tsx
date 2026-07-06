@@ -50,6 +50,14 @@ function FlowCanvas() {
   const clearPendingSelect = useStore((s) => s.clearPendingSelect);
   const setViewportCenter = useStore((s) => s.setViewportCenter);
   const addNode = useStore((s) => s.addNode);
+  const editingPipeline = useStore((s) => s.editStack.length > 0);
+  const exitPipeline = useStore((s) => s.exitPipeline);
+  const pipelineName = useStore((s) => {
+    const frame = s.editStack[s.editStack.length - 1];
+    if (!frame) return '';
+    const node = frame.nodes.find((n) => n.id === frame.pipelineNodeId);
+    return (node?.config.name as string) || 'Pipeline';
+  });
   const updateNodeConfig = useStore((s) => s.updateNodeConfig);
   const loadGraph = useStore((s) => s.loadGraph);
   const addConnection = useStore((s) => s.addConnection);
@@ -184,11 +192,24 @@ function FlowCanvas() {
   return (
     <div
       ref={wrapperRef}
-      className={`canvas ${pending ? 'connecting' : ''}`}
+      className={`canvas ${pending ? 'connecting' : ''} ${editingPipeline ? 'canvas-in-pipeline' : ''}`}
       onDrop={(e) => void onDrop(e)}
       onDragOver={(e) => e.preventDefault()}
     >
-      {storeNodes.length === 0 && (
+      {editingPipeline && (
+        <div className="pipeline-breadcrumb">
+          <button type="button" className="btn btn-primary" onClick={() => exitPipeline()}>
+            ‹ Done editing
+          </button>
+          <span className="pipeline-breadcrumb-label">
+            Editing pipeline: <strong>{pipelineName}</strong>
+          </span>
+          <span className="pipeline-breadcrumb-hint">
+            Add Pipeline Input / Output nodes to define its ports
+          </span>
+        </div>
+      )}
+      {storeNodes.length === 0 && !editingPipeline && (
         <div className="canvas-empty">
           <div className="canvas-empty-card">
             <div className="canvas-empty-title">Start building</div>

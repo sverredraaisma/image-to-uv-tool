@@ -65,6 +65,7 @@ export const pipelineNode: NodeDefinition = {
   autoRun: false,
   inputs: [], // derived by nodePorts() from config.inputs
   outputs: [], // derived by nodePorts() from config.outputs
+  configFields: [{ kind: 'text', key: 'name', label: 'Name', placeholder: 'My pipeline' }],
   defaultConfig: () => ({
     graph: { nodes: [], edges: [] } as Subgraph,
     inputs: [],

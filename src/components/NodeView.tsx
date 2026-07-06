@@ -49,6 +49,8 @@ export function NodeView({ id, selected }: NodeProps) {
   const openEditor = useStore((s) => s.openEditor);
   const openPreview = useStore((s) => s.openPreview);
   const updateNodeConfig = useStore((s) => s.updateNodeConfig);
+  const enterPipeline = useStore((s) => s.enterPipeline);
+  const editingPipeline = useStore((s) => s.editStack.length > 0);
   const addToast = useStore((s) => s.addToast);
 
   if (!node || !def) {
@@ -216,6 +218,18 @@ export function NodeView({ id, selected }: NodeProps) {
         {def.customEditor && (
           <button type="button" className="wide-btn nodrag" onClick={() => openEditor(id)}>
             Open editor…
+          </button>
+        )}
+
+        {node.type === 'pipeline' && (
+          <button
+            type="button"
+            className="wide-btn nodrag"
+            title={editingPipeline ? 'Close the current pipeline first' : 'Edit the nodes inside'}
+            disabled={editingPipeline}
+            onClick={() => enterPipeline(id)}
+          >
+            Open pipeline ▸
           </button>
         )}
 

@@ -10,7 +10,14 @@ export function NodePicker({ onPick, onClose }: { onPick: (type: string) => void
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const showGenAI = useStore((s) => s.showGenAI);
-  const nodes = useMemo(() => allNodeDefs(), []);
+  const editingPipeline = useStore((s) => s.editStack.length > 0);
+  const nodes = useMemo(() => {
+    const all = allNodeDefs();
+    // The Input/Output markers only make sense inside a pipeline editor.
+    return editingPipeline
+      ? all
+      : all.filter((d) => d.type !== 'pipelineInput' && d.type !== 'pipelineOutput');
+  }, [editingPipeline]);
   const menu = buildNodeMenu(nodes, query, showGenAI);
   const searching = query.trim().length > 0;
 
