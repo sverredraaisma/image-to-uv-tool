@@ -2,6 +2,7 @@ import { useStore } from '../store/store';
 import { getNodeDefSafe } from '../engine/registry';
 import { ConfigFields } from './ConfigFields';
 import { AreaPickerEditor } from './AreaPickerEditor';
+import { SplitRegionEditor } from './SplitRegionEditor';
 import { CurvesEditor } from './CurvesEditor';
 import { Gloss3DEditor } from './Gloss3DEditor';
 import { ModelSchemaHint } from './ModelSchemaHint';
@@ -17,6 +18,7 @@ export function SettingsModal() {
   if (!def) return null;
 
   const isAreaPicker = def.customEditor === 'areaPicker';
+  const isSplitRegion = def.customEditor === 'splitRegion';
   const isGloss3d = def.customEditor === 'gloss3d';
   const isAi = def.category === 'AI (Replicate)';
 
@@ -25,7 +27,7 @@ export function SettingsModal() {
       title={`${def.label} · settings`}
       onClose={() => close(null)}
       className="settings-modal"
-      wide={isAreaPicker || isGloss3d}
+      wide={isAreaPicker || isSplitRegion || isGloss3d}
     >
       {isAreaPicker ? (
         <AreaPickerEditor nodeId={editorNodeId} />
@@ -38,6 +40,7 @@ export function SettingsModal() {
             collapseAdvanced
           />
           {def.customEditor === 'curves' && <CurvesEditor nodeId={editorNodeId} />}
+          {isSplitRegion && <SplitRegionEditor nodeId={editorNodeId} />}
           {isGloss3d && <Gloss3DEditor nodeId={editorNodeId} />}
           {isAi && <ModelSchemaHint nodeId={editorNodeId} model={String(node.config.model ?? '')} />}
         </>

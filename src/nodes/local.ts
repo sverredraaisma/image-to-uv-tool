@@ -585,13 +585,14 @@ export const splitRegionNode: NodeDefinition = {
   label: 'Split Region',
   category: 'Transform',
   description:
-    'Cut a rectangular region out as its own image, plus its coordinates + size. Wire "Coords" into Place Image to composite the (processed) region back exactly where it came from.',
+    'Cut a rectangular region out as its own image, plus its coordinates + size. Open the editor to drag the region on the image. Wire "Coords" into Place Image to composite the (processed) region back exactly where it came from.',
   autoRun: true,
   inputs: [{ id: 'in', label: 'Image', type: 'image' }],
   outputs: [
     { id: 'out', label: 'Region', type: 'image' },
     { id: 'coords', label: 'Coords', type: 'text' },
   ],
+  customEditor: 'splitRegion',
   configFields: [
     { kind: 'number', key: 'x', label: 'X', min: 0, step: 1 },
     { kind: 'number', key: 'y', label: 'Y', min: 0, step: 1 },
