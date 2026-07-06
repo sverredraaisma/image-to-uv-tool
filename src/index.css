@@ -768,6 +768,28 @@ textarea {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
+.area-tools {
+  display: flex;
+  gap: 4px;
+}
+.area-img.tool-shape {
+  cursor: crosshair;
+  touch-action: none;
+}
+.area-shape {
+  position: absolute;
+  border: 1.5px solid var(--accent);
+  background: rgba(91, 157, 255, 0.18);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.area-shape-ellipse {
+  border-radius: 50%;
+}
+.area-shape-drag {
+  border-style: dashed;
+  background: rgba(91, 157, 255, 0.28);
+}
 
 /* ---------------- Gloss 3D preview ---------------- */
 .gloss3d {

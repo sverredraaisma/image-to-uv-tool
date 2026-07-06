@@ -49,7 +49,8 @@ import {
   type MorphOp,
   type TransformOp,
 } from '../lib/image';
-import { magicWandMask, type Point } from '../lib/magicWand';
+import { type Point } from '../lib/magicWand';
+import { buildSelectionMask, type SelectionShape } from '../lib/selection';
 import { heightmapToStl } from '../lib/stl';
 import { isBlobRef } from '../lib/blobStore';
 import { runHeavyOp } from '../lib/heavyOps';
@@ -982,18 +983,22 @@ export const areaPickerNode: NodeDefinition = {
   type: 'areaPicker',
   label: 'Area Picker',
   category: 'Mask',
-  description: 'Click points on the image to magic-wand select areas; outputs a mask.',
+  description:
+    'Combine magic-wand clicks, rectangle and ellipse selections into one mask. Open the editor to draw; all selections are unioned.',
   autoRun: true,
   inputs: [{ id: 'in', label: 'Image', type: 'image' }],
   outputs: [{ id: 'out', label: 'Mask', type: 'mask' }],
   configFields: [{ kind: 'number', key: 'tolerance', label: 'Tolerance', min: 0, max: 255, step: 1 }],
   customEditor: 'areaPicker',
-  defaultConfig: () => ({ points: [] as Point[], tolerance: 32 }),
+  defaultConfig: () => ({ points: [] as Point[], tolerance: 32, shapes: [] as SelectionShape[] }),
   compute: ({ inputs, config }) => {
     const img = asImage(inputs.in);
     if (!img) return { out: undefined };
     const points = Array.isArray(config.points) ? (config.points as Point[]) : [];
-    return { out: magicWandMask(img, points, num(config.tolerance, 32)) };
+    const shapes = Array.isArray(config.shapes) ? (config.shapes as SelectionShape[]) : [];
+    return {
+      out: buildSelectionMask(img, { points, tolerance: num(config.tolerance, 32), shapes }),
+    };
   },
 };
 
