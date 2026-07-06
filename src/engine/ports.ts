@@ -18,9 +18,21 @@ export function portsFromConfig(v: unknown): PortSpec[] {
   if (!Array.isArray(v)) return [];
   const out: PortSpec[] = [];
   for (const raw of v) {
-    const p = raw as { id?: unknown; label?: unknown; type?: unknown; multiple?: unknown; required?: unknown };
+    const p = raw as {
+      id?: unknown;
+      label?: unknown;
+      type?: unknown;
+      multiple?: unknown;
+      required?: unknown;
+    };
     if (typeof p?.id !== 'string' || typeof p?.label !== 'string') continue;
-    out.push({ id: p.id, label: p.label, type: asPortType(p.type), multiple: !!p.multiple, required: !!p.required });
+    out.push({
+      id: p.id,
+      label: p.label,
+      type: asPortType(p.type),
+      multiple: !!p.multiple,
+      required: !!p.required,
+    });
   }
   return out;
 }
@@ -39,10 +51,7 @@ export interface ResolvedPorts {
  * The actual input/output ports of a node instance. Falls back to the static
  * definition ports for ordinary nodes.
  */
-export function nodePorts(
-  node: { type: string; config: NodeConfig },
-  def?: NodeDefinition,
-): ResolvedPorts {
+export function nodePorts(node: { type: string; config: NodeConfig }, def?: NodeDefinition): ResolvedPorts {
   switch (node.type) {
     case 'pipeline':
       return { inputs: portsFromConfig(node.config.inputs), outputs: portsFromConfig(node.config.outputs) };

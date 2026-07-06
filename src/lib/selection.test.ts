@@ -45,7 +45,8 @@ describe('buildSelection', () => {
     // Left half white, right half black; wand-seed the white, plus a rect on
     // the black side — the mask should cover both.
     const img = createImage(4, 2, [0, 0, 0, 255]);
-    for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) img.data.set([255, 255, 255, 255], (y * 4 + x) * 4);
+    for (let y = 0; y < 2; y++)
+      for (let x = 0; x < 2; x++) img.data.set([255, 255, 255, 255], (y * 4 + x) * 4);
     const sel = buildSelection(img, {
       points: [{ x: 0, y: 0 }],
       tolerance: 10,

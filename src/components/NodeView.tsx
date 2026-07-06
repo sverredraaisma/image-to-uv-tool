@@ -134,7 +134,9 @@ export function NodeView({ id, selected }: NodeProps) {
       className={`node cat-${def.category.replace(/\W+/g, '')} ${selected ? 'node-selected' : ''} ${
         node.bypassed ? 'node-bypassed' : ''
       }`}
-      style={{ width: nodeWidth({ inputs: ports.inputs, outputs: ports.outputs, configFields: def.configFields }) }}
+      style={{
+        width: nodeWidth({ inputs: ports.inputs, outputs: ports.outputs, configFields: def.configFields }),
+      }}
     >
       <div className="node-header">
         <span className={`status-icon ${statusMeta.cls}`} title={rt?.error ?? statusMeta.title}>

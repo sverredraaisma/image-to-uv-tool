@@ -104,6 +104,8 @@ settling with a stale result.
 | Outline                        | Adjust          | auto   | Coloured outline of an adjustable thickness around non-transparent pixels.                                                                                                                                                                                        |
 | Alpha Cleanup                  | Adjust          | auto   | Snap pixels below an alpha threshold to transparent / black / white.                                                                                                                                                                                              |
 | Crop                           | Transform       | auto   | Crop a rectangle from the image.                                                                                                                                                                                                                                  |
+| Split Region                   | Transform       | auto   | Cut a rectangular region out as its own image plus its clamped coordinates + size (a **Coords** text output). Wire Coords into Place Image to composite a processed region back exactly where it came from.                                                       |
+| Place Image                    | Compose         | auto   | Composite an overlay onto a base at given coordinates + size (source-over). Wire **Coords** from Split Region to drop a processed region back in place; the overlay is scaled to the coords size.                                                                 |
 | Resize                         | Transform       | auto   | Resize to a target width/height (nearest-neighbour).                                                                                                                                                                                                              |
 | Pad                            | Transform       | auto   | Extend the canvas with a transparent border (e.g. for outpainting).                                                                                                                                                                                               |
 | Rotate / Flip                  | Transform       | auto   | Rotate by 90° steps or flip.                                                                                                                                                                                                                                      |
@@ -115,7 +117,7 @@ settling with a stale result.
 | Combine Masks                  | Mask            | auto   | Boolean-combine two masks (AND / OR / A−B / XOR).                                                                                                                                                                                                                 |
 | Chroma Key                     | Mask            | auto   | Mask pixels near a target colour (within tolerance).                                                                                                                                                                                                              |
 | Remove Colour                  | Mask            | auto   | Make pixels near a colour transparent (local background key-out).                                                                                                                                                                                                 |
-| Area Picker                    | Mask            | auto   | Click points on the image (large editor); a magic-wand flood-fill from those points (adjustable tolerance) produces a white mask. Points are saved.                                                                                                               |
+| Area Picker                    | Mask            | auto   | Large editor combining a magic-wand flood-fill (click points, adjustable tolerance), rectangle and ellipse tools — all unioned into one white mask. Includes a Pan tool; scroll to zoom.                                                                          |
 | Heightmap → STL                | Export          | manual | Turn a heightmap into a solid STL (white = tall) with min-white cutoff, base thickness, depth range and physical width. **Merge flat areas** greedy-meshes equal-height regions into large plateaus — a tiny mesh for simple art, and accepts much bigger images. |
 | Gloss Preview                  | UV              | auto   | Simulate a spot-gloss (varnish) print: Blinn-Phong specular from heightmap relief (flat if none), masked by a gloss map; reports coverage %. Open the editor for an interactive **3D view** you can orbit under the light.                                        |
 | **Generate** (text→image)      | AI (Replicate)  | manual | Flux Schnell, SDXL Lightning, Flux Dev, SDXL, SD 3.5, Recraft v3, Ideogram v2.                                                                                                                                                                                    |
@@ -128,9 +130,27 @@ settling with a stale result.
 | **Describe** (image→text)      | AI (Replicate)  | manual | Image Caption (BLIP), Moondream (VLM), LLaVA (VLM), CLIP Interrogator, OCR (text extract).                                                                                                                                                                        |
 | **Custom**                     | AI (Replicate)  | manual | Replicate (custom) — any model: set the slug, wire images/prompt, add anything else via JSON.                                                                                                                                                                     |
 | **LLMs**                       | AI (OpenRouter) | manual | Llama 3.1 8B, Gemini Flash, GPT-4o mini, Claude 3.5 Haiku, custom — a prompt plus optional wired text input → text.                                                                                                                                               |
+| Pipeline                       | Pipeline        | manual | A sub-graph collapsed to one node. **Open** it to edit the nodes inside on the canvas; its Pipeline Input/Output markers become the node's own ports. Save/load reusable pipelines to the browser or a `.pipeline.json` file.                                     |
+| Pipeline Input / Output        | Pipeline        | —      | Markers used inside a pipeline: each becomes an input/output port on the pipeline node, with a settable name and type. Only shown in the menu while editing a pipeline.                                                                                           |
 
 AI models are grouped by capability in the **+ Add node** menu, which is
 sorted and has a live search filter.
+
+### Editor conveniences
+
+- **New nodes land in the centre of the current view** and come selected, so you
+  never have to hunt for them.
+- **Gen AI toggle** (toolbar): hide every generative-AI node from the add-node
+  menus — for working without generative AI on hand. Generative nodes carry a ✦
+  badge; analysis/enhancement AI utilities (segment, depth, upscale, background
+  removal, describe) stay visible.
+- **Auto-format** arranges all nodes into a tidy layered layout from their
+  connections (one undo step), then fits the view.
+- **Pan + zoom** in the image preview and the Area Picker editor — scroll to
+  zoom toward the cursor, drag to pan, buttons to fit.
+- **On-demand previews:** opening a preview renders the node at full resolution,
+  re-running the pipeline up to that point (local nodes only — never spends AI
+  tokens) with a loading spinner until it's ready.
 
 Image data flows between nodes as raw RGBA buffers (`RasterImage`), so every
 image operation is a pure, testable function. `mask` and `image` ports are

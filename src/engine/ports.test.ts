@@ -34,7 +34,9 @@ describe('nodePorts', () => {
       def({ type: 'pipeline', inputs: [], outputs: [] }),
     );
     expect(p.inputs).toEqual([{ id: 'a', label: 'Photo', type: 'image', multiple: false, required: false }]);
-    expect(p.outputs).toEqual([{ id: 'b', label: 'Caption', type: 'text', multiple: false, required: false }]);
+    expect(p.outputs).toEqual([
+      { id: 'b', label: 'Caption', type: 'text', multiple: false, required: false },
+    ]);
   });
 
   it('gives a pipelineInput a single typed output named from config', () => {

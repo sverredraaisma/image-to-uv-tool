@@ -18,9 +18,7 @@ const nodes: MenuNode[] = [
 ];
 
 // The generative-AI subset (Flux) carries the genAI flag; utilities don't.
-const nodesWithGenAI: MenuNode[] = nodes.map((n) =>
-  n.type === 'flux' ? { ...n, genAI: true } : n,
-);
+const nodesWithGenAI: MenuNode[] = nodes.map((n) => (n.type === 'flux' ? { ...n, genAI: true } : n));
 
 describe('buildNodeMenu', () => {
   it('orders categories by priority and excludes test nodes', () => {

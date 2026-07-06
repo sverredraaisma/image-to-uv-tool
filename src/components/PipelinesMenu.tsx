@@ -22,7 +22,11 @@ export function PipelinesMenu() {
   const [saved, setSaved] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const refresh = () => pipelineLibrary.list().then(setSaved).catch(() => setSaved([]));
+  const refresh = () =>
+    pipelineLibrary
+      .list()
+      .then(setSaved)
+      .catch(() => setSaved([]));
   const toggle = () => {
     if (!open) refresh();
     setOpen((o) => !o);

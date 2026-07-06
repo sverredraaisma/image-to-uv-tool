@@ -171,19 +171,16 @@ function derivePipelinePorts(nodes: GraphNode[]): { inputs: PortSpec[]; outputs:
  * pipeline node (updating its embedded graph + derived ports) and drop any
  * parent edge that referenced a port the edit removed.
  */
-function foldRootGraph(state: {
+function foldRootGraph(state: { nodes: GraphNode[]; edges: GraphEdge[]; editStack: PipelineFrame[] }): {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  editStack: PipelineFrame[];
-}): { nodes: GraphNode[]; edges: GraphEdge[] } {
+} {
   if (!state.editStack.length) return { nodes: state.nodes, edges: state.edges };
   const frame = state.editStack[state.editStack.length - 1];
   const subgraph = { nodes: state.nodes, edges: state.edges };
   const { inputs, outputs } = derivePipelinePorts(state.nodes);
   const nodes = frame.nodes.map((n) =>
-    n.id === frame.pipelineNodeId
-      ? { ...n, config: { ...n.config, graph: subgraph, inputs, outputs } }
-      : n,
+    n.id === frame.pipelineNodeId ? { ...n, config: { ...n.config, graph: subgraph, inputs, outputs } } : n,
   );
   const handles = new Set([...inputs, ...outputs].map((p) => p.id));
   const edges = frame.edges.filter(

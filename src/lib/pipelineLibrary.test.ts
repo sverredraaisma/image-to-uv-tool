@@ -35,7 +35,9 @@ describe('pipeline library', () => {
   it('isSavedPipeline validates shape', () => {
     expect(isSavedPipeline(sample)).toBe(true);
     expect(isSavedPipeline({ name: 'x' })).toBe(false);
-    expect(isSavedPipeline({ name: 'x', graph: { nodes: [], edges: [] }, inputs: [], outputs: [] })).toBe(true);
+    expect(isSavedPipeline({ name: 'x', graph: { nodes: [], edges: [] }, inputs: [], outputs: [] })).toBe(
+      true,
+    );
     expect(isSavedPipeline(null)).toBe(false);
   });
 });

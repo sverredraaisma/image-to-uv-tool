@@ -56,7 +56,11 @@ describe('evaluateSubgraph', () => {
         node('o1', 'pipelineOutput', { name: 'Original' }),
         node('o2', 'pipelineOutput', { name: 'Grey' }),
       ],
-      edges: [edge('pin', 'out', 'gray', 'in'), edge('pin', 'out', 'o1', 'in'), edge('gray', 'out', 'o2', 'in')],
+      edges: [
+        edge('pin', 'out', 'gray', 'in'),
+        edge('pin', 'out', 'o1', 'in'),
+        edge('gray', 'out', 'o2', 'in'),
+      ],
     };
     const img = createImage(1, 1, [255, 0, 0, 255]);
     const out = await evaluateSubgraph(graph, { pin: img }, ctx({}));
