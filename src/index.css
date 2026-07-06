@@ -701,6 +701,64 @@ textarea {
   word-break: break-all;
 }
 
+/* ---------------- Pan / zoom viewport ---------------- */
+.panzoom {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  touch-action: none;
+}
+.panzoom-draggable {
+  cursor: grab;
+}
+.panzoom-panning {
+  cursor: grabbing;
+}
+.panzoom-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  line-height: 0;
+  will-change: transform;
+}
+.panzoom-content img {
+  max-width: none;
+  max-height: none;
+  display: block;
+}
+.panzoom-controls {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  background: rgba(14, 17, 22, 0.82);
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+}
+.panzoom-controls .icon-btn {
+  font-size: 14px;
+  min-width: 20px;
+}
+.panzoom-scale {
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 38px;
+  text-align: center;
+  user-select: none;
+}
+.preview-panzoom {
+  height: 66vh;
+}
+.area-panzoom {
+  height: 52vh;
+}
+
 /* checkerboard to show transparency */
 .checker {
   background-image:
@@ -775,6 +833,9 @@ textarea {
 .area-img.tool-shape {
   cursor: crosshair;
   touch-action: none;
+}
+.area-img.tool-pan {
+  cursor: grab;
 }
 .area-shape {
   position: absolute;

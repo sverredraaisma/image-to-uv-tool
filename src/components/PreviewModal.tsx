@@ -5,6 +5,7 @@ import { downloadBlob, downloadText, previewFileName } from '../lib/download';
 import { stlToAscii, stlToBinary, stlToObj } from '../lib/stl';
 import { stlToThreeMf } from '../lib/threeMf';
 import { Modal } from './Modal';
+import { PanZoom } from './PanZoom';
 
 export function PreviewModal() {
   const preview = useStore((s) => s.preview);
@@ -100,11 +101,13 @@ export function PreviewModal() {
       }
     >
       {value.kind === 'image' && imageUrl && (
-        <img src={imageUrl} alt={title} className="preview-full checker" />
+        <PanZoom className="preview-panzoom" fitKey={imageUrl}>
+          <img src={imageUrl} alt={title} className="checker" />
+        </PanZoom>
       )}
       {value.kind === 'image' && (
         <div className="preview-meta">
-          {value.width} × {value.height} px
+          {value.width} × {value.height} px · scroll to zoom, drag to pan
         </div>
       )}
       {value.kind === 'text' && <pre className="preview-textfull">{value.text}</pre>}

@@ -2,11 +2,12 @@ import { useMemo, useState } from 'react';
 import { useStore } from '../store/store';
 import { rasterToDataUrl } from '../lib/canvas';
 import { num } from '../nodes/helpers';
+import { PanZoom } from './PanZoom';
 import type { Point } from '../lib/magicWand';
 import type { SelectionShape } from '../lib/selection';
 import type { RasterImage } from '../types';
 
-type Tool = 'wand' | 'rect' | 'ellipse';
+type Tool = 'wand' | 'rect' | 'ellipse' | 'pan';
 
 interface Drag {
   x0: number;
@@ -59,7 +60,8 @@ export function AreaPickerEditor({ nodeId }: { nodeId: string }) {
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLImageElement>) => {
-    if (tool === 'wand' || !inputImage) return;
+    // Only the shape tools draw; wand adds points on click, pan lets PanZoom pan.
+    if ((tool !== 'rect' && tool !== 'ellipse') || !inputImage || e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const { x, y } = toImage(e, e.currentTarget);
     setDrag({ x0: x, y0: y, x1: x, y1: y });
@@ -102,7 +104,7 @@ export function AreaPickerEditor({ nodeId }: { nodeId: string }) {
     <div className="area-picker">
       <div className="area-controls">
         <div className="area-tools" role="group" aria-label="Selection tool">
-          {(['wand', 'rect', 'ellipse'] as Tool[]).map((t) => (
+          {(['wand', 'rect', 'ellipse', 'pan'] as Tool[]).map((t) => (
             <button
               key={t}
               type="button"
@@ -114,10 +116,12 @@ export function AreaPickerEditor({ nodeId }: { nodeId: string }) {
                   ? 'Magic wand — click to flood-fill an area'
                   : t === 'rect'
                     ? 'Rectangle — drag to select'
-                    : 'Ellipse — drag to select'
+                    : t === 'ellipse'
+                      ? 'Ellipse — drag to select'
+                      : 'Pan — drag to move the image (scroll to zoom in any tool)'
               }
             >
-              {t === 'wand' ? '✦ Wand' : t === 'rect' ? '▭ Rect' : '◯ Ellipse'}
+              {t === 'wand' ? '✦ Wand' : t === 'rect' ? '▭ Rect' : t === 'ellipse' ? '◯ Ellipse' : '✋ Pan'}
             </button>
           ))}
         </div>
@@ -166,44 +170,52 @@ export function AreaPickerEditor({ nodeId }: { nodeId: string }) {
         {src && (
           <div className="area-stage">
             <div className="area-label">
-              {tool === 'wand' ? 'Click to add points' : 'Drag to draw a shape'}
+              {tool === 'wand'
+                ? 'Click to add points · scroll to zoom'
+                : tool === 'pan'
+                  ? 'Drag to pan · scroll to zoom'
+                  : 'Drag to draw a shape · scroll to zoom'}
             </div>
-            <div className="area-img-wrap">
-              <img
-                src={src}
-                alt="input"
-                className={`area-img checker ${tool === 'wand' ? 'tool-wand' : 'tool-shape'}`}
-                onClick={onClick}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                draggable={false}
-              />
-              {shapes.map((s, i) => (
-                <span
-                  key={i}
-                  className={`area-shape area-shape-${s.type}`}
-                  style={shapeStyle(s)}
-                  aria-hidden="true"
+            <PanZoom className="area-panzoom" dragToPan={tool === 'pan'} fitKey={src}>
+              <div className="area-img-wrap">
+                <img
+                  src={src}
+                  alt="input"
+                  className={`area-img checker tool-${tool === 'rect' || tool === 'ellipse' ? 'shape' : tool}`}
+                  onClick={onClick}
+                  onPointerDown={onPointerDown}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                  draggable={false}
                 />
-              ))}
-              {dragShape && dragShape.width > 0 && dragShape.height > 0 && (
-                <span
-                  className={`area-shape area-shape-${tool === 'rect' ? 'rect' : 'ellipse'} area-shape-drag`}
-                  style={shapeStyle(dragShape)}
-                  aria-hidden="true"
-                />
-              )}
-              {points.map((p, i) => (
-                <span key={i} className="area-dot" style={{ left: pct(p.x, iw), top: pct(p.y, ih) }} />
-              ))}
-            </div>
+                {shapes.map((s, i) => (
+                  <span
+                    key={i}
+                    className={`area-shape area-shape-${s.type}`}
+                    style={shapeStyle(s)}
+                    aria-hidden="true"
+                  />
+                ))}
+                {dragShape && dragShape.width > 0 && dragShape.height > 0 && (
+                  <span
+                    className={`area-shape area-shape-${tool === 'rect' ? 'rect' : 'ellipse'} area-shape-drag`}
+                    style={shapeStyle(dragShape)}
+                    aria-hidden="true"
+                  />
+                )}
+                {points.map((p, i) => (
+                  <span key={i} className="area-dot" style={{ left: pct(p.x, iw), top: pct(p.y, ih) }} />
+                ))}
+              </div>
+            </PanZoom>
           </div>
         )}
         {maskSrc && (
           <div className="area-stage">
             <div className="area-label">Mask output</div>
-            <img src={maskSrc} alt="mask" className="area-img" />
+            <PanZoom className="area-panzoom" fitKey={maskSrc}>
+              <img src={maskSrc} alt="mask" />
+            </PanZoom>
           </div>
         )}
       </div>
