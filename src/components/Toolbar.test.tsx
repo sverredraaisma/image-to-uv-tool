@@ -69,7 +69,7 @@ describe('Toolbar', () => {
       edges: [],
     };
     const file = new File([JSON.stringify(graph)], 'g.json', { type: 'application/json' });
-    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const input = container.querySelector('input[aria-label="Load graph file"]') as HTMLInputElement;
     await userEvent.upload(input, file);
     await waitFor(() => {
       expect(useStore.getState().nodes).toHaveLength(1);

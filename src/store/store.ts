@@ -22,7 +22,8 @@ import {
 } from '../engine/graph';
 import { isCompatible } from '../engine/compatibility';
 import { getNodeDef, getNodeDefSafe } from '../engine/registry';
-import { nodePorts, asPortType } from '../engine/ports';
+import { nodePorts, asPortType, portsFromConfig } from '../engine/ports';
+import type { SavedPipeline } from '../lib/pipelineLibrary';
 import { sanitizeGraph, type SanitizeOptions } from '../engine/sanitize';
 import { CURRENT_GRAPH_VERSION, migrateSavedGraph } from '../engine/migrate';
 import { reconcileRuntime } from '../engine/reconcile';
@@ -287,6 +288,11 @@ export interface StoreState {
   // pipeline sub-canvas editing
   enterPipeline: (pipelineNodeId: string) => void;
   exitPipeline: () => void;
+  /** Build a reusable pipeline from the pipeline being edited, or the selected
+   *  pipeline node. Returns null if neither is available. */
+  buildSavedPipeline: (name: string) => SavedPipeline | null;
+  /** Drop a saved pipeline onto the canvas as a new (selected) pipeline node. */
+  insertSavedPipeline: (saved: SavedPipeline) => string;
 
   // persistence / lifecycle
   init: () => void;
@@ -1025,6 +1031,46 @@ export const useStore = create<StoreState>()(
         get().markOutOfDate(frame.pipelineNodeId);
         for (const d of descendants(frame.pipelineNodeId, parentEdges)) get().markOutOfDate(d);
         void get().processAutoRun();
+      },
+
+      buildSavedPipeline: (name) => {
+        const s = get();
+        // While editing, capture the live subgraph; otherwise the selected
+        // pipeline node's stored subgraph.
+        if (s.editStack.length) {
+          const { inputs, outputs } = derivePipelinePorts(s.nodes);
+          return {
+            version: 1,
+            name,
+            graph: structuredClone({ nodes: s.nodes, edges: s.edges }),
+            inputs,
+            outputs,
+          };
+        }
+        const node = s.selectedNodeId ? s.nodes.find((n) => n.id === s.selectedNodeId) : undefined;
+        if (!node || node.type !== 'pipeline') return null;
+        const graph = (node.config.graph as { nodes: GraphNode[]; edges: GraphEdge[] } | undefined) ?? {
+          nodes: [],
+          edges: [],
+        };
+        return {
+          version: 1,
+          name,
+          graph: structuredClone(graph),
+          inputs: portsFromConfig(node.config.inputs),
+          outputs: portsFromConfig(node.config.outputs),
+        };
+      },
+
+      insertSavedPipeline: (saved) => {
+        const id = get().addNode('pipeline'); // centred + selected
+        get().updateNodeConfig(id, {
+          graph: structuredClone(saved.graph),
+          inputs: saved.inputs,
+          outputs: saved.outputs,
+          name: saved.name,
+        });
+        return id;
       },
 
       init: () => {

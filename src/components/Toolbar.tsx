@@ -4,6 +4,7 @@ import { downloadText, graphFileName } from '../lib/download';
 import { encodeGraphToHash } from '../lib/shareLink';
 import { NodePicker } from './NodePicker';
 import { ProjectsMenu } from './ProjectsMenu';
+import { PipelinesMenu } from './PipelinesMenu';
 import { EXAMPLES, type Example } from './examples';
 import type { SavedGraph } from '../types';
 
@@ -213,6 +214,7 @@ export function Toolbar() {
         </button>
         <ExamplesMenu />
         <ProjectsMenu />
+        <PipelinesMenu />
         <button type="button" className="btn" onClick={() => void onSave()}>
           Save
         </button>
@@ -239,6 +241,7 @@ export function Toolbar() {
         <input
           ref={fileRef}
           type="file"
+          aria-label="Load graph file"
           accept="application/json,.json"
           style={{ display: 'none' }}
           onChange={(e) => {
