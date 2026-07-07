@@ -49,6 +49,7 @@ function FlowCanvas() {
   const pendingSelectIds = useStore((s) => s.pendingSelectIds);
   const clearPendingSelect = useStore((s) => s.clearPendingSelect);
   const setViewportCenter = useStore((s) => s.setViewportCenter);
+  const setNodeSizes = useStore((s) => s.setNodeSizes);
   const addNode = useStore((s) => s.addNode);
   const editingPipeline = useStore((s) => s.editStack.length > 0);
   const exitPipeline = useStore((s) => s.exitPipeline);
@@ -65,7 +66,7 @@ function FlowCanvas() {
   const cancelPending = useStore((s) => s.cancelPendingConnection);
   const addToast = useStore((s) => s.addToast);
 
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const arrangeNonce = useStore((s) => s.arrangeNonce);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -83,6 +84,21 @@ function FlowCanvas() {
     });
     return () => setViewportCenter(null);
   }, [screenToFlowPosition, setViewportCenter]);
+
+  // Expose React Flow's measured node sizes so autoFormat (in the store, outside
+  // this provider) can lay out around each node's real footprint.
+  useEffect(() => {
+    setNodeSizes(() => {
+      const sizes: Record<string, { width: number; height: number }> = {};
+      for (const n of getNodes()) {
+        const w = n.measured?.width;
+        const h = n.measured?.height;
+        if (w && h) sizes[n.id] = { width: w, height: h };
+      }
+      return sizes;
+    });
+    return () => setNodeSizes(null);
+  }, [getNodes, setNodeSizes]);
 
   // Nodes live in local React Flow state for smooth dragging; only the final
   // dropped position is written back to the (persisted) store.

@@ -222,6 +222,12 @@ export interface StoreState {
    * canvas mounts. Runtime-only, never persisted.
    */
   viewportCenter: (() => { x: number; y: number }) | null;
+  /**
+   * Installed by the canvas so out-of-provider code (autoFormat) can read React
+   * Flow's *measured* node sizes on demand, keeping large nodes from overlapping
+   * in the layout. Null until the canvas mounts. Runtime-only, never persisted.
+   */
+  nodeSizes: (() => Record<string, { width: number; height: number }>) | null;
   editorNodeId: string | null;
   preview: PreviewState | null;
   toasts: Toast[];
@@ -275,6 +281,7 @@ export interface StoreState {
   setSelection: (ids: string[]) => void;
   clearPendingSelect: () => void;
   setViewportCenter: (fn: (() => { x: number; y: number }) | null) => void;
+  setNodeSizes: (fn: (() => Record<string, { width: number; height: number }>) | null) => void;
   openEditor: (id: string | null) => void;
   openPreview: (value: DataValue, title: string) => void;
   /**
@@ -363,6 +370,7 @@ export const useStore = create<StoreState>()(
       selectedNodeIds: [],
       pendingSelectIds: [],
       viewportCenter: null,
+      nodeSizes: null,
       editorNodeId: null,
       preview: null,
       toasts: [],
@@ -533,7 +541,8 @@ export const useStore = create<StoreState>()(
       autoFormat: () => {
         const { nodes, edges } = get();
         if (!nodes.length) return;
-        const pos = autoLayout(nodes, edges, { originX: 80, originY: 80 });
+        const sizes = get().nodeSizes?.();
+        const pos = autoLayout(nodes, edges, { originX: 80, originY: 80, sizes });
         get()._snapshot();
         set((s) => ({
           nodes: s.nodes.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)),
@@ -722,6 +731,7 @@ export const useStore = create<StoreState>()(
       setSelection: (ids) => set({ selectedNodeIds: ids, selectedNodeId: ids.length === 1 ? ids[0] : null }),
       clearPendingSelect: () => set((s) => (s.pendingSelectIds.length ? { pendingSelectIds: [] } : s)),
       setViewportCenter: (fn) => set({ viewportCenter: fn }),
+      setNodeSizes: (fn) => set({ nodeSizes: fn }),
       openEditor: (id) => set({ editorNodeId: id }),
       openPreview: (value, title) => {
         previewToken++; // supersede any pending on-demand render
