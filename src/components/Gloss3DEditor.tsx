@@ -42,6 +42,7 @@ export function Gloss3DEditor({ nodeId }: { nodeId: string }) {
   const intensity = num(cfg.intensity, 1);
   const matte = num(cfg.matte, 0);
   const relief = num(cfg.heightStrength, 2);
+  const smooth = num(cfg.heightSmooth, 2);
   const azimuth = num(cfg.azimuth, 135);
   const elevation = num(cfg.elevation, 45);
 
@@ -76,8 +77,9 @@ export function Gloss3DEditor({ nodeId }: { nodeId: string }) {
       intensity,
       matte,
       relief,
+      smooth,
     });
-  }, [shininess, intensity, matte, relief]);
+  }, [shininess, intensity, matte, relief, smooth]);
   drawRef.current = draw;
 
   // Create / dispose the renderer once.

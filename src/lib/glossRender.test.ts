@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   buildGeometry,
+  buildNormalMap,
   computeMatrices,
   createGlossRenderer,
   lightDirection,
@@ -55,6 +56,7 @@ function fakeGl() {
     UNSIGNED_SHORT: 23,
     FLOAT: 24,
     // creators
+    getExtension: () => null, // no OES_element_index_uint → Uint16 index path
     createShader: () => ({}),
     shaderSource: () => {},
     compileShader: () => {},
@@ -194,6 +196,100 @@ describe('buildGeometry (mesh displacement)', () => {
   });
 });
 
+describe('buildNormalMap', () => {
+  const decode = (nm: ReturnType<typeof buildNormalMap>, x: number, y: number) => {
+    const o = (y * nm.width + x) * 4;
+    return [nm.data[o] / 255 * 2 - 1, nm.data[o + 1] / 255 * 2 - 1, nm.data[o + 2] / 255 * 2 - 1];
+  };
+
+  it('is flat (pointing straight up) for a uniform heightmap', () => {
+    const flat = createImage(8, 8, [128, 128, 128, 255]);
+    const nm = buildNormalMap(flat, 1, 2);
+    expect(nm.width).toBe(8);
+    const [nx, ny, nz] = decode(nm, 4, 4);
+    expect(nx).toBeCloseTo(0, 2);
+    expect(ny).toBeCloseTo(0, 2);
+    expect(nz).toBeCloseTo(1, 2);
+  });
+
+  it('tilts the normal against the slope, matching buildGeometry', () => {
+    // Left dark → right bright: height rises toward +x, so the surface normal
+    // leans toward −x (nx < 0) — the same sign buildGeometry produces.
+    const ramp = createImage(16, 4, [0, 0, 0, 255]);
+    for (let y = 0; y < 4; y++)
+      for (let x = 0; x < 16; x++) ramp.data.set([x * 17, x * 17, x * 17, 255], (y * 16 + x) * 4);
+
+    const nm = buildNormalMap(ramp, 1, 2);
+    const [nx, , nz] = decode(nm, 8, 2);
+    expect(nx).toBeLessThan(0);
+    expect(nz).toBeGreaterThan(0);
+
+    // Mesh normals for the same ramp include the matching negative-x lean.
+    const geo = buildGeometry(ramp, 1, 2, 16);
+    let minNx = Infinity;
+    for (let i = 0; i < geo.normals.length; i += 3) minNx = Math.min(minNx, geo.normals[i]);
+    expect(minNx).toBeLessThan(0);
+  });
+
+  it('spreads an isolated 1-LSB quantization step into a gentle bump, not a ridge', () => {
+    // A single 1-LSB cliff in an otherwise flat, wide field — the artifact that
+    // used to spike. A raw ±1 derivative would tilt it to |nx| ≈ 0.23; the
+    // pre-blur must keep it far gentler while still registering some slope.
+    const w = 1024;
+    const step = createImage(w, 8, [130, 130, 130, 255]);
+    for (let y = 0; y < 8; y++)
+      for (let x = w / 2; x < w; x++) step.data.set([131, 131, 131, 255], (y * w + x) * 4);
+
+    const nm = buildNormalMap(step, 1, 2);
+    let maxAbsNx = 0;
+    for (let i = 0; i < nm.data.length; i += 4) {
+      maxAbsNx = Math.max(maxAbsNx, Math.abs((nm.data[i] / 255) * 2 - 1));
+    }
+    expect(maxAbsNx).toBeGreaterThan(0); // the slope is still there…
+    expect(maxAbsNx).toBeLessThan(0.12); // …but no sharp one-pixel ridge
+  });
+
+  it('makes far-apart quantization steps gentler than closely-spaced ones', () => {
+    // Same 1-LSB steps, different spacing. Widely-spaced steps (a gentler true
+    // slope) must produce weaker normals than tightly-packed ones.
+    const staircase = (period: number) => {
+      const w = 1024;
+      const img = createImage(w, 8, [128, 128, 128, 255]);
+      for (let y = 0; y < 8; y++)
+        for (let x = 0; x < w; x++) {
+          const v = 128 + Math.floor(x / period);
+          img.data.set([v, v, v, 255], (y * w + x) * 4);
+        }
+      return img;
+    };
+    const meanAbsNx = (img: ReturnType<typeof staircase>) => {
+      const nm = buildNormalMap(img, 1, 2);
+      let sum = 0;
+      let n = 0;
+      for (let i = 0; i < nm.data.length; i += 4, n++) sum += Math.abs((nm.data[i] / 255) * 2 - 1);
+      return sum / n;
+    };
+    const close = meanAbsNx(staircase(4)); // step every 4px  → steeper slope
+    const far = meanAbsNx(staircase(32)); // step every 32px → gentler slope
+    expect(close).toBeGreaterThan(far);
+  });
+
+  it('smoothFraction controls how much a step is blurred', () => {
+    const w = 1024;
+    const step = createImage(w, 4, [130, 130, 130, 255]);
+    for (let y = 0; y < 4; y++)
+      for (let x = w / 2; x < w; x++) step.data.set([160, 160, 160, 255], (y * w + x) * 4);
+    const peakNx = (frac: number) => {
+      const nm = buildNormalMap(step, 1, 2, frac);
+      let m = 0;
+      for (let i = 0; i < nm.data.length; i += 4) m = Math.max(m, Math.abs((nm.data[i] / 255) * 2 - 1));
+      return m;
+    };
+    // More smoothing → the same cliff is spread over more pixels → gentler normal.
+    expect(peakNx(1 / 32)).toBeLessThan(peakNx(1 / 512));
+  });
+});
+
 describe('createGlossRenderer', () => {
   it('returns null when WebGL is unavailable (headless) instead of throwing', () => {
     const canvas = document.createElement('canvas');
@@ -227,9 +323,9 @@ describe('createGlossRenderer', () => {
       heightmap: createImage(4, 4, [128, 128, 128, 255]),
     });
     expect(r.hasArt()).toBe(true);
-    // Only art + gloss are GPU textures; the heightmap is CPU-sampled to displace
-    // the mesh geometry.
-    expect(calls.textureUploads).toBe(2);
+    // art + gloss + the normal map baked from the heightmap are GPU textures; the
+    // heightmap itself is also CPU-sampled to displace the mesh geometry.
+    expect(calls.textureUploads).toBe(3);
 
     r.resize(320, 200);
     r.render({

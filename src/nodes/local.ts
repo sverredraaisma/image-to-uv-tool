@@ -1104,6 +1104,15 @@ export const glossPreviewNode: NodeDefinition = {
       step: 0.5,
       advanced: true,
     },
+    {
+      kind: 'number',
+      key: 'heightSmooth',
+      label: 'Relief smoothing',
+      min: 0,
+      max: 20,
+      step: 0.5,
+      advanced: true,
+    },
   ],
   defaultConfig: () => ({
     azimuth: 135,
@@ -1112,6 +1121,7 @@ export const glossPreviewNode: NodeDefinition = {
     intensity: 1,
     matte: 0,
     heightStrength: 2,
+    heightSmooth: 2,
   }),
   compute: ({ inputs, config }) => {
     const art = asImage(inputs.art);

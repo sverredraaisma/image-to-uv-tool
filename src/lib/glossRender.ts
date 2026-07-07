@@ -142,6 +142,8 @@ export interface GlossRenderParams {
   intensity: number;
   matte: number;
   relief: number;
+  /** Relief-smoothing multiplier for the normal-map bake; defaults when omitted. */
+  smooth?: number;
 }
 
 export interface GlossRenderer {
@@ -154,8 +156,11 @@ export interface GlossRenderer {
 
 // The mesh is a real displaced heightfield: each vertex is pushed along Z by the
 // heightmap (CPU-side, so no vertex texture fetch — that fails to LINK where
-// MAX_VERTEX_TEXTURE_IMAGE_UNITS is 0), and its normal comes from the displaced
-// surface. Lighting therefore reacts to the true 3D shape.
+// MAX_VERTEX_TEXTURE_IMAGE_UNITS is 0), giving a true 3D silhouette you can orbit.
+// The *shading* detail, though, comes from a normal map baked from the full-res
+// heightmap and sampled per-fragment (uHasNormal), so relief far finer than the
+// tessellation still catches the light. The interpolated vertex normal is only
+// the fallback used when no heightmap is wired.
 const VERT = `
 attribute vec3 aPos;
 attribute vec3 aNormal;
@@ -174,9 +179,13 @@ const FRAG = `
 precision highp float;
 varying vec2 vUv;
 varying vec3 vNormal;
+uniform mat3 uNormalMat;
 uniform sampler2D uArt;
 uniform sampler2D uGloss;
+uniform sampler2D uNormalTex;
 uniform bool uHasGloss;
+uniform bool uHasNormal;
+uniform float uReliefStrength;
 uniform vec3 uLightDir;
 uniform float uShininess;
 uniform float uIntensity;
@@ -185,7 +194,18 @@ float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 void main() {
   vec3 albedo = texture2D(uArt, vUv).rgb;
   float gloss = uHasGloss ? luma(texture2D(uGloss, vUv).rgb) : 0.0;
-  vec3 N = normalize(vNormal);
+  // High-res per-fragment normal from the baked normal map (model space, same
+  // frame as aNormal), else the interpolated mesh normal. The normal map is
+  // baked at a reference relief; rescaling its tangent tilt by uReliefStrength
+  // reproduces the exact surface normal at the live relief.
+  vec3 N;
+  if (uHasNormal) {
+    vec3 nt = texture2D(uNormalTex, vUv).rgb * 2.0 - 1.0;
+    nt.xy *= uReliefStrength;
+    N = normalize(uNormalMat * normalize(nt));
+  } else {
+    N = normalize(vNormal);
+  }
   vec3 V = vec3(0.0, 0.0, 1.0);
   vec3 H = normalize(uLightDir + V);
   float ndl = max(dot(N, uLightDir), 0.0);
@@ -209,41 +229,64 @@ function compile(gl: WebGLRenderingContext, type: number, src: string): WebGLSha
   return sh;
 }
 
-// Mesh resolution. (GRID+1)² must stay ≤ 65536 so triangle indices fit in a
-// Uint16 (no OES_element_index_uint needed). 200 → ~40k verts, plenty of relief.
-const GRID = 200;
-const ROW = GRID + 1;
+// Mesh resolution. The renderer uses GRID_HI when OES_element_index_uint lets
+// triangle indices be 32-bit; otherwise GRID_LO, whose (GRID_LO+1)² = 65536 is
+// the densest grid that still fits Uint16 indices (max index 65535). The
+// exported pure builders default to DEFAULT_GRID when no grid is passed.
+const DEFAULT_GRID = 200;
+const GRID_LO = 255; // 256² verts → max index 65535 (fits Uint16)
+const GRID_HI = 512; // 513² verts → needs Uint32 indices
 // Peak displacement (world units) per unit of `relief` (heightStrength). The
 // plane spans 2 units, so relief=2 gives ±0.5·2·0.12 ≈ ±0.12 → a gentle bas-relief
 // by default; raise the Relief strength control for a more dramatic mesh.
 const RELIEF_SCALE = 0.12;
+// The normal map is baked at this reference relief; the shader rescales its xy
+// tilt by (live relief / this) so bump strength tracks the Relief control with
+// no texture rebuild. 2 matches the node's default heightStrength.
+const NORMAL_REF_RELIEF = 2;
+// Before differencing the height field into a normal map, low-pass it with a box
+// blur whose radius is (longer side · this · smooth-multiplier). This
+// reconstructs the smooth surface behind 8-bit quantization: an isolated 240→241
+// step gets spread over ~2·radius px instead of spiking into a one-pixel ridge,
+// so gentle far-apart slopes stay gentle while genuine close, high-contrast
+// detail still bumps. This is the radius *per unit* of the node's Relief
+// smoothing control; the renderer multiplies it by that value.
+const NORMAL_SMOOTH_FRACTION = 1 / 256;
+// Default Relief-smoothing multiplier when a caller/params doesn't specify one
+// (≈16px blur at a 2048px height field). Matches the node's heightSmooth default.
+const DEFAULT_SMOOTH = 2;
 
 /** Constant per-vertex UVs (image-upright), built once. */
-function buildUvs(): Float32Array {
-  const uv = new Float32Array(ROW * ROW * 2);
-  for (let j = 0; j <= GRID; j++) {
-    for (let i = 0; i <= GRID; i++) {
-      const k = (j * ROW + i) * 2;
-      uv[k] = i / GRID;
-      uv[k + 1] = 1 - j / GRID;
+function buildUvs(grid = DEFAULT_GRID): Float32Array {
+  const row = grid + 1;
+  const uv = new Float32Array(row * row * 2);
+  for (let j = 0; j <= grid; j++) {
+    for (let i = 0; i <= grid; i++) {
+      const k = (j * row + i) * 2;
+      uv[k] = i / grid;
+      uv[k + 1] = 1 - j / grid;
     }
   }
   return uv;
 }
 
-/** Constant triangle indices for the grid, built once. */
-function buildIndices(): Uint16Array {
-  const idx = new Uint16Array(GRID * GRID * 6);
+/**
+ * Constant triangle indices for the grid, built once. Uses Uint32 when the grid
+ * is too dense for a Uint16 index (needs OES_element_index_uint at draw time).
+ */
+function buildIndices(grid = DEFAULT_GRID): Uint16Array | Uint32Array {
+  const row = grid + 1;
+  const idx = row * row - 1 > 65535 ? new Uint32Array(grid * grid * 6) : new Uint16Array(grid * grid * 6);
   let o = 0;
-  for (let j = 0; j < GRID; j++) {
-    for (let i = 0; i < GRID; i++) {
-      const a = j * ROW + i;
+  for (let j = 0; j < grid; j++) {
+    for (let i = 0; i < grid; i++) {
+      const a = j * row + i;
       idx[o++] = a;
       idx[o++] = a + 1;
-      idx[o++] = a + ROW;
+      idx[o++] = a + row;
       idx[o++] = a + 1;
-      idx[o++] = a + ROW + 1;
-      idx[o++] = a + ROW;
+      idx[o++] = a + row + 1;
+      idx[o++] = a + row;
     }
   }
   return idx;
@@ -277,34 +320,36 @@ export function buildGeometry(
   heightImg: RasterImage | undefined,
   planeAspect: number,
   relief: number,
+  grid = DEFAULT_GRID,
 ): { positions: Float32Array; normals: Float32Array } {
-  const positions = new Float32Array(ROW * ROW * 3);
-  const normals = new Float32Array(ROW * ROW * 3);
+  const row = grid + 1;
+  const positions = new Float32Array(row * row * 3);
+  const normals = new Float32Array(row * row * 3);
   const sx = planeAspect >= 1 ? 1 : planeAspect;
   const sy = planeAspect >= 1 ? 1 / planeAspect : 1;
   const amp = relief * RELIEF_SCALE;
 
-  const z = new Float32Array(ROW * ROW);
+  const z = new Float32Array(row * row);
   if (heightImg && amp !== 0) {
-    for (let j = 0; j <= GRID; j++) {
-      for (let i = 0; i <= GRID; i++) {
-        z[j * ROW + i] = (sampleLum(heightImg, i / GRID, 1 - j / GRID) - 0.5) * amp;
+    for (let j = 0; j <= grid; j++) {
+      for (let i = 0; i <= grid; i++) {
+        z[j * row + i] = (sampleLum(heightImg, i / grid, 1 - j / grid) - 0.5) * amp;
       }
     }
   }
-  const dx = (2 / GRID) * sx;
-  const dy = (2 / GRID) * sy;
-  for (let j = 0; j <= GRID; j++) {
-    for (let i = 0; i <= GRID; i++) {
-      const k = j * ROW + i;
-      positions[k * 3] = ((i / GRID) * 2 - 1) * sx;
-      positions[k * 3 + 1] = ((j / GRID) * 2 - 1) * sy;
+  const dx = (2 / grid) * sx;
+  const dy = (2 / grid) * sy;
+  for (let j = 0; j <= grid; j++) {
+    for (let i = 0; i <= grid; i++) {
+      const k = j * row + i;
+      positions[k * 3] = ((i / grid) * 2 - 1) * sx;
+      positions[k * 3 + 1] = ((j / grid) * 2 - 1) * sy;
       positions[k * 3 + 2] = z[k];
       // Central-difference surface normal (clamped at the edges).
-      const zl = z[j * ROW + Math.max(0, i - 1)];
-      const zr = z[j * ROW + Math.min(GRID, i + 1)];
-      const zd = z[Math.max(0, j - 1) * ROW + i];
-      const zu = z[Math.min(GRID, j + 1) * ROW + i];
+      const zl = z[j * row + Math.max(0, i - 1)];
+      const zr = z[j * row + Math.min(grid, i + 1)];
+      const zd = z[Math.max(0, j - 1) * row + i];
+      const zu = z[Math.min(grid, j + 1) * row + i];
       const nx = -(zr - zl) / (2 * dx);
       const ny = -(zu - zd) / (2 * dy);
       const len = Math.hypot(nx, ny, 1) || 1;
@@ -314,6 +359,103 @@ export function buildGeometry(
     }
   }
   return { positions, normals };
+}
+
+/**
+ * Separable box blur (clamp-to-edge) over a scalar field, via a sliding window
+ * running sum — O(w·h) regardless of radius. Returns `src` unchanged when the
+ * radius is below 1px. Used to reconstruct the smooth surface behind an 8-bit
+ * height field before differencing it into normals.
+ */
+function boxBlur(src: Float32Array, w: number, h: number, r: number): Float32Array {
+  if (r < 1) return src;
+  const win = 2 * r + 1;
+  const clampI = (v: number, hi: number) => (v < 0 ? 0 : v > hi ? hi : v);
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let sum = 0;
+    for (let k = -r; k <= r; k++) sum += src[row + clampI(k, w - 1)];
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = sum / win;
+      sum += src[row + clampI(x + r + 1, w - 1)] - src[row + clampI(x - r, w - 1)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let k = -r; k <= r; k++) sum += tmp[clampI(k, h - 1) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = sum / win;
+      sum += tmp[clampI(y + r + 1, h - 1) * w + x] - tmp[clampI(y - r, h - 1) * w + x];
+    }
+  }
+  return out;
+}
+
+/**
+ * Bake a heightmap into a normal map at the heightmap's own (GPU-capped)
+ * resolution, so per-fragment lighting can show detail far finer than the mesh.
+ * The stored normal is a unit vector in the plane's model frame (x → +u,
+ * y → −v, z → up) — the same slope convention as buildGeometry — computed at
+ * `refRelief`; the shader rescales the xy tilt to the live relief. Because the
+ * stored normal is linear in the height amplitude before normalisation,
+ * scaling xy by (relief / refRelief) and renormalising yields the exact normal
+ * at any relief.
+ *
+ * The height field is low-pass filtered first (blur radius = longer side ·
+ * `smoothFraction`) so 8-bit quantization steps don't become one-pixel ridges:
+ * the normal then reflects the surface's actual slope over distance — gentle
+ * where ridges are far apart, strong where real detail is close together. Pass a
+ * larger `smoothFraction` to suppress more stairstepping (at the cost of blurring
+ * finer detail), or 0 to difference the raw samples. Exported for testing.
+ */
+export function buildNormalMap(
+  heightImg: RasterImage,
+  planeAspect: number,
+  refRelief: number,
+  smoothFraction = NORMAL_SMOOTH_FRACTION,
+): RasterImage {
+  const w = heightImg.width;
+  const h = heightImg.height;
+  const src = heightImg.data;
+  const raw = new Float32Array(w * h);
+  for (let i = 0, p = 0; i < raw.length; i++, p += 4) {
+    raw[i] = luminance(src[p], src[p + 1], src[p + 2]) / 255;
+  }
+  // Smooth away 8-bit quantization staircases before differencing.
+  const radius = Math.round(Math.max(w, h) * Math.max(0, smoothFraction));
+  const lum = boxBlur(raw, w, h, radius);
+  const sx = planeAspect >= 1 ? 1 : planeAspect;
+  const sy = planeAspect >= 1 ? 1 / planeAspect : 1;
+  const amp = refRelief * RELIEF_SCALE;
+  // World-space height slope per unit luminance gradient (matches buildGeometry:
+  // dz/dx = amp/(2·sx) · dLum/du, with dLum/du ≈ gradient·(dim−1)/2).
+  const ax = (amp * (w - 1)) / (4 * sx);
+  const ay = (amp * (h - 1)) / (4 * sy);
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const yUp = (y > 0 ? y - 1 : 0) * w;
+    const yDn = (y < h - 1 ? y + 1 : h - 1) * w;
+    const yc = y * w;
+    for (let x = 0; x < w; x++) {
+      const xl = x > 0 ? x - 1 : 0;
+      const xr = x < w - 1 ? x + 1 : w - 1;
+      const gx = lum[yc + xr] - lum[yc + xl]; // +u (model +x)
+      const gy = lum[yDn + x] - lum[yUp + x]; // +v row (model −y)
+      let nx = -gx * ax;
+      let ny = gy * ay;
+      const inv = 1 / Math.hypot(nx, ny, 1);
+      nx *= inv;
+      ny *= inv;
+      const o = (yc + x) * 4;
+      out[o] = (nx * 0.5 + 0.5) * 255;
+      out[o + 1] = (ny * 0.5 + 0.5) * 255;
+      out[o + 2] = (inv * 0.5 + 0.5) * 255; // nz = 1·inv
+      out[o + 3] = 255;
+    }
+  }
+  return { kind: 'image', width: w, height: h, data: out };
 }
 
 /** GPUs cap texture size; keep uploads within a safe bound. */
@@ -379,10 +521,15 @@ export function createGlossRenderer(canvas: HTMLCanvasElement): GlossRenderer | 
   const idxBuf = gl.createBuffer();
   if (!posBuf || !normBuf || !uvBuf || !idxBuf) return null;
 
+  // A denser mesh (smoother silhouette) when 32-bit indices are available.
+  const uintExt = gl.getExtension('OES_element_index_uint');
+  const grid = uintExt ? GRID_HI : GRID_LO;
+
   // Constant UVs + indices upload once.
-  const indices = buildIndices();
+  const indices = buildIndices(grid);
+  const indexType = indices instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
   gl.bindBuffer(gl.ARRAY_BUFFER, uvBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, buildUvs(), gl.STATIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, buildUvs(grid), gl.STATIC_DRAW);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
@@ -399,29 +546,48 @@ export function createGlossRenderer(canvas: HTMLCanvasElement): GlossRenderer | 
     shininess: gl.getUniformLocation(prog, 'uShininess'),
     intensity: gl.getUniformLocation(prog, 'uIntensity'),
     matte: gl.getUniformLocation(prog, 'uMatte'),
+    normalTex: gl.getUniformLocation(prog, 'uNormalTex'),
+    hasNormal: gl.getUniformLocation(prog, 'uHasNormal'),
+    reliefStrength: gl.getUniformLocation(prog, 'uReliefStrength'),
   };
 
   const artTex = gl.createTexture();
   const glossTex = gl.createTexture();
+  const normalTex = gl.createTexture();
 
   let hasArt = false;
   let hasGloss = false;
+  let hasNormal = false;
   let planeAspect = 1;
   let heightImg: RasterImage | undefined;
   let builtRelief = NaN; // forces a geometry build on the first render
+  let builtSmooth = DEFAULT_SMOOTH; // last smoothing the normal map was baked at
   let geometryDirty = true;
 
   gl.clearColor(0.09, 0.09, 0.11, 1);
   gl.enable(gl.DEPTH_TEST);
 
   const rebuildGeometry = (relief: number) => {
-    const { positions, normals } = buildGeometry(heightImg, planeAspect, relief);
+    const { positions, normals } = buildGeometry(heightImg, planeAspect, relief, grid);
     gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
     gl.bufferData(gl.ARRAY_BUFFER, normals, gl.DYNAMIC_DRAW);
     builtRelief = relief;
     geometryDirty = false;
+  };
+
+  // Bake the heightmap into the normal-map texture at the given smoothing. Cheap
+  // to skip (no heightmap → just clears hasNormal), so it's safe to call eagerly.
+  const rebuildNormalMap = (smooth: number) => {
+    if (heightImg && normalTex) {
+      const frac = NORMAL_SMOOTH_FRACTION * Math.max(0, smooth);
+      uploadTexture(gl, normalTex, buildNormalMap(heightImg, planeAspect, NORMAL_REF_RELIEF, frac));
+      hasNormal = true;
+    } else {
+      hasNormal = false;
+    }
+    builtSmooth = smooth;
   };
 
   const bindAttrib = (buf: WebGLBuffer, loc: number, size: number) => {
@@ -447,8 +613,11 @@ export function createGlossRenderer(canvas: HTMLCanvasElement): GlossRenderer | 
       } else {
         hasGloss = false;
       }
-      // Keep the heightmap for CPU displacement (capped for fast sampling).
-      heightImg = t.heightmap ? fitForGpu(t.heightmap, 1024) : undefined;
+      // Keep the heightmap for CPU displacement (capped for fast sampling) and
+      // bake it into a normal map (at the last-used smoothing) so per-fragment
+      // shading resolves detail finer than the mesh tessellation.
+      heightImg = t.heightmap ? fitForGpu(t.heightmap, 2048) : undefined;
+      rebuildNormalMap(builtSmooth);
       geometryDirty = true;
     },
     resize(width, height) {
@@ -460,6 +629,8 @@ export function createGlossRenderer(canvas: HTMLCanvasElement): GlossRenderer | 
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       if (!hasArt) return;
       if (geometryDirty || p.relief !== builtRelief) rebuildGeometry(p.relief);
+      const smooth = Number.isFinite(p.smooth) ? (p.smooth as number) : DEFAULT_SMOOTH;
+      if (smooth !== builtSmooth) rebuildNormalMap(smooth);
 
       const aspect = canvas.height > 0 ? canvas.width / canvas.height : 1;
       const { mvp, normalMat } = computeMatrices({ rotX: p.rotX, rotY: p.rotY, zoom: p.zoom, aspect });
@@ -478,6 +649,8 @@ export function createGlossRenderer(canvas: HTMLCanvasElement): GlossRenderer | 
       gl.uniform1f(u.intensity, p.intensity);
       gl.uniform1f(u.matte, p.matte);
       gl.uniform1i(u.hasGloss, hasGloss ? 1 : 0);
+      gl.uniform1i(u.hasNormal, hasNormal ? 1 : 0);
+      gl.uniform1f(u.reliefStrength, p.relief / NORMAL_REF_RELIEF);
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, artTex);
@@ -485,12 +658,16 @@ export function createGlossRenderer(canvas: HTMLCanvasElement): GlossRenderer | 
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, glossTex);
       gl.uniform1i(u.gloss, 1);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, normalTex);
+      gl.uniform1i(u.normalTex, 2);
 
-      gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+      gl.drawElements(gl.TRIANGLES, indices.length, indexType, 0);
     },
     dispose() {
       gl.deleteTexture(artTex);
       gl.deleteTexture(glossTex);
+      gl.deleteTexture(normalTex);
       gl.deleteBuffer(posBuf);
       gl.deleteBuffer(normBuf);
       gl.deleteBuffer(uvBuf);
