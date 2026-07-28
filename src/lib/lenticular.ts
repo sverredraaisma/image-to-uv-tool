@@ -202,11 +202,11 @@ export function heightForViewAngle(pitchMm: number, ri: number, viewAngleDeg: nu
 }
 
 /** Apply one calibration band's value on top of the node's live settings. */
-export function withCalibrationValue(
-  settings: LenticularSettings,
+export function withCalibrationValue<T extends LenticularSettings>(
+  settings: T,
   spec: CalibrationSpec,
   value: number,
-): LenticularSettings {
+): T {
   if (spec.param === 'height') return { ...settings, heightMm: value };
   if (spec.param === 'ri') return { ...settings, ri: value };
   const lpi = { ...settings, lpi: value };
@@ -512,6 +512,243 @@ export function depthPreview(render: LenticularRender): RasterImage {
   return img;
 }
 
+// ---------------------------------------------------------------------------
+// 2D lens grid (integral imaging): rows *and* columns of lenslets, so the print
+// carries parallax in both axes and a whole grid of views instead of a strip.
+//
+// The optics are unchanged. A spherical cap and a cylinder obey the same
+// refraction at a surface of radius R, so `lensGeometry` solves this array too:
+// same sag, same base, same focus, same viewing cone. Only the footprint
+// differs — a round cap inscribed in each square cell, leaving the cell corners
+// (1 − π/4, about 21%) flat at base height.
+// ---------------------------------------------------------------------------
+
+export interface LensGridSettings extends LenticularSettings {
+  /** Lenslets per side of one view grid: 2 = 2×2 (4 views), 3 = 3×3 (9). */
+  grid: number;
+  /** 0–1 phase down the second axis, the rows of lenslets. */
+  phaseY: number;
+  /**
+   * Place each view opposite the direction it is named for. A lens inverts, so
+   * the view you see from the left has to sit on the *right* of its cell; with
+   * this off the print is pseudoscopic (parallax runs backwards).
+   */
+  mirrorViews: boolean;
+}
+
+export const MIN_GRID = 2;
+export const MAX_GRID = 6;
+/** 3×3 — nine views, the smallest grid with a true head-on centre. */
+export const DEFAULT_GRID = 3;
+
+export const clampGrid = (grid: number): number =>
+  Math.min(MAX_GRID, Math.max(MIN_GRID, Math.round(grid) || MIN_GRID));
+
+/**
+ * Where one row/column of the grid sits relative to the neutral, head-on view:
+ * `Left`, `Centre`, `Right` for a 3-wide grid, `Far left … Far right` for 4 or
+ * 5, numbered beyond that. Even grids have no centre column.
+ */
+export function gridAxisLabel(index: number, count: number, axis: 'x' | 'y'): string {
+  const offset = index - (count - 1) / 2;
+  if (offset === 0) return 'Centre';
+  const word = axis === 'x' ? (offset < 0 ? 'Left' : 'Right') : offset < 0 ? 'Up' : 'Down';
+  const rank = Math.ceil(Math.abs(offset));
+  const maxRank = Math.ceil((count - 1) / 2);
+  if (maxRank <= 1) return word;
+  if (maxRank === 2) return rank === 1 ? word : `Far ${word.toLowerCase()}`;
+  return `${word} ${rank}`;
+}
+
+/** Human-readable name of one grid cell, e.g. `Left · Up` or `Centre (neutral)`. */
+export function gridCellLabel(col: number, row: number, grid: number): string {
+  const x = gridAxisLabel(col, grid, 'x');
+  const y = gridAxisLabel(row, grid, 'y');
+  if (x === 'Centre' && y === 'Centre') return 'Centre (neutral)';
+  if (x === 'Centre') return y;
+  if (y === 'Centre') return x;
+  return `${x} · ${y}`;
+}
+
+/** Stable port id for a grid cell — independent of the label wording. */
+export const gridCellId = (col: number, row: number): string => `c${col}r${row}`;
+
+/** Cells in port order: row-major from the top-left (`Left · Up`). */
+export function gridCells(grid: number): { col: number; row: number; id: string; label: string }[] {
+  const n = clampGrid(grid);
+  const cells = [];
+  for (let row = 0; row < n; row++) {
+    for (let col = 0; col < n; col++) {
+      cells.push({ col, row, id: gridCellId(col, row), label: gridCellLabel(col, row, n) });
+    }
+  }
+  return cells;
+}
+
+/** {@link interlacedSize} for a grid: every cell needs `grid` views across. */
+export function gridInterlacedSize(settings: LensGridSettings, views: RasterImage[]): OutputSize {
+  const first = views[0];
+  const cells = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
+  const samples = Math.max(1, settings.stripSamples);
+  const forViews = Math.ceil(cells * clampGrid(settings.grid) * samples);
+  const forArtwork = Math.max(...views.map((v) => v.width));
+  const width = Math.max(1, forViews, forArtwork);
+  return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
+}
+
+function requireGridViews(views: RasterImage[], grid: number): number {
+  const n = clampGrid(grid);
+  if (views.length !== n * n) {
+    throw new Error(`A ${n}×${n} lens grid needs ${n * n} images (got ${views.length}).`);
+  }
+  return n;
+}
+
+/**
+ * Interlace a grid of views under a 2D lens array. Same idea as the 1D
+ * interlace, run on both axes at once: the position within the cell picks a
+ * column *and* a row of the view grid, and the sample point is the cell centre
+ * so every one of the grid² tiles under a lenslet shows the same spot.
+ *
+ * Views arrive in {@link gridCells} order (row-major from `Left · Up`).
+ */
+export function renderGridInterlaced(
+  views: RasterImage[],
+  settings: LensGridSettings,
+  options: RenderOptions = {},
+): RasterImage {
+  const grid = requireGridViews(views, settings.grid);
+  const size = options.interlacedSize ?? gridInterlacedSize(settings, views);
+  const width = Math.max(1, Math.round(size.width));
+  const height = Math.max(1, Math.round(size.height));
+  checkBudget(width, height, 'Interlaced artwork', 'Reduce Width (mm), LPI, the grid or the source size');
+
+  const s = sheet(views, settings, options);
+  const phaseY = settings.phaseY - Math.floor(settings.phaseY);
+  const mmPerPx = s.widthMm / width;
+  const out = createImage(width, height, [255, 255, 255, 255]);
+
+  for (let y = 0; y < height; y++) {
+    const yMm = (y + 0.5) * mmPerPx;
+    for (let x = 0; x < width; x++) {
+      const xMm = (x + 0.5) * mmPerPx;
+      const band = bandAt(s, xMm, yMm);
+      if (!band) continue;
+
+      const pitchMm = band.geometry.pitchMm;
+      const u = xMm * s.cos + yMm * s.sin;
+      const v = -xMm * s.sin + yMm * s.cos;
+      const su = u / pitchMm + s.phase;
+      const sv = v / pitchMm + phaseY;
+      const cellU = Math.floor(su);
+      const cellV = Math.floor(sv);
+      const col = Math.min(grid - 1, Math.floor((su - cellU) * grid));
+      const row = Math.min(grid - 1, Math.floor((sv - cellV) * grid));
+
+      // The lens inverts: the tile on the left of a cell is what an eye to the
+      // *right* sees, so a view named "Left" belongs on the right.
+      const viewCol = settings.mirrorViews ? grid - 1 - col : col;
+      const viewRow = settings.mirrorViews ? grid - 1 - row : row;
+
+      // Sample at the cell centre, rotated back into sheet coordinates.
+      const uc = (cellU + 0.5 - s.phase) * pitchMm;
+      const vc = (cellV + 0.5 - phaseY) * pitchMm;
+      sampleNormalized(
+        views[viewRow * grid + viewCol],
+        (uc * s.cos - vc * s.sin) / s.widthMm,
+        (uc * s.sin + vc * s.cos) / s.heightMm,
+        out.data,
+        (y * width + x) * 4,
+      );
+    }
+  }
+  return out;
+}
+
+/**
+ * The lens array as a 16-bit height field: a spherical cap per cell, inscribed
+ * in the cell so the corners stay flat at base height.
+ */
+export function renderGridDepthMap(
+  views: RasterImage[],
+  settings: LensGridSettings,
+  options: RenderOptions = {},
+): DepthMapResult {
+  const size = outputSize(settings, views[0]);
+  const { width, height } = size;
+  checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI');
+
+  const s = sheet(views, settings, options);
+  const phaseY = settings.phaseY - Math.floor(settings.phaseY);
+  const mmPerPx = s.widthMm / width;
+  const depth = new Uint16Array(width * height);
+
+  for (let y = 0; y < height; y++) {
+    const yMm = (y + 0.5) * mmPerPx;
+    for (let x = 0; x < width; x++) {
+      const xMm = (x + 0.5) * mmPerPx;
+      const band = bandAt(s, xMm, yMm);
+      if (!band) continue;
+
+      const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
+      const u = xMm * s.cos + yMm * s.sin;
+      const v = -xMm * s.sin + yMm * s.cos;
+      const su = u / pitchMm + s.phase;
+      const sv = v / pitchMm + phaseY;
+      const du = (su - Math.floor(su) - 0.5) * pitchMm;
+      const dv = (sv - Math.floor(sv) - 0.5) * pitchMm;
+
+      // Round cap inscribed in the square cell; outside it, flat base.
+      const r = Math.hypot(du, dv);
+      const arc =
+        r <= pitchMm / 2 ? Math.sqrt(Math.max(0, radiusMm * radiusMm - r * r)) - (radiusMm - sagMm) : 0;
+      const mm = baseMm + Math.max(0, arc);
+      depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
+    }
+  }
+  return { depth, width, height, scaleMm: s.depthScaleMm, bands: s.bands };
+}
+
+/** Both halves of a 2D lens-grid print. See {@link renderLenticular}. */
+export function renderLensGrid(
+  views: RasterImage[],
+  settings: LensGridSettings,
+  options: RenderOptions = {},
+): LenticularRender {
+  const grid = requireGridViews(views, settings.grid);
+  const art = options.interlacedSize ?? gridInterlacedSize(settings, views);
+  const map = outputSize(settings, views[0]);
+  checkBudget(
+    art.width,
+    art.height,
+    'Interlaced artwork',
+    'Reduce Width (mm), LPI, the grid or the source size',
+  );
+  checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI');
+
+  const interlaced = renderGridInterlaced(views, { ...settings, grid }, options);
+  const depth = renderGridDepthMap(views, { ...settings, grid }, options);
+  return {
+    interlaced,
+    depth: depth.depth,
+    depthScaleMm: depth.scaleMm,
+    depthWidth: depth.width,
+    depthHeight: depth.height,
+    bands: depth.bands,
+  };
+}
+
+/**
+ * Switch target for a grid: a checkerboard of views, so a tilt along *either*
+ * axis flips the sheet. The neutral centre view is white.
+ */
+export function gridSwitchViews(grid: number): RasterImage[] {
+  return gridCells(grid).map(({ col, row }) => {
+    const v = (col + row) % 2 === 0 ? 255 : 0;
+    return createImage(1, 1, [v, v, v, 255]);
+  });
+}
+
 /** Fewer pixels than this across a lenticule and the lens profile is terraced. */
 const MIN_LENS_PX = 8;
 
@@ -542,6 +779,52 @@ export function describeGeometry(
   if (geometry.pitchPx < MIN_LENS_PX) {
     lines.push(
       `⚠ Only ${geometry.pitchPx.toFixed(2)} px across a lenticule — the printed lens will be terraced. ` +
+        `Raise PPI or lower LPI.`,
+    );
+  }
+  return lines.join('\n');
+}
+
+/** Cells across and down the sheet — one lenslet each, one pixel per view. */
+export function gridCellCounts(settings: LensGridSettings, first: RasterImage): OutputSize {
+  const across = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
+  return {
+    width: Math.max(1, Math.round(across)),
+    height: Math.max(1, Math.round((across * first.height) / first.width)),
+  };
+}
+
+/** {@link describeGeometry} for the 2D grid node. */
+export function describeGridGeometry(
+  settings: LensGridSettings,
+  geometry: LensGeometry,
+  depthSize: OutputSize,
+  artSize: OutputSize,
+  cells: OutputSize,
+): string {
+  const mm = (v: number) => v.toFixed(3);
+  const grid = clampGrid(settings.grid);
+  const lines = [
+    `${grid}×${grid} grid = ${grid * grid} views · ${settings.widthMm} mm wide`,
+    `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
+      `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
+    `Lenslet pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
+      `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / grid).toFixed(2)} px per view tile`,
+    // The lens count *is* the per-view resolution: one lenslet shows one pixel
+    // of each view, so this is what the viewer actually sees.
+    `Each view resolves to ${cells.width}×${cells.height} px (one per lenslet)`,
+    `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
+    `Radius ${mm(geometry.radiusMm)} mm · focus ${mm(geometry.focusMm)} mm below apex · viewing angle ${geometry.viewAngleDeg.toFixed(1)}°`,
+  ];
+  if (!geometry.feasible) {
+    lines.push(
+      `⚠ At ${settings.lpi} LPI / RI ${settings.ri} the lens cannot focus in ${mm(settings.heightMm)} mm — ` +
+        `it focuses ${mm(geometry.focusMm)} mm down. Raise Height to ${mm(geometry.minHeightMm)} mm or raise LPI.`,
+    );
+  }
+  if (geometry.pitchPx < MIN_LENS_PX) {
+    lines.push(
+      `⚠ Only ${geometry.pitchPx.toFixed(2)} px across a lenslet — the printed lens will be terraced. ` +
         `Raise PPI or lower LPI.`,
     );
   }

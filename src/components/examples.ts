@@ -309,4 +309,80 @@ export const EXAMPLES: Example[] = [
       ],
     },
   },
+  {
+    name: 'Lens Grid → 4-state spinner',
+    description:
+      'A 2×2 lens grid where the bright quadrant always points at you, so the print spins as you turn it.',
+    graph: {
+      version: 1,
+      nodes: [
+        // Two thresholded gradients multiplied together = one white quadrant,
+        // the smallest thing that reads as "pointing somewhere".
+        {
+          id: 'gx',
+          type: 'gradient',
+          position: { x: 40, y: 80 },
+          config: { width: 256, height: 256, from: '#000000', to: '#ffffff', direction: 'horizontal' },
+        },
+        {
+          id: 'gy',
+          type: 'gradient',
+          position: { x: 40, y: 260 },
+          config: { width: 256, height: 256, from: '#000000', to: '#ffffff', direction: 'vertical' },
+        },
+        { id: 'tx', type: 'threshold', position: { x: 260, y: 80 }, config: { level: 128, invert: false } },
+        { id: 'ty', type: 'threshold', position: { x: 260, y: 260 }, config: { level: 128, invert: false } },
+        // Bottom-right quadrant white — the "Right · Down" state.
+        { id: 'q', type: 'combine', position: { x: 470, y: 170 }, config: { mode: 'multiply' } },
+        // …and its three rotations. Rotating 90° CW walks the bright quadrant
+        // one step anticlockwise around the square: BR → BL → TL → TR.
+        { id: 'r90', type: 'transform', position: { x: 690, y: 60 }, config: { op: 'rotate90' } },
+        { id: 'r180', type: 'transform', position: { x: 690, y: 200 }, config: { op: 'rotate180' } },
+        { id: 'r270', type: 'transform', position: { x: 690, y: 340 }, config: { op: 'rotate270' } },
+        {
+          id: 'grid',
+          type: 'lensGrid',
+          position: { x: 940, y: 170 },
+          // Small and coarse so Run stays quick: a 1181 px lens map, not 32 MP.
+          // 50 LPI needs at least 0.762 mm of gloss to focus, so 0.9 is fine.
+          config: {
+            grid: 2,
+            widthMm: 50,
+            ppi: 600,
+            lpi: 50,
+            phase: 0,
+            phaseY: 0,
+            heightMm: 0.9,
+            ri: 1.5,
+            orientationDeg: 0,
+            mirrorViews: true,
+            stripSamples: 2,
+            calibBands: 9,
+            heightMin: 0.6,
+            heightMax: 1.4,
+            riMin: 1.4,
+            riMax: 1.6,
+            lpiMin: 40,
+            lpiMax: 60,
+            lpiAutoHeight: true,
+          },
+        },
+      ],
+      edges: [
+        edge('gx', 'tx'),
+        edge('gy', 'ty'),
+        wire('tx', 'q', 'out', 'a'),
+        wire('ty', 'q', 'out', 'b'),
+        edge('q', 'r90'),
+        edge('q', 'r180'),
+        edge('q', 'r270'),
+        // Each view gets the rotation whose bright quadrant points the way that
+        // view is looked at from, so the quadrant chases you around the print.
+        wire('q', 'grid', 'out', 'c1r1'), // Right · Down
+        wire('r90', 'grid', 'out', 'c0r1'), // Left · Down
+        wire('r180', 'grid', 'out', 'c0r0'), // Left · Up
+        wire('r270', 'grid', 'out', 'c1r0'), // Right · Up
+      ],
+    },
+  },
 ];

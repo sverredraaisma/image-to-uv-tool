@@ -199,7 +199,7 @@ describe('buildGeometry (mesh displacement)', () => {
 describe('buildNormalMap', () => {
   const decode = (nm: ReturnType<typeof buildNormalMap>, x: number, y: number) => {
     const o = (y * nm.width + x) * 4;
-    return [nm.data[o] / 255 * 2 - 1, nm.data[o + 1] / 255 * 2 - 1, nm.data[o + 2] / 255 * 2 - 1];
+    return [(nm.data[o] / 255) * 2 - 1, (nm.data[o + 1] / 255) * 2 - 1, (nm.data[o + 2] / 255) * 2 - 1];
   };
 
   it('is flat (pointing straight up) for a uniform heightmap', () => {

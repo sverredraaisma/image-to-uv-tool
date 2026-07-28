@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/store';
 import { platform } from '../lib/platform';
@@ -6,19 +6,30 @@ import { downloadBlob } from '../lib/download';
 import { encodeGray16Png } from '../lib/png16';
 import {
   calibrationValues,
+  clampGrid,
+  gridCellCounts,
+  gridInterlacedSize,
+  gridSwitchViews,
   interlacedSize,
   lensGeometry,
   outputSize,
   renderDepthMap,
+  renderGridDepthMap,
+  renderGridInterlaced,
   renderInterlaced,
   switchFrames,
   type CalibrationParam,
   type CalibrationSpec,
   type DepthMapResult,
+  type LenticularSettings,
+  type OutputSize,
+  type RenderOptions,
 } from '../lib/lenticular';
+import { lensGridInputs } from '../engine/ports';
 import { settingsFromConfig } from '../nodes/lenticular';
+import { gridSettingsFromConfig } from '../nodes/lensGrid';
 import { bool, num } from '../nodes/helpers';
-import type { RasterImage } from '../types';
+import type { NodeConfig, RasterImage } from '../types';
 
 const CALIBRATIONS: { param: CalibrationParam; label: string; minKey: string; maxKey: string }[] = [
   { param: 'height', label: 'Height', minKey: 'heightMin', maxKey: 'heightMax' },
@@ -26,43 +37,58 @@ const CALIBRATIONS: { param: CalibrationParam; label: string; minKey: string; ma
   { param: 'lpi', label: 'LPI', minKey: 'lpiMin', maxKey: 'lpiMax' },
 ];
 
+/** A blank gutter so neighbouring calibration bands can't bleed together. */
+const BAND_GAP_MM = 0.4;
+
 /** Round for a filename: 0.85 → "0-85". */
 const slug = (v: number) => String(Math.round(v * 1000) / 1000).replace('.', '-');
 
 /**
- * Editor for the Lenticular Print node: the solved lens geometry, plus the
+ * What the shared print editor needs to know about the node it is editing —
+ * everything the 1D lenticular and the 2D grid do differently.
+ */
+interface PrintKind {
+  /** Filename stem, e.g. `lenticular` or `lensgrid`. */
+  slug: string;
+  settings: LenticularSettings;
+  /** Source images, in the order the renderer consumes them. */
+  views: RasterImage[];
+  /** All views present — false disables every download. */
+  ready: boolean;
+  /** Shown when `ready` is false. */
+  missing: ReactNode;
+  /** Extra rows for the geometry table. */
+  rows?: ReactNode;
+  /** Physical gutter between calibration bands. */
+  bandGapMm: number;
+  artSize: OutputSize | null;
+  renderArt(views: RasterImage[], options: RenderOptions): RasterImage;
+  renderDepth(options: RenderOptions): DepthMapResult;
+  /** Solid views that read as a hard flip, for the switch sheet. */
+  switchViews(): RasterImage[];
+}
+
+/**
+ * Shared editor body for both print nodes: the solved lens geometry, plus the
  * downloads that can't travel down a wire — the 16-bit gloss depth map (the
  * canvas is 8-bit, and 8 bits over a 0.9 mm stack terraces the lens) and the
  * Height / RI / LPI calibration sheets.
  */
-export function LenticularEditor({ nodeId }: { nodeId: string }) {
-  const node = useStore((s) => s.nodes.find((n) => n.id === nodeId));
-  // Frames in connection order — the same order the node itself interlaces in.
-  // Shallow-compared: the selector builds a fresh array on every store change.
-  const frames = useStore(
-    useShallow((s) => {
-      const values = s.edges
-        .filter((e) => e.target === nodeId && e.targetHandle === 'frames')
-        .map((e) => s.runtime[e.source]?.outputs?.[e.sourceHandle]);
-      return values.filter((v): v is RasterImage => !!v && v.kind === 'image');
-    }),
-  );
+function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) {
   const addToast = useStore((s) => s.addToast);
   const [busy, setBusy] = useState<string | null>(null);
 
-  if (!node) return null;
-  const settings = settingsFromConfig(node.config);
+  const { settings, views, ready } = kind;
   const geometry = lensGeometry(settings);
-  const depthSize = frames[0] ? outputSize(settings, frames[0]) : null;
-  const artSize = frames.length >= 2 ? interlacedSize(settings, frames) : null;
+  const depthSize = views[0] ? outputSize(settings, views[0]) : null;
   const mm = (v: number) => `${v.toFixed(3)} mm`;
 
-  const autoHeight = bool(node.config.lpiAutoHeight, true);
+  const autoHeight = bool(config.lpiAutoHeight, true);
   const calibrationSpec = (calib: (typeof CALIBRATIONS)[number]): CalibrationSpec => ({
     param: calib.param,
-    min: num(node.config[calib.minKey], 0),
-    max: num(node.config[calib.maxKey], 0),
-    bands: Math.max(2, Math.round(num(node.config.calibBands, 9))),
+    min: num(config[calib.minKey], 0),
+    max: num(config[calib.maxKey], 0),
+    bands: Math.max(2, Math.round(num(config.calibBands, 9))),
     autoHeight,
   });
 
@@ -87,27 +113,23 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
 
   const downloadMain = () =>
     run('depth', async () => {
-      const map = renderDepthMap(frames, settings);
-      downloadDepth16(map, `lenticular-depth16-${settings.lpi}lpi-${slug(settings.heightMm)}mm.png`);
+      const map = kind.renderDepth({});
+      downloadDepth16(map, `${kind.slug}-depth16-${settings.lpi}lpi-${slug(settings.heightMm)}mm.png`);
     });
-
-  // A blank gutter keeps neighbouring bands from bleeding into each other on
-  // press, so a band that flips cleanly is unambiguous.
-  const BAND_GAP_MM = 0.4;
 
   const downloadCalibration = (calib: (typeof CALIBRATIONS)[number]) =>
     run(calib.param, async () => {
       const spec = calibrationSpec(calib);
       const values = calibrationValues(spec);
-      const options = { calibration: spec, bandGapMm: BAND_GAP_MM };
-      const art = renderInterlaced(frames, settings, options);
-      const stem = `lenticular-calib-${calib.param}-${slug(values[0])}-to-${slug(values[values.length - 1])}-${values.length}bands`;
+      const options: RenderOptions = { calibration: spec, bandGapMm: kind.bandGapMm };
+      const art = kind.renderArt(views, options);
+      const stem = `${kind.slug}-calib-${calib.param}-${slug(values[0])}-to-${slug(values[values.length - 1])}-${values.length}bands`;
       downloadBlob(await platform.encodePngBlob(art), `${stem}-interlaced.png`);
 
       // The same sheet with the artwork replaced by a hard white→black switch:
       // where the print flips, with none of the art's own detail in the way.
       // Forced onto the artwork's raster so the two sheets overlay exactly.
-      const switched = renderInterlaced(switchFrames(frames.length), settings, {
+      const switched = kind.renderArt(kind.switchViews(), {
         ...options,
         interlacedSize: { width: art.width, height: art.height },
       });
@@ -115,7 +137,7 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
 
       // The depth scale rides in the filename: with auto height each LPI band
       // gets its own stack, so "what does white mean" changes per sheet.
-      const map = renderDepthMap(frames, settings, options);
+      const map = kind.renderDepth(options);
       downloadDepth16(map, `${stem}-depth16-max${slug(map.scaleMm)}mm.png`);
     });
 
@@ -125,8 +147,7 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
       <dl className="lenticular-geometry">
         <dt>Pitch</dt>
         <dd>
-          {mm(geometry.pitchMm)} ({geometry.pitchPx.toFixed(2)} px
-          {frames.length > 1 && <> · {(geometry.pitchPx / frames.length).toFixed(2)} px per frame</>})
+          {mm(geometry.pitchMm)} ({geometry.pitchPx.toFixed(2)} px)
         </dd>
         <dt>Lens sag</dt>
         <dd>{mm(geometry.sagMm)}</dd>
@@ -141,7 +162,8 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
         <dt>Depth map</dt>
         <dd>{depthSize ? `${depthSize.width} × ${depthSize.height} px @ ${settings.ppi} PPI` : '—'}</dd>
         <dt>Artwork</dt>
-        <dd>{artSize ? `${artSize.width} × ${artSize.height} px` : '— connect frames'}</dd>
+        <dd>{kind.artSize ? `${kind.artSize.width} × ${kind.artSize.height} px` : '— connect the inputs'}</dd>
+        {kind.rows}
       </dl>
 
       {!geometry.feasible && (
@@ -152,11 +174,7 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
         </p>
       )}
 
-      {frames.length < 2 && (
-        <p className="lenticular-warning">
-          ⚠ Connect at least 2 images to the Frames input — they interlace in connection order.
-        </p>
-      )}
+      {!ready && <p className="lenticular-warning">⚠ {kind.missing}</p>}
 
       <h4>Downloads</h4>
       <p className="lenticular-note">
@@ -166,16 +184,16 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
         both the interlace and your source resolution — scale it to the sheet in the printing tool.
       </p>
       <div className="lenticular-actions">
-        <button type="button" className="btn" disabled={frames.length < 2 || !!busy} onClick={downloadMain}>
+        <button type="button" className="btn" disabled={!ready || !!busy} onClick={downloadMain}>
           {busy === 'depth' ? 'Rendering…' : '16-bit gloss depth map'}
         </button>
       </div>
 
       <h4>Calibration sheets</h4>
       <p className="lenticular-note">
-        Each sheet sweeps one setting across {Math.max(2, Math.round(num(node.config.calibBands, 9)))} bands
-        (min → max, set under Advanced) while every other setting stays as it is here. Print one, and read off
-        the band that flips cleanest. Each button downloads three files: the interlaced artwork, a white→black{' '}
+        Each sheet sweeps one setting across {Math.max(2, Math.round(num(config.calibBands, 9)))} bands (min →
+        max, set under Advanced) while every other setting stays as it is here. Print one, and read off the
+        band that flips cleanest. Each button downloads three files: the interlaced artwork, a white→black{' '}
         <em>switch</em> sheet on the same raster (the flip with no artwork detail in the way), and the 16-bit
         depth map.
       </p>
@@ -201,7 +219,7 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
               key={calib.param}
               type="button"
               className="btn"
-              disabled={frames.length < 2 || !!busy}
+              disabled={!ready || !!busy}
               title={values.map((v) => Math.round(v * 1000) / 1000).join(', ')}
               onClick={() => downloadCalibration(calib)}
             >
@@ -213,5 +231,105 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
         })}
       </div>
     </div>
+  );
+}
+
+/** Resolved image on one input port of a node, if it has computed. */
+function imageOn(
+  edges: { target: string; targetHandle: string; source: string; sourceHandle: string }[],
+  runtime: Record<string, { outputs?: Record<string, unknown> } | undefined>,
+  nodeId: string,
+  portId: string,
+): RasterImage | undefined {
+  const edge = edges.find((e) => e.target === nodeId && e.targetHandle === portId);
+  const value = edge ? runtime[edge.source]?.outputs?.[edge.sourceHandle] : undefined;
+  return value && (value as RasterImage).kind === 'image' ? (value as RasterImage) : undefined;
+}
+
+/** Editor for the Lenticular Print node. */
+export function LenticularEditor({ nodeId }: { nodeId: string }) {
+  const node = useStore((s) => s.nodes.find((n) => n.id === nodeId));
+  // Frames in connection order — the same order the node itself interlaces in.
+  // Shallow-compared: the selector builds a fresh array on every store change.
+  const frames = useStore(
+    useShallow((s) => {
+      const values = s.edges
+        .filter((e) => e.target === nodeId && e.targetHandle === 'frames')
+        .map((e) => s.runtime[e.source]?.outputs?.[e.sourceHandle]);
+      return values.filter((v): v is RasterImage => !!v && v.kind === 'image');
+    }),
+  );
+
+  if (!node) return null;
+  const settings = settingsFromConfig(node.config);
+  const ready = frames.length >= 2;
+  return (
+    <PrintEditor
+      config={node.config}
+      kind={{
+        slug: 'lenticular',
+        settings,
+        views: frames,
+        ready,
+        missing: 'Connect at least 2 images to the Frames input — they interlace in connection order.',
+        bandGapMm: BAND_GAP_MM,
+        artSize: ready ? interlacedSize(settings, frames) : null,
+        renderArt: (v, options) => renderInterlaced(v, settings, options),
+        renderDepth: (options) => renderDepthMap(frames, settings, options),
+        switchViews: () => switchFrames(frames.length),
+      }}
+    />
+  );
+}
+
+/** Editor for the Lens Grid Print node. */
+export function LensGridEditor({ nodeId }: { nodeId: string }) {
+  const node = useStore((s) => s.nodes.find((n) => n.id === nodeId));
+  const views = useStore(
+    useShallow((s) => {
+      const nd = s.nodes.find((n) => n.id === nodeId);
+      if (!nd) return [];
+      return lensGridInputs(nd.config).map((port) => imageOn(s.edges, s.runtime, nodeId, port.id));
+    }),
+  );
+
+  if (!node) return null;
+  const settings = gridSettingsFromConfig(node.config);
+  const grid = clampGrid(settings.grid);
+  const present = views.filter((v): v is RasterImage => !!v);
+  const ready = present.length === grid * grid;
+  const missingLabels = lensGridInputs(node.config)
+    .filter((_, i) => !views[i])
+    .map((p) => p.label);
+  const cells = ready ? gridCellCounts(settings, present[0]) : null;
+
+  return (
+    <PrintEditor
+      config={node.config}
+      kind={{
+        slug: 'lensgrid',
+        settings,
+        views: present,
+        ready,
+        missing: `Connect all ${grid * grid} views of the ${grid}×${grid} grid. Missing: ${missingLabels.join(', ')}.`,
+        // One whole cell of gutter: with lenslets in both axes a band edge
+        // would otherwise leave a row of half-printed lenses.
+        bandGapMm: Math.max(BAND_GAP_MM, 25.4 / Math.max(1, settings.lpi)),
+        artSize: ready ? gridInterlacedSize(settings, present) : null,
+        rows: (
+          <>
+            <dt>Grid</dt>
+            <dd>
+              {grid} × {grid} = {grid * grid} views
+            </dd>
+            <dt>Per-view resolution</dt>
+            <dd>{cells ? `${cells.width} × ${cells.height} px (one per lenslet)` : '—'}</dd>
+          </>
+        ),
+        renderArt: (v, options) => renderGridInterlaced(v, settings, options),
+        renderDepth: (options) => renderGridDepthMap(present, settings, options),
+        switchViews: () => gridSwitchViews(grid),
+      }}
+    />
   );
 }

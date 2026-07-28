@@ -3,6 +3,7 @@ import { localNodes } from './local';
 import { aiNodes } from './ai';
 import { llmNodes } from './llm';
 import { lenticularNodes } from './lenticular';
+import { lensGridNodes } from './lensGrid';
 import { pipelineNodes } from './pipeline';
 
 let registered = false;
@@ -10,7 +11,15 @@ let registered = false;
 /** Register every built-in node definition (idempotent). */
 export function registerBuiltinNodes(): void {
   if (registered) return;
-  for (const def of [...localNodes, ...aiNodes, ...llmNodes, ...lenticularNodes, ...pipelineNodes]) {
+  const all = [
+    ...localNodes,
+    ...aiNodes,
+    ...llmNodes,
+    ...lenticularNodes,
+    ...lensGridNodes,
+    ...pipelineNodes,
+  ];
+  for (const def of all) {
     registerNode(def);
   }
   registered = true;

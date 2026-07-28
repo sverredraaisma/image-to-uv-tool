@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '../nodes'; // register built-ins
-import { LenticularEditor } from './LenticularEditor';
+import { LenticularEditor, LensGridEditor } from './LenticularEditor';
 import { useStore } from '../store/store';
 import { setPlatform } from '../lib/platform';
 
@@ -156,6 +156,65 @@ describe('LenticularEditor', () => {
 
     // Every band keeps the node's own 5 mm stack.
     expect(names[2]).toBe('lenticular-calib-lpi-40-to-50-9bands-depth16-max5mm.png');
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  });
+});
+
+/** A 2×2 Lens Grid with all four views wired and computed. */
+async function gridWithViews(connect = ['c0r0', 'c1r0', 'c0r1', 'c1r1']) {
+  const id = s().addNode('lensGrid');
+  s().updateNodeConfig(id, { grid: 2, widthMm: 25.4, ppi: 100, lpi: 10, heightMm: 5 });
+  for (const handle of connect) {
+    const src = s().addNode('solidColor');
+    s().updateNodeConfig(src, { width: 20, height: 20, color: '#ff0000' });
+    s().addConnection({ source: src, sourceHandle: 'out', target: id, targetHandle: handle });
+  }
+  await s().processAutoRun();
+  return id;
+}
+
+describe('LensGridEditor', () => {
+  it('renders nothing for an unknown node id', () => {
+    const { container } = render(<LensGridEditor nodeId="nope" />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('reports the grid, its per-view resolution and both rasters', async () => {
+    const id = await gridWithViews();
+    render(<LensGridEditor nodeId={id} />);
+    expect(screen.getByText('2 × 2 = 4 views')).toBeInTheDocument();
+    expect(screen.getByText('10 × 10 px (one per lenslet)')).toBeInTheDocument();
+    expect(screen.getByText('100 × 100 px @ 100 PPI')).toBeInTheDocument(); // the lens
+    expect(screen.getByText('40 × 40 px')).toBeInTheDocument(); // 10 cells × 2 × 2
+    for (const button of screen.getAllByRole('button')) expect(button).toBeEnabled();
+  });
+
+  it('names the unconnected cells and blocks the downloads', async () => {
+    const id = await gridWithViews(['c0r0', 'c1r1']);
+    render(<LensGridEditor nodeId={id} />);
+    expect(screen.getByText(/Missing: Right · Up, Left · Down/)).toBeInTheDocument();
+    for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled();
+  });
+
+  it('downloads calibration sheets under its own filename stem', async () => {
+    const id = await gridWithViews();
+    const names: string[] = [];
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      names.push(this.download);
+    });
+    setPlatform({ encodePngBlob: async () => new Blob([new Uint8Array([1])], { type: 'image/png' }) });
+
+    render(<LensGridEditor nodeId={id} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Height:/ }));
+    await waitFor(() => expect(names).toHaveLength(3));
+
+    expect(names[0]).toBe('lensgrid-calib-height-0-6-to-1-4-9bands-interlaced.png');
+    expect(names[1]).toBe('lensgrid-calib-height-0-6-to-1-4-9bands-switch.png');
+    expect(names[2]).toMatch(/^lensgrid-calib-height-0-6-to-1-4-9bands-depth16-max/);
     click.mockRestore();
     vi.unstubAllGlobals();
   });
