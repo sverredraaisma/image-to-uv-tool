@@ -83,6 +83,79 @@ export function linearGradient(
   return out;
 }
 
+export type RadialMode = 'radial' | 'ring' | 'conic';
+
+export interface RadialGradientOptions {
+  mode: RadialMode;
+  /** Outer edge, as a fraction of half the shorter side. */
+  radius: number;
+  /** `ring` only: inner edge, same units. */
+  innerRadius: number;
+  /** `conic` only: where the sweep starts, degrees clockwise from 12 o'clock. */
+  angle: number;
+  /** `ring` only: edge softness as a fraction of the radius. Also antialiases. */
+  feather: number;
+}
+
+/**
+ * Circular gradients — the shapes a linear ramp can't make.
+ *
+ *  • `radial` ramps from the centre outwards, reaching `to` at `radius`.
+ *  • `ring` fills the band between `innerRadius` and `radius` with `to`,
+ *    everything else `from`, with `feather` softening both edges.
+ *  • `conic` sweeps once around the centre — the ramp a dial or a loading
+ *    spinner is built from.
+ *
+ * Radii are fractions of half the shorter side, so 1.0 is the inscribed circle
+ * whatever the aspect ratio.
+ */
+export function radialGradient(
+  width: number,
+  height: number,
+  from: [number, number, number, number],
+  to: [number, number, number, number],
+  options: RadialGradientOptions,
+): RasterImage {
+  const out = createImage(width, height);
+  const cx = width / 2;
+  const cy = height / 2;
+  const unit = Math.max(1e-6, Math.min(width, height) / 2);
+  const outer = Math.max(1e-6, options.radius) * unit;
+  const inner = Math.max(0, options.innerRadius) * unit;
+  const feather = Math.max(0, options.feather) * unit;
+  // Sweep clockwise from 12 o'clock, the direction a spinner turns; a positive
+  // start angle carries the seam clockwise with it.
+  const start = -options.angle / 360;
+  const wrap = (t: number) => ((t % 1) + 1) % 1;
+
+  /** Smooth 0→1 over a `feather`-wide edge centred on `edge`. */
+  const softStep = (edge: number, d: number) => {
+    if (feather <= 0) return d >= edge ? 1 : 0;
+    return Math.max(0, Math.min(1, (d - edge) / feather + 0.5));
+  };
+
+  for (let y = 0; y < height; y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = 0; x < width; x++) {
+      const dx = x + 0.5 - cx;
+      let t: number;
+      if (options.mode === 'conic') {
+        // atan2(dx, -dy) puts 0 at 12 o'clock and grows clockwise.
+        t = wrap(Math.atan2(dx, -dy) / (Math.PI * 2) + start);
+      } else {
+        const d = Math.hypot(dx, dy);
+        t =
+          options.mode === 'ring'
+            ? softStep(inner, d) * (1 - softStep(outer, d))
+            : Math.max(0, Math.min(1, d / outer));
+      }
+      const i = (y * width + x) * 4;
+      for (let c = 0; c < 4; c++) out.data[i + c] = from[c] + (to[c] - from[c]) * t;
+    }
+  }
+  return out;
+}
+
 /** Multiply each RGB channel by a colour (0–255 per channel). Alpha kept. */
 export function tint(img: RasterImage, color: [number, number, number]): RasterImage {
   const out = cloneImage(img);

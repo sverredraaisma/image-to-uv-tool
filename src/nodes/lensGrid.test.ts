@@ -249,7 +249,7 @@ describe('Lens Grid node', () => {
   });
 });
 
-describe('the 4-state spinner example', () => {
+describe('the loading-spinner example', () => {
   const example = EXAMPLES.find((e) => e.name.includes('spinner'))!;
   const graph = example.graph as SavedGraph;
 
@@ -260,7 +260,7 @@ describe('the 4-state spinner example', () => {
       const e = graph.edges.find((edge) => edge.target === id && edge.targetHandle === handle);
       return e ? outputs[e.source] : undefined;
     };
-    for (const id of ['gx', 'gy', 'tx', 'ty', 'q', 'r90', 'r180', 'r270']) {
+    for (const id of ['ring', 'sweep', 'ticks', 's0', 'r90', 'r180', 'r270']) {
       const node = graph.nodes.find((n) => n.id === id)!;
       const def = getNodeDef(node.type);
       const inputs =
@@ -271,55 +271,86 @@ describe('the 4-state spinner example', () => {
     return outputs;
   }
 
-  it('builds one bright quadrant and its three rotations', async () => {
+  /** Brightness at `deg` clockwise from 12 o'clock, on the ring itself. */
+  const onRing = (img: RasterImage, deg: number) => {
+    const r = (img.width / 2) * 0.69; // between the 0.56 and 0.82 radii
+    const rad = (deg * Math.PI) / 180;
+    const x = Math.round(img.width / 2 + r * Math.sin(rad));
+    const y = Math.round(img.height / 2 - r * Math.cos(rad));
+    return px(img, x, y)[0];
+  };
+
+  /** Angle of the brightest point on the ring — where the tail is. */
+  const tailAngle = (img: RasterImage) => {
+    let best = -1;
+    let bestDeg = 0;
+    for (let deg = 0; deg < 360; deg += 2) {
+      const v = onRing(img, deg);
+      if (v > best) {
+        best = v;
+        bestDeg = deg;
+      }
+    }
+    return { deg: bestDeg, value: best };
+  };
+
+  it('builds a hollow ring, not a disc', async () => {
     const out = await runSources();
-    const corner = (img: RasterImage, cx: number, cy: number) =>
-      px(img, cx ? img.width - 4 : 4, cy ? img.height - 4 : 4)[0];
-    // q is white in the bottom-right only…
-    expect(corner(out.q, 1, 1)).toBeGreaterThan(200);
-    expect(corner(out.q, 0, 0)).toBeLessThan(50);
-    expect(corner(out.q, 1, 0)).toBeLessThan(50);
-    expect(corner(out.q, 0, 1)).toBeLessThan(50);
-    // …and each rotation walks it one step around the square.
-    expect(corner(out.r90, 0, 1)).toBeGreaterThan(200); // bottom-left
-    expect(corner(out.r180, 0, 0)).toBeGreaterThan(200); // top-left
-    expect(corner(out.r270, 1, 0)).toBeGreaterThan(200); // top-right
+    expect(px(out.s0, 256, 256)[0]).toBe(0); // hole in the middle
+    expect(px(out.s0, 4, 4)[0]).toBe(0); // and dark outside
+    expect(tailAngle(out.s0).value).toBe(255); // …and the tail reaches full white
   });
 
-  it('points each view’s bright quadrant the way that view is seen from', async () => {
+  it('graduates the ring into ticks that ramp once around', async () => {
     const out = await runSources();
-    // The wiring under test: which rotation feeds which named cell.
+    // The conic sweep rises clockwise from the seam at 12 o'clock…
+    expect(onRing(out.s0, 30)).toBeLessThan(onRing(out.s0, 150));
+    expect(onRing(out.s0, 150)).toBeLessThan(onRing(out.s0, 270));
+    // …so the tail is brightest just anticlockwise of 12, i.e. "up".
+    expect(onRing(out.s0, 350)).toBeGreaterThan(200);
+    // Posterize means discrete steps, not a smooth ramp: neighbouring samples
+    // inside one tick are identical.
+    expect(onRing(out.s0, 182)).toBe(onRing(out.s0, 186));
+  });
+
+  it('turns the tail a quarter turn per rotation', async () => {
+    const out = await runSources();
+    const base = tailAngle(out.s0).deg;
+    const turned = (img: RasterImage) => (tailAngle(img).deg - base + 720) % 360;
+    // Within a tick's width (30°) of a clean quarter, half and three-quarter turn.
+    expect(turned(out.r90)).toBeGreaterThan(75);
+    expect(turned(out.r90)).toBeLessThan(105);
+    expect(turned(out.r180)).toBeGreaterThan(165);
+    expect(turned(out.r180)).toBeLessThan(195);
+    expect(turned(out.r270)).toBeGreaterThan(255);
+    expect(turned(out.r270)).toBeLessThan(285);
+    // The tail is "up" to start with, so the four states read up/right/down/left.
+    expect(base).toBeGreaterThan(330);
+  });
+
+  it('points each view’s tail the way that view is seen from', async () => {
+    const out = await runSources();
     const wiredTo = (handle: string) =>
       graph.edges.find((e) => e.target === 'grid' && e.targetHandle === handle)!.source;
-    expect(wiredTo('c1r1')).toBe('q'); // Right · Down → quadrant bottom-right
-    expect(wiredTo('c0r1')).toBe('r90'); // Left · Down  → quadrant bottom-left
-    expect(wiredTo('c0r0')).toBe('r180'); // Left · Up    → quadrant top-left
-    expect(wiredTo('c1r0')).toBe('r270'); // Right · Up   → quadrant top-right
+    expect(wiredTo('c0r0')).toBe('s0'); // Left · Up    → tail up
+    expect(wiredTo('c1r0')).toBe('r90'); // Right · Up   → tail right
+    expect(wiredTo('c1r1')).toBe('r180'); // Right · Down → tail down
+    expect(wiredTo('c0r1')).toBe('r270'); // Left · Down  → tail left
 
-    // Every view is distinct, so all four states are actually different.
+    // All four states differ, so the spin never stalls.
     const views = ['c0r0', 'c1r0', 'c0r1', 'c1r1'].map((h) => out[wiredTo(h)]);
-    const signatures = views.map((v) => v.data.join(','));
-    expect(new Set(signatures).size).toBe(4);
+    expect(new Set(views.map((v) => v.data.join(','))).size).toBe(4);
   });
 
   it('renders to a small, printable pair of sheets', async () => {
     const out = await runSources();
     const node = graph.nodes.find((n) => n.id === 'grid')!;
     const result = await getNodeDef('lensGrid').compute(
-      ctx(
-        {
-          c0r0: out.r180,
-          c1r0: out.r270,
-          c0r1: out.r90,
-          c1r1: out.q,
-        },
-        node.config,
-      ),
+      ctx({ c0r0: out.s0, c1r0: out.r90, c1r1: out.r180, c0r1: out.r270 }, node.config),
     );
     const interlaced = result.interlaced as RasterImage;
-    const depth = result.depth as RasterImage;
-    expect(depth.width).toBe(1181); // 50 mm at 600 PPI
-    expect(interlaced.width).toBeLessThan(depth.width);
+    expect((result.depth as RasterImage).width).toBe(1181); // 50 mm at 600 PPI
+    expect(interlaced.width).toBe(512); // the source spinner's own resolution
     if (result.info?.kind === 'text') expect(result.info.text).not.toContain('⚠');
     else throw new Error('expected a text info output');
   });
