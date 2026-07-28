@@ -42,6 +42,9 @@ describe('Lenticular Print node', () => {
     expect(cfg.heightMm).toBe(0.9);
     expect(cfg.ri).toBe(1.5);
     expect(cfg.orientationDeg).toBe(0);
+    // An LPI sweep at a fixed height compares lenses with different viewing
+    // cones (and can break focus entirely), so matching is the default.
+    expect(cfg.lpiAutoHeight).toBe(true);
   });
 
   it('interlaces the frames and emits a depth preview and an info report', async () => {

@@ -155,6 +155,13 @@ export interface CalibrationSpec {
   max: number;
   /** Number of bands across the sheet. */
   bands: number;
+  /**
+   * LPI sweeps only: give every band its own gloss height instead of the one
+   * from the settings, so all bands share a viewing angle (see
+   * {@link heightForViewAngle}). Without it, a coarse-pitch band can fall below
+   * the height it needs to focus at all, and compares a broken lens.
+   */
+  autoHeight?: boolean;
 }
 
 /** The value each band of a calibration sheet is printed at. */
@@ -165,15 +172,57 @@ export function calibrationValues(spec: CalibrationSpec): number[] {
   return Array.from({ length: bands }, (_, i) => lo + ((hi - lo) * i) / (bands - 1));
 }
 
+/**
+ * The gloss height that gives a lens of this pitch the requested viewing cone.
+ *
+ * The cone comes from the marginal ray leaving the focus for the lens edge,
+ * refracted out to air, so it depends only on the ratio (p/2) / H and on n:
+ *
+ *   sin(θ/2) = n · sin(atan( (p/2) / H ))   ⇒   H = (p/2) · √(1/sin²i − 1)
+ *
+ * Because it is a *ratio*, H scales linearly with pitch — halve the pitch and
+ * you halve the height for the same angle. The feasibility floor
+ * n·p / (2(n−1)) scales with pitch too, so an angle reachable at one LPI is
+ * reachable at every LPI: an LPI sweep can always be made angle-matched.
+ */
+export function heightForViewAngle(pitchMm: number, ri: number, viewAngleDeg: number): number {
+  const n = Math.max(1.0001, ri);
+  const half = pitchMm / 2;
+  const sinAir = Math.sin((Math.min(179.9, Math.max(0.1, viewAngleDeg)) / 2) * (Math.PI / 180));
+  // Clamped away from 0 (which would demand an infinitely thick stack) and from
+  // 1 (a ray along the surface, which no lens delivers).
+  const sinInside = Math.min(0.999999, Math.max(1e-6, sinAir / n));
+  return half * Math.sqrt(1 / (sinInside * sinInside) - 1);
+}
+
 /** Apply one calibration band's value on top of the node's live settings. */
 export function withCalibrationValue(
   settings: LenticularSettings,
-  param: CalibrationParam,
+  spec: CalibrationSpec,
   value: number,
 ): LenticularSettings {
-  if (param === 'height') return { ...settings, heightMm: value };
-  if (param === 'ri') return { ...settings, ri: value };
-  return { ...settings, lpi: value };
+  if (spec.param === 'height') return { ...settings, heightMm: value };
+  if (spec.param === 'ri') return { ...settings, ri: value };
+  const lpi = { ...settings, lpi: value };
+  if (!spec.autoHeight) return lpi;
+  // Match the angle the node's own settings produce, so the sweep isolates
+  // pitch: every band views the same cone, only its lens count differs.
+  const target = lensGeometry(settings).viewAngleDeg;
+  return { ...lpi, heightMm: heightForViewAngle(25.4 / Math.max(1e-6, value), settings.ri, target) };
+}
+
+/**
+ * Solid frames that read as a hard switch: frame 0 white through to black on
+ * the last. With two frames that is simply white then black — the target for
+ * checking *where* a print flips, with none of the artwork's own detail in the
+ * way. 1×1 because a lenticular render samples frames normalised.
+ */
+export function switchFrames(count: number): RasterImage[] {
+  const n = Math.max(2, Math.round(count));
+  return Array.from({ length: n }, (_, i) => {
+    const v = Math.round(255 * (1 - i / (n - 1)));
+    return createImage(1, 1, [v, v, v, 255]);
+  });
 }
 
 export interface LenticularRender {
@@ -194,6 +243,12 @@ export interface RenderOptions {
   calibration?: CalibrationSpec;
   /** Blank separator between calibration bands, printer pixels. */
   bandGapPx?: number;
+  /**
+   * Render at this exact pixel size instead of deriving it from the first
+   * frame. Lets a companion sheet (e.g. {@link switchFrames}) land on the same
+   * raster as the artwork it accompanies, whatever aspect its frames have.
+   */
+  size?: OutputSize;
 }
 
 /**
@@ -211,8 +266,9 @@ export function renderLenticular(
   options: RenderOptions = {},
 ): LenticularRender {
   if (frames.length < 2) throw new Error('Lenticular print needs at least 2 images');
-  const size = outputSize(settings, frames[0]);
-  const { width, height } = size;
+  const size = options.size ?? outputSize(settings, frames[0]);
+  const width = Math.max(1, Math.round(size.width));
+  const height = Math.max(1, Math.round(size.height));
   if (width * height > MAX_OUTPUT_PIXELS) {
     throw new Error(
       `Output would be ${width}×${height} px (${Math.round((width * height) / 1e6)} MP). ` +
@@ -231,12 +287,13 @@ export function renderLenticular(
   const bands = options.calibration
     ? values.map((value) => ({
         value,
-        geometry: lensGeometry(withCalibrationValue(settings, options.calibration!.param, value)),
+        geometry: lensGeometry(withCalibrationValue(settings, options.calibration!, value)),
       }))
     : [{ geometry: lensGeometry(settings) }];
 
-  // Depth is normalised against the tallest stack on the sheet, so a Height
-  // calibration keeps every band on one comparable scale.
+  // Depth is normalised against the tallest stack on the sheet, so a Height (or
+  // auto-height LPI) calibration keeps every band on one comparable scale — a
+  // band that needs a shorter stack simply prints darker.
   const depthScaleMm = Math.max(1e-6, ...bands.map((b) => b.geometry.totalMm));
 
   // Bands are stacked along the lenticule direction (v), so each one still

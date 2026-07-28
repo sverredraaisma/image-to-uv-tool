@@ -104,7 +104,7 @@ describe('LenticularEditor', () => {
     vi.unstubAllGlobals();
   });
 
-  it('downloads both sheets of a calibration set', async () => {
+  it('downloads all three sheets of a calibration set', async () => {
     const id = await graphWithFrames();
     const names: string[] = [];
     vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() });
@@ -113,15 +113,42 @@ describe('LenticularEditor', () => {
     ) {
       names.push(this.download);
     });
-    // The interlaced sheet goes through the canvas PNG encoder; jsdom has none.
+    // The interlaced sheets go through the canvas PNG encoder; jsdom has none.
     setPlatform({ encodePngBlob: async () => new Blob([new Uint8Array([1])], { type: 'image/png' }) });
 
     render(<LenticularEditor nodeId={id} />);
     await userEvent.click(screen.getByRole('button', { name: /^LPI:/ }));
-    await waitFor(() => expect(names).toHaveLength(2));
+    await waitFor(() => expect(names).toHaveLength(3));
 
-    expect(names[0]).toBe('lenticular-calib-lpi-40-to-50-9bands-interlaced.png');
-    expect(names[1]).toBe('lenticular-calib-lpi-40-to-50-9bands-depth16.png');
+    const stem = 'lenticular-calib-lpi-40-to-50-9bands';
+    expect(names[0]).toBe(`${stem}-interlaced.png`);
+    expect(names[1]).toBe(`${stem}-switch.png`);
+    // Auto height is on, so the 40 LPI band (a 4× coarser pitch than the node's
+    // 10 LPI) sets the scale at 4× its 5 mm height ÷ 4 … i.e. 1.25 mm.
+    expect(names[2]).toBe(`${stem}-depth16-max1-25mm.png`);
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('holds the height across the LPI sweep when auto height is off', async () => {
+    const id = await graphWithFrames();
+    const names: string[] = [];
+    s().updateNodeConfig(id, { lpiAutoHeight: false });
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      names.push(this.download);
+    });
+    setPlatform({ encodePngBlob: async () => new Blob([new Uint8Array([1])], { type: 'image/png' }) });
+
+    render(<LenticularEditor nodeId={id} />);
+    expect(screen.getByText(/holds Height at 5\.000 mm for every band/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^LPI:/ }));
+    await waitFor(() => expect(names).toHaveLength(3));
+
+    // Every band keeps the node's own 5 mm stack.
+    expect(names[2]).toBe('lenticular-calib-lpi-40-to-50-9bands-depth16-max5mm.png');
     click.mockRestore();
     vi.unstubAllGlobals();
   });

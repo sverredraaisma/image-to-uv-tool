@@ -9,12 +9,13 @@ import {
   lensGeometry,
   outputSize,
   renderLenticular,
+  switchFrames,
   type CalibrationParam,
   type CalibrationSpec,
   type LenticularRender,
 } from '../lib/lenticular';
 import { settingsFromConfig } from '../nodes/lenticular';
-import { num } from '../nodes/helpers';
+import { bool, num } from '../nodes/helpers';
 import type { RasterImage } from '../types';
 
 const CALIBRATIONS: { param: CalibrationParam; label: string; minKey: string; maxKey: string }[] = [
@@ -53,6 +54,15 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
   const size = frames[0] ? outputSize(settings, frames[0]) : null;
   const mm = (v: number) => `${v.toFixed(3)} mm`;
 
+  const autoHeight = bool(node.config.lpiAutoHeight, true);
+  const calibrationSpec = (calib: (typeof CALIBRATIONS)[number]): CalibrationSpec => ({
+    param: calib.param,
+    min: num(node.config[calib.minKey], 0),
+    max: num(node.config[calib.maxKey], 0),
+    bands: Math.max(2, Math.round(num(node.config.calibBands, 9))),
+    autoHeight,
+  });
+
   const downloadDepth16 = (render: LenticularRender, name: string) => {
     const png = encodeGray16Png(render.width, render.height, render.depth);
     downloadBlob(new Blob([png as BlobPart], { type: 'image/png' }), name);
@@ -80,12 +90,7 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
 
   const downloadCalibration = (calib: (typeof CALIBRATIONS)[number]) =>
     run(calib.param, async () => {
-      const spec: CalibrationSpec = {
-        param: calib.param,
-        min: num(node.config[calib.minKey], 0),
-        max: num(node.config[calib.maxKey], 0),
-        bands: Math.max(2, Math.round(num(node.config.calibBands, 9))),
-      };
+      const spec = calibrationSpec(calib);
       const values = calibrationValues(spec);
       // A blank gutter (~0.4 mm) keeps neighbouring bands from bleeding into
       // each other on press, so a band that flips cleanly is unambiguous.
@@ -93,7 +98,20 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
       const render = renderLenticular(frames, settings, { calibration: spec, bandGapPx });
       const stem = `lenticular-calib-${calib.param}-${slug(values[0])}-to-${slug(values[values.length - 1])}-${values.length}bands`;
       downloadBlob(await platform.encodePngBlob(render.interlaced), `${stem}-interlaced.png`);
-      downloadDepth16(render, `${stem}-depth16.png`);
+
+      // The same sheet with the artwork replaced by a hard white→black switch:
+      // where the print flips, with none of the art's own detail in the way.
+      // Forced onto the artwork's raster so the two sheets overlay exactly.
+      const switched = renderLenticular(switchFrames(frames.length), settings, {
+        calibration: spec,
+        bandGapPx,
+        size: { width: render.width, height: render.height },
+      });
+      downloadBlob(await platform.encodePngBlob(switched.interlaced), `${stem}-switch.png`);
+
+      // The depth scale rides in the filename: with auto height each LPI band
+      // gets its own stack, so "what does white mean" changes per sheet.
+      downloadDepth16(render, `${stem}-depth16-max${slug(render.depthScaleMm)}mm.png`);
     });
 
   return (
@@ -148,16 +166,27 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
       <p className="lenticular-note">
         Each sheet sweeps one setting across {Math.max(2, Math.round(num(node.config.calibBands, 9)))} bands
         (min → max, set under Advanced) while every other setting stays as it is here. Print one, and read off
-        the band that flips cleanest. Each button downloads the interlaced artwork plus its 16-bit depth map.
+        the band that flips cleanest. Each button downloads three files: the interlaced artwork, a white→black{' '}
+        <em>switch</em> sheet on the same raster (the flip with no artwork detail in the way), and the 16-bit
+        depth map.
       </p>
+      {autoHeight ? (
+        <p className="lenticular-note">
+          The LPI sweep gives each band its own gloss height so they all view the same{' '}
+          {geometry.viewAngleDeg.toFixed(1)}° cone — finer-pitch bands need a shorter stack, so they come out
+          darker in the depth map. Turn off <em>LPI calib.: auto height</em> under Advanced to hold the height
+          fixed instead.
+        </p>
+      ) : (
+        <p className="lenticular-note">
+          The LPI sweep holds Height at {mm(settings.heightMm)} for every band, so coarse-pitch bands may not
+          focus at all. Turn on <em>LPI calib.: auto height</em> under Advanced to match viewing angles
+          instead.
+        </p>
+      )}
       <div className="lenticular-actions">
         {CALIBRATIONS.map((calib) => {
-          const values = calibrationValues({
-            param: calib.param,
-            min: num(node.config[calib.minKey], 0),
-            max: num(node.config[calib.maxKey], 0),
-            bands: Math.max(2, Math.round(num(node.config.calibBands, 9))),
-          });
+          const values = calibrationValues(calibrationSpec(calib));
           return (
             <button
               key={calib.param}

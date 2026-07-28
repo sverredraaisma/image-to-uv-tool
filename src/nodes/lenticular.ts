@@ -79,6 +79,12 @@ export const lenticularNode: NodeDefinition = {
     { kind: 'number', key: 'riMax', label: 'RI calib. max', min: 1.01, max: 3, step: 0.01, advanced: true },
     { kind: 'number', key: 'lpiMin', label: 'LPI calib. min', min: 1, step: 1, advanced: true },
     { kind: 'number', key: 'lpiMax', label: 'LPI calib. max', min: 1, step: 1, advanced: true },
+    {
+      kind: 'boolean',
+      key: 'lpiAutoHeight',
+      label: 'LPI calib.: auto height (match viewing angle)',
+      advanced: true,
+    },
   ],
   defaultConfig: () => ({
     widthMm: 100,
@@ -96,6 +102,9 @@ export const lenticularNode: NodeDefinition = {
     riMax: 1.6,
     lpiMin: 40,
     lpiMax: 50,
+    // On by default: a fixed height across an LPI sweep compares lenses with
+    // different viewing cones, and coarse bands may not focus at all.
+    lpiAutoHeight: true,
   }),
   compute: async ({ inputs, config, onProgress }) => {
     const frames = asImages(inputs.frames);

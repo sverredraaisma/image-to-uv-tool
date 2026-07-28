@@ -5,10 +5,14 @@ import {
   calibrationValues,
   depthPreview,
   describeGeometry,
+  heightForViewAngle,
   lensGeometry,
   outputSize,
   renderLenticular,
+  switchFrames,
   withCalibrationValue,
+  type CalibrationParam,
+  type CalibrationSpec,
   type LenticularSettings,
 } from './lenticular';
 import type { RasterImage } from '../types';
@@ -247,9 +251,10 @@ describe('calibration sheets', () => {
 
   it('overrides exactly one setting per band', () => {
     const base = settings();
-    expect(withCalibrationValue(base, 'height', 1.2)).toEqual({ ...base, heightMm: 1.2 });
-    expect(withCalibrationValue(base, 'ri', 1.7)).toEqual({ ...base, ri: 1.7 });
-    expect(withCalibrationValue(base, 'lpi', 60)).toEqual({ ...base, lpi: 60 });
+    const spec = (param: CalibrationParam): CalibrationSpec => ({ param, min: 0, max: 1, bands: 2 });
+    expect(withCalibrationValue(base, spec('height'), 1.2)).toEqual({ ...base, heightMm: 1.2 });
+    expect(withCalibrationValue(base, spec('ri'), 1.7)).toEqual({ ...base, ri: 1.7 });
+    expect(withCalibrationValue(base, spec('lpi'), 60)).toEqual({ ...base, lpi: 60 });
   });
 
   it('renders one band per value, each with its own geometry', () => {
@@ -293,6 +298,100 @@ describe('calibration sheets', () => {
     expect(depthAt(r, 5, 0)).toBe(0);
     expect(pixelAt(r.interlaced, 5, 0)).toEqual([255, 255, 255]);
     expect(depthAt(r, 5, 4)).toBeGreaterThan(0);
+  });
+});
+
+describe('auto height for an LPI sweep', () => {
+  it('solves the height that hits a requested viewing angle', () => {
+    const s = settings({ lpi: 45, heightMm: 0.9, ri: 1.5 });
+    const g = lensGeometry(s);
+    // Round-trip: feed the angle back in and the height comes out again.
+    expect(heightForViewAngle(g.pitchMm, s.ri, g.viewAngleDeg)).toBeCloseTo(0.9, 9);
+  });
+
+  it('scales the height linearly with pitch, since only the ratio sets the angle', () => {
+    const angle = 50;
+    const coarse = heightForViewAngle(1, 1.5, angle);
+    expect(heightForViewAngle(0.5, 1.5, angle)).toBeCloseTo(coarse / 2, 9);
+  });
+
+  it('gives every band of an LPI sweep the same viewing angle', () => {
+    const base = settings({ lpi: 45, heightMm: 0.9, ri: 1.5 });
+    const target = lensGeometry(base).viewAngleDeg;
+    const spec: CalibrationSpec = { param: 'lpi', min: 20, max: 80, bands: 5, autoHeight: true };
+    for (const value of calibrationValues(spec)) {
+      const band = lensGeometry(withCalibrationValue(base, spec, value));
+      expect(band.viewAngleDeg).toBeCloseTo(target, 6);
+      expect(band.feasible).toBe(true); // an angle reachable at one LPI is reachable at all
+    }
+  });
+
+  it('keeps a coarse band focusing, where a fixed height would break it', () => {
+    const base = settings({ lpi: 45, heightMm: 0.9, ri: 1.5 });
+    const fixed: CalibrationSpec = { param: 'lpi', min: 20, max: 80, bands: 2 };
+    const auto: CalibrationSpec = { ...fixed, autoHeight: true };
+    // 20 LPI is a 1.27 mm pitch: 0.9 mm of gloss cannot focus it.
+    expect(lensGeometry(withCalibrationValue(base, fixed, 20)).feasible).toBe(false);
+    expect(lensGeometry(withCalibrationValue(base, auto, 20)).feasible).toBe(true);
+  });
+
+  it('leaves height and RI sweeps alone', () => {
+    const base = settings();
+    const spec = (param: CalibrationParam): CalibrationSpec => ({
+      param,
+      min: 0,
+      max: 1,
+      bands: 2,
+      autoHeight: true,
+    });
+    expect(withCalibrationValue(base, spec('height'), 1.2).heightMm).toBe(1.2);
+    expect(withCalibrationValue(base, spec('ri'), 1.7)).toEqual({ ...base, ri: 1.7 });
+  });
+
+  it('darkens the finer-pitch bands, which need a shorter stack', () => {
+    const s = settings({ lpi: 10, heightMm: 5 });
+    const r = renderLenticular([RED, BLUE], s, {
+      calibration: { param: 'lpi', min: 10, max: 20, bands: 2, autoHeight: true },
+    });
+    // Coarse band keeps the settings' own height and sets the scale…
+    expect(r.depthScaleMm).toBeCloseTo(5, 6);
+    expect(maxOf(r.depth.slice(0, r.width * 40))).toBeGreaterThan(65000);
+    // …the 20 LPI band needs half the stack for the same cone, so it tops out
+    // at half the depth value.
+    const fineBandPeak = maxOf(r.depth.slice(r.width * 60));
+    expect(fineBandPeak / 65535).toBeCloseTo(0.5, 2);
+  });
+});
+
+describe('switchFrames', () => {
+  it('is white then black for two frames', () => {
+    const frames = switchFrames(2);
+    expect(frames).toHaveLength(2);
+    expect([...frames[0].data]).toEqual([255, 255, 255, 255]);
+    expect([...frames[1].data]).toEqual([0, 0, 0, 255]);
+  });
+
+  it('ramps evenly through grey for more frames', () => {
+    expect(switchFrames(3).map((f) => f.data[0])).toEqual([255, 128, 0]);
+    expect(switchFrames(5).map((f) => f.data[0])).toEqual([255, 191, 128, 64, 0]);
+  });
+
+  it('never returns fewer than two frames', () => {
+    expect(switchFrames(1)).toHaveLength(2);
+    expect(switchFrames(0)).toHaveLength(2);
+  });
+
+  it('interlaces into a hard black/white switch on the artwork raster', () => {
+    const art = createImage(40, 10, [12, 34, 56, 255]);
+    const s = settings();
+    const size = outputSize(s, art);
+    const r = renderLenticular(switchFrames(2), s, { size });
+    // Same raster as the artwork sheet, so the two overlay exactly…
+    expect(r.width).toBe(size.width);
+    expect(r.height).toBe(size.height);
+    // …and each lenticule is half white, half black.
+    for (let x = 0; x < 5; x++) expect(pixelAt(r.interlaced, x, 0)).toEqual([255, 255, 255]);
+    for (let x = 5; x < 10; x++) expect(pixelAt(r.interlaced, x, 0)).toEqual([0, 0, 0]);
   });
 });
 
