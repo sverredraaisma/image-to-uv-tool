@@ -44,6 +44,12 @@ export interface LenticularSettings {
   ri: number;
   /** Orientation of the lenticules, degrees. 0 = they run vertically. */
   orientationDeg: number;
+  /**
+   * Pixels per frame strip in the interlaced artwork — its whole resolution
+   * budget, see {@link interlacedSize}. 1 is the theoretical minimum but drops
+   * strips wherever the phase lands badly; 2 is the safe floor.
+   */
+  stripSamples: number;
 }
 
 export interface LensGeometry {
@@ -225,15 +231,41 @@ export function switchFrames(count: number): RasterImage[] {
   });
 }
 
+/**
+ * Smallest raster that still holds everything the interlaced sheet knows.
+ *
+ * The interlaced artwork carries no lens geometry — it is flat ink that the
+ * printing tool scales onto the sheet — so it has no reason to sit on the
+ * printer's PPI raster. Two things bound it from below:
+ *
+ *   • the interlace itself: `stripSamples` pixels for every frame strip of
+ *     every lenticule, so no strip can be skipped by an unlucky phase;
+ *   • the artwork: never resample the highest-resolution frame downwards.
+ *
+ * The aspect ratio is the first frame's, as everywhere else. The bound is
+ * orientation-independent: the pixels are square, so a strip that survives
+ * along x survives at any angle.
+ */
+export function interlacedSize(settings: LenticularSettings, frames: RasterImage[]): OutputSize {
+  const first = frames[0];
+  const lenticules = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
+  const samples = Math.max(1, settings.stripSamples);
+  const forStrips = Math.ceil(lenticules * frames.length * samples);
+  const forArtwork = Math.max(...frames.map((f) => f.width));
+  const width = Math.max(1, forStrips, forArtwork);
+  return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
+}
+
 export interface LenticularRender {
-  /** Interlaced artwork, ready to print. */
+  /** Interlaced artwork — its own minimal raster, see {@link interlacedSize}. */
   interlaced: RasterImage;
   /** Lens array as a 16-bit height field; 65535 = `depthScaleMm`. */
   depth: Uint16Array;
   /** Height in mm that a depth value of 65535 represents. */
   depthScaleMm: number;
-  width: number;
-  height: number;
+  /** Depth-map raster — the printer's PPI raster, see {@link outputSize}. */
+  depthWidth: number;
+  depthHeight: number;
   /** Geometry per band (a single entry for a normal, unbanded render). */
   bands: { value?: number; geometry: LensGeometry }[];
 }
@@ -241,24 +273,207 @@ export interface LenticularRender {
 export interface RenderOptions {
   /** Sweep a setting across the sheet instead of rendering it flat. */
   calibration?: CalibrationSpec;
-  /** Blank separator between calibration bands, printer pixels. */
-  bandGapPx?: number;
+  /** Blank separator between calibration bands, millimetres. */
+  bandGapMm?: number;
   /**
-   * Render at this exact pixel size instead of deriving it from the first
-   * frame. Lets a companion sheet (e.g. {@link switchFrames}) land on the same
-   * raster as the artwork it accompanies, whatever aspect its frames have.
+   * Render the artwork at this exact pixel size instead of deriving it. Lets a
+   * companion sheet (e.g. {@link switchFrames}) land on the same raster as the
+   * artwork it accompanies, whatever resolution its own frames have.
    */
-  size?: OutputSize;
+  interlacedSize?: OutputSize;
+}
+
+interface Band {
+  value?: number;
+  geometry: LensGeometry;
 }
 
 /**
- * Render the interlaced artwork and its lens depth map in a single pass.
+ * Everything about the sheet that is independent of how finely it is rastered.
+ * Both passes work in millimetres off this, so the artwork and the depth map
+ * describe the same physical print at different resolutions.
+ */
+interface Sheet {
+  widthMm: number;
+  heightMm: number;
+  cos: number;
+  sin: number;
+  /** Phase wrapped into 0–1. */
+  phase: number;
+  bands: Band[];
+  /** Lens-parallel coordinate of the sheet's leading corner, mm. */
+  vMinMm: number;
+  /** Width of one calibration band along that coordinate, mm. */
+  bandSpanMm: number;
+  gapMm: number;
+  depthScaleMm: number;
+}
+
+function sheet(frames: RasterImage[], settings: LenticularSettings, options: RenderOptions): Sheet {
+  const theta = (settings.orientationDeg * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  const widthMm = Math.max(0.01, settings.widthMm);
+  const heightMm = (widthMm * frames[0].height) / frames[0].width;
+
+  // One geometry per calibration band (or a single one for a flat render).
+  const values = options.calibration ? calibrationValues(options.calibration) : [];
+  const bands: Band[] = options.calibration
+    ? values.map((value) => ({
+        value,
+        geometry: lensGeometry(withCalibrationValue(settings, options.calibration!, value)),
+      }))
+    : [{ geometry: lensGeometry(settings) }];
+
+  // Bands are stacked along the lenticule direction (v), so each one still
+  // carries whole, uncut lenticules at any orientation.
+  const corners = [
+    [0, 0],
+    [widthMm, 0],
+    [0, heightMm],
+    [widthMm, heightMm],
+  ].map(([x, y]) => -x * sin + y * cos);
+  const vMinMm = Math.min(...corners);
+  const vSpanMm = Math.max(1e-6, Math.max(...corners) - vMinMm);
+
+  return {
+    widthMm,
+    heightMm,
+    cos,
+    sin,
+    phase: settings.phase - Math.floor(settings.phase),
+    bands,
+    vMinMm,
+    bandSpanMm: vSpanMm / bands.length,
+    gapMm: Math.max(0, options.bandGapMm ?? 0),
+    // Depth is normalised against the tallest stack on the sheet, so a Height
+    // (or auto-height LPI) calibration keeps every band on one comparable
+    // scale — a band that needs a shorter stack simply prints darker.
+    depthScaleMm: Math.max(1e-6, ...bands.map((b) => b.geometry.totalMm)),
+  };
+}
+
+/** The band covering a point, or null inside a between-band gutter. */
+function bandAt(s: Sheet, xMm: number, yMm: number): Band | null {
+  if (s.bands.length < 2) return s.bands[0];
+  const v = -xMm * s.sin + yMm * s.cos - s.vMinMm;
+  const slot = Math.min(s.bands.length - 1, Math.max(0, Math.floor(v / s.bandSpanMm)));
+  if (s.gapMm > 0 && v - slot * s.bandSpanMm < s.gapMm) return null;
+  return s.bands[slot];
+}
+
+function checkBudget(width: number, height: number, what: string, fix: string): void {
+  if (width * height <= MAX_OUTPUT_PIXELS) return;
+  throw new Error(
+    `${what} would be ${width}×${height} px (${Math.round((width * height) / 1e6)} MP). ` +
+      `${fix} — the limit is ${MAX_OUTPUT_PIXELS / 1e6} MP.`,
+  );
+}
+
+/**
+ * Render the interlaced artwork.
  *
- * Each output pixel is placed by its coordinate `u` across the lenticules
- * (rotated by `orientationDeg`). The fraction of the way through the lenticule
- * picks the frame; the sample point is the *lenticule centre*, not the pixel
- * itself, so every strip of a lenticule shows the same spot of the artwork from
- * its own frame — that squeeze to 1/n of the lenticule width is the interlace.
+ * Each pixel is placed by its coordinate `u` across the lenticules (rotated by
+ * `orientationDeg`). The fraction of the way through the lenticule picks the
+ * frame; the sample point is the *lenticule centre*, not the pixel itself, so
+ * every strip of a lenticule shows the same spot of the artwork from its own
+ * frame — that squeeze to 1/n of the lenticule width is the interlace.
+ */
+export function renderInterlaced(
+  frames: RasterImage[],
+  settings: LenticularSettings,
+  options: RenderOptions = {},
+): RasterImage {
+  if (frames.length < 2) throw new Error('Lenticular print needs at least 2 images');
+  const size = options.interlacedSize ?? interlacedSize(settings, frames);
+  const width = Math.max(1, Math.round(size.width));
+  const height = Math.max(1, Math.round(size.height));
+  checkBudget(width, height, 'Interlaced artwork', 'Reduce Width (mm), LPI or the source resolution');
+
+  const s = sheet(frames, settings, options);
+  const frameCount = frames.length;
+  const mmPerPx = s.widthMm / width;
+  const out = createImage(width, height, [255, 255, 255, 255]);
+
+  for (let y = 0; y < height; y++) {
+    const yMm = (y + 0.5) * mmPerPx;
+    for (let x = 0; x < width; x++) {
+      const xMm = (x + 0.5) * mmPerPx;
+      const band = bandAt(s, xMm, yMm);
+      if (!band) continue; // gutter between calibration bands stays white
+
+      const u = xMm * s.cos + yMm * s.sin;
+      const pitchMm = band.geometry.pitchMm;
+      const cell = Math.floor(u / pitchMm + s.phase);
+      const t = u / pitchMm + s.phase - cell;
+
+      const frame = Math.min(frameCount - 1, Math.floor(t * frameCount));
+      const shift = (cell + 0.5 - s.phase) * pitchMm - u;
+      sampleNormalized(
+        frames[frame],
+        (xMm + shift * s.cos) / s.widthMm,
+        (yMm + shift * s.sin) / s.heightMm,
+        out.data,
+        (y * width + x) * 4,
+      );
+    }
+  }
+  return out;
+}
+
+export interface DepthMapResult {
+  depth: Uint16Array;
+  width: number;
+  height: number;
+  /** Height in mm that a depth value of 65535 represents. */
+  scaleMm: number;
+  bands: Band[];
+}
+
+/**
+ * Render the lens array as a 16-bit height field, on the printer's own raster:
+ * unlike the artwork this *is* geometry, and its resolution is the resolution
+ * of the lenses themselves.
+ */
+export function renderDepthMap(
+  frames: RasterImage[],
+  settings: LenticularSettings,
+  options: RenderOptions = {},
+): DepthMapResult {
+  if (frames.length < 1) throw new Error('Lenticular print needs at least 2 images');
+  const size = outputSize(settings, frames[0]);
+  const { width, height } = size;
+  checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI');
+
+  const s = sheet(frames, settings, options);
+  const mmPerPx = s.widthMm / width;
+  const depth = new Uint16Array(width * height);
+
+  for (let y = 0; y < height; y++) {
+    const yMm = (y + 0.5) * mmPerPx;
+    for (let x = 0; x < width; x++) {
+      const xMm = (x + 0.5) * mmPerPx;
+      const band = bandAt(s, xMm, yMm);
+      if (!band) continue; // gutter between calibration bands prints no gloss
+
+      const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
+      const u = xMm * s.cos + yMm * s.sin;
+      const t = u / pitchMm + s.phase - Math.floor(u / pitchMm + s.phase);
+
+      // Lens profile: circular arc of radius R and sag `sagMm`, on the base.
+      const offset = (t - 0.5) * pitchMm;
+      const arc = Math.sqrt(Math.max(0, radiusMm * radiusMm - offset * offset)) - (radiusMm - sagMm);
+      const mm = baseMm + Math.max(0, arc);
+      depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
+    }
+  }
+  return { depth, width, height, scaleMm: s.depthScaleMm, bands: s.bands };
+}
+
+/**
+ * Both halves of a lenticular print. They deliberately sit on *different*
+ * rasters: the artwork on the smallest raster that loses nothing, the lens
+ * depth map on the printer's PPI raster that decides how good the lenses are.
  */
 export function renderLenticular(
   frames: RasterImage[],
@@ -266,94 +481,28 @@ export function renderLenticular(
   options: RenderOptions = {},
 ): LenticularRender {
   if (frames.length < 2) throw new Error('Lenticular print needs at least 2 images');
-  const size = options.size ?? outputSize(settings, frames[0]);
-  const width = Math.max(1, Math.round(size.width));
-  const height = Math.max(1, Math.round(size.height));
-  if (width * height > MAX_OUTPUT_PIXELS) {
-    throw new Error(
-      `Output would be ${width}×${height} px (${Math.round((width * height) / 1e6)} MP). ` +
-        `Reduce Width (mm) or PPI — the limit is ${MAX_OUTPUT_PIXELS / 1e6} MP.`,
-    );
-  }
+  // Budget both halves before rendering either: a sheet too big for the depth
+  // map must fail now, not after a multi-megapixel artwork pass.
+  const art = options.interlacedSize ?? interlacedSize(settings, frames);
+  const map = outputSize(settings, frames[0]);
+  checkBudget(art.width, art.height, 'Interlaced artwork', 'Reduce Width (mm), LPI or the source resolution');
+  checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI');
 
-  const theta = (settings.orientationDeg * Math.PI) / 180;
-  const cos = Math.cos(theta);
-  const sin = Math.sin(theta);
-  const frameCount = frames.length;
-  const phase = settings.phase - Math.floor(settings.phase); // wrap into 0–1
-
-  // One geometry per calibration band (or a single one for a flat render).
-  const values = options.calibration ? calibrationValues(options.calibration) : [];
-  const bands = options.calibration
-    ? values.map((value) => ({
-        value,
-        geometry: lensGeometry(withCalibrationValue(settings, options.calibration!, value)),
-      }))
-    : [{ geometry: lensGeometry(settings) }];
-
-  // Depth is normalised against the tallest stack on the sheet, so a Height (or
-  // auto-height LPI) calibration keeps every band on one comparable scale — a
-  // band that needs a shorter stack simply prints darker.
-  const depthScaleMm = Math.max(1e-6, ...bands.map((b) => b.geometry.totalMm));
-
-  // Bands are stacked along the lenticule direction (v), so each one still
-  // carries whole, uncut lenticules at any orientation.
-  const corners = [
-    [0, 0],
-    [width, 0],
-    [0, height],
-    [width, height],
-  ].map(([x, y]) => -x * sin + y * cos);
-  const vMin = Math.min(...corners);
-  const vSpan = Math.max(1e-6, Math.max(...corners) - vMin);
-  const bandSpan = vSpan / bands.length;
-  const gap = Math.max(0, options.bandGapPx ?? 0);
-
-  const interlaced = createImage(width, height, [255, 255, 255, 255]);
-  const depth = new Uint16Array(width * height);
-  const pixel = interlaced.data;
-
-  for (let y = 0; y < height; y++) {
-    const py = y + 0.5;
-    for (let x = 0; x < width; x++) {
-      const px = x + 0.5;
-      const index = y * width + x;
-
-      let band = bands[0];
-      if (bands.length > 1) {
-        const v = -px * sin + py * cos - vMin;
-        const slot = Math.min(bands.length - 1, Math.max(0, Math.floor(v / bandSpan)));
-        // Blank gutter between bands: white artwork, zero gloss.
-        if (gap > 0 && v - slot * bandSpan < gap) continue;
-        band = bands[slot];
-      }
-
-      const { pitchPx, sagMm, baseMm, radiusMm } = band.geometry;
-      const s = (px * cos + py * sin) / pitchPx + phase;
-      const cell = Math.floor(s);
-      const t = s - cell;
-
-      // --- interlace: this strip's frame, sampled at the lenticule centre ---
-      const frame = Math.min(frameCount - 1, Math.floor(t * frameCount));
-      const shift = (cell + 0.5 - phase) * pitchPx - (px * cos + py * sin);
-      const sx = (px + shift * cos) / width;
-      const sy = (py + shift * sin) / height;
-      sampleNormalized(frames[frame], sx, sy, pixel, index * 4);
-
-      // --- lens profile: circular arc of radius R, sag `sagMm`, on the base ---
-      const offset = (t - 0.5) * band.geometry.pitchMm;
-      const arc = Math.sqrt(Math.max(0, radiusMm * radiusMm - offset * offset)) - (radiusMm - sagMm);
-      const mm = baseMm + Math.max(0, arc);
-      depth[index] = Math.round(Math.min(1, mm / depthScaleMm) * 65535);
-    }
-  }
-
-  return { interlaced, depth, depthScaleMm, width, height, bands };
+  const interlaced = renderInterlaced(frames, settings, options);
+  const depth = renderDepthMap(frames, settings, options);
+  return {
+    interlaced,
+    depth: depth.depth,
+    depthScaleMm: depth.scaleMm,
+    depthWidth: depth.width,
+    depthHeight: depth.height,
+    bands: depth.bands,
+  };
 }
 
 /** 8-bit greyscale view of a 16-bit depth map, for on-canvas preview. */
 export function depthPreview(render: LenticularRender): RasterImage {
-  const img = createImage(render.width, render.height, [0, 0, 0, 255]);
+  const img = createImage(render.depthWidth, render.depthHeight, [0, 0, 0, 255]);
   for (let i = 0; i < render.depth.length; i++) {
     const v = render.depth[i] >>> 8;
     img.data[i * 4] = v;
@@ -363,18 +512,24 @@ export function depthPreview(render: LenticularRender): RasterImage {
   return img;
 }
 
+/** Fewer pixels than this across a lenticule and the lens profile is terraced. */
+const MIN_LENS_PX = 8;
+
 /** Human-readable geometry report for the node's Info output and its editor. */
 export function describeGeometry(
   settings: LenticularSettings,
   geometry: LensGeometry,
   frameCount: number,
-  size: OutputSize,
+  depthSize: OutputSize,
+  artSize: OutputSize,
 ): string {
   const mm = (v: number) => v.toFixed(3);
-  const stripPx = geometry.pitchPx / frameCount;
   const lines = [
-    `${frameCount} frames · ${size.width}×${size.height} px @ ${settings.ppi} PPI`,
-    `Lenticule pitch ${mm(geometry.pitchMm)} mm (${geometry.pitchPx.toFixed(2)} px), ${stripPx.toFixed(2)} px per frame strip`,
+    `${frameCount} frames · ${settings.widthMm} mm wide`,
+    `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
+      `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
+    `Lenticule pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
+      `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / frameCount).toFixed(2)} px per frame strip`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
     `Radius ${mm(geometry.radiusMm)} mm · focus ${mm(geometry.focusMm)} mm below apex · viewing angle ${geometry.viewAngleDeg.toFixed(1)}°`,
   ];
@@ -384,9 +539,10 @@ export function describeGeometry(
         `it focuses ${mm(geometry.focusMm)} mm down. Raise Height to ${mm(geometry.minHeightMm)} mm or raise LPI.`,
     );
   }
-  if (stripPx < 4) {
+  if (geometry.pitchPx < MIN_LENS_PX) {
     lines.push(
-      `⚠ Only ${stripPx.toFixed(2)} px per frame strip — raise PPI, lower LPI, or use fewer frames.`,
+      `⚠ Only ${geometry.pitchPx.toFixed(2)} px across a lenticule — the printed lens will be terraced. ` +
+        `Raise PPI or lower LPI.`,
     );
   }
   return lines.join('\n');

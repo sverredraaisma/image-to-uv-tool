@@ -5,6 +5,7 @@ import type { NodeConfig, NodeDefinition } from '../types';
 import {
   depthPreview,
   describeGeometry,
+  interlacedSize,
   lensGeometry,
   outputSize,
   renderLenticular,
@@ -22,6 +23,7 @@ export function settingsFromConfig(config: NodeConfig): LenticularSettings {
     heightMm: Math.max(0.001, num(config.heightMm, 0.9)),
     ri: Math.max(1.0001, num(config.ri, 1.5)),
     orientationDeg: num(config.orientationDeg, 0),
+    stripSamples: Math.max(1, num(config.stripSamples, 2)),
   };
 }
 
@@ -32,7 +34,9 @@ export const lenticularNode: NodeDefinition = {
   description:
     'Interlace 2+ images under a lens array and emit the gloss lens array that focuses on them. ' +
     'Connect the frames in viewing order. Height/RI/LPI decide the lens sag and the flat base beneath it; ' +
-    'open the editor for the 16-bit depth map and Height/RI/LPI calibration sheets. Manual: click Run.',
+    'open the editor for the 16-bit depth map and Height/RI/LPI calibration sheets. ' +
+    'The depth map is on the PPI raster (it is the lens); the artwork is only as big as the interlace and ' +
+    'the source images need — scale it to the sheet at print time. Manual: click Run.',
   // Manual: a 100 mm sheet at 1440 PPI is a ~32 MP two-buffer render.
   autoRun: false,
   customEditor: 'lenticular',
@@ -50,6 +54,15 @@ export const lenticularNode: NodeDefinition = {
     { kind: 'number', key: 'heightMm', label: 'Height (mm)', min: 0.01, step: 0.05 },
     { kind: 'number', key: 'ri', label: 'RI', min: 1.01, max: 3, step: 0.01 },
     { kind: 'number', key: 'orientationDeg', label: 'Orientation (°)', min: -180, max: 180, step: 1 },
+    {
+      kind: 'number',
+      key: 'stripSamples',
+      label: 'Artwork px per frame strip',
+      min: 1,
+      max: 16,
+      step: 1,
+      advanced: true,
+    },
     {
       kind: 'number',
       key: 'calibBands',
@@ -95,6 +108,7 @@ export const lenticularNode: NodeDefinition = {
     // 1.5 is the usual cured clear-varnish / acrylic figure.
     ri: 1.5,
     orientationDeg: 0,
+    stripSamples: 2,
     calibBands: 9,
     heightMin: 0.6,
     heightMax: 1.4,
@@ -112,8 +126,9 @@ export const lenticularNode: NodeDefinition = {
       throw new Error(`Lenticular print needs at least 2 images (got ${frames.length}).`);
     }
     const settings = settingsFromConfig(config);
-    const size = outputSize(settings, frames[0]);
-    onProgress?.(`Interlacing ${frames.length} frames at ${size.width}×${size.height}…`);
+    const depthSize = outputSize(settings, frames[0]);
+    const artSize = interlacedSize(settings, frames);
+    onProgress?.(`Interlacing ${frames.length} frames, lens map at ${depthSize.width}×${depthSize.height}…`);
     // Let the spinner paint before the render locks the main thread.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -123,7 +138,7 @@ export const lenticularNode: NodeDefinition = {
       depth: depthPreview(render),
       info: {
         kind: 'text',
-        text: describeGeometry(settings, lensGeometry(settings), frames.length, size),
+        text: describeGeometry(settings, lensGeometry(settings), frames.length, depthSize, artSize),
       },
     };
   },

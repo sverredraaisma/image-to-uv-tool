@@ -51,24 +51,46 @@ describe('Lenticular Print node', () => {
     const out = await lenticularNode.compute(ctx({ frames: [RED, BLUE] }, config()));
     const interlaced = out.interlaced as RasterImage;
     const depth = out.depth as RasterImage;
-    expect(interlaced.width).toBe(100);
+    // Artwork on its own minimal raster: 10 lenticules × 2 frames × 2 samples.
+    expect(interlaced.width).toBe(40);
     expect(px(interlaced, 0, 0)).toEqual([255, 0, 0]);
-    expect(px(interlaced, 5, 0)).toEqual([0, 0, 255]);
-    expect(depth.width).toBe(interlaced.width);
-    expect(depth.height).toBe(interlaced.height);
+    expect(px(interlaced, 2, 0)).toEqual([0, 0, 255]);
+    // Depth map on the printer's raster instead — it is the lens.
+    expect(depth.width).toBe(100);
+    expect(depth.height).toBe(100);
     // Depth preview is greyscale, brightest at the lenticule apex.
     expect(px(depth, 5, 0)[0]).toBeGreaterThan(px(depth, 0, 0)[0]);
     expect(out.info?.kind).toBe('text');
-    if (out.info?.kind === 'text') expect(out.info.text).toContain('2 frames');
+    if (out.info?.kind === 'text') {
+      expect(out.info.text).toContain('2 frames');
+      expect(out.info.text).toContain('Depth map 100×100 px @ 100 PPI · artwork 40×40 px');
+    }
   });
 
   it('interlaces three or more frames', async () => {
     const green = createImage(20, 20, [0, 255, 0, 255]);
     const out = await lenticularNode.compute(ctx({ frames: [RED, green, BLUE] }, config()));
     const img = out.interlaced as RasterImage;
+    // A third frame widens the artwork raster to keep 2 px per strip.
+    expect(img.width).toBe(60);
     expect(px(img, 0, 0)).toEqual([255, 0, 0]);
-    expect(px(img, 4, 0)).toEqual([0, 255, 0]);
-    expect(px(img, 8, 0)).toEqual([0, 0, 255]);
+    expect(px(img, 2, 0)).toEqual([0, 255, 0]);
+    expect(px(img, 4, 0)).toEqual([0, 0, 255]);
+  });
+
+  it('sizes the artwork off the source resolution when that is the larger', async () => {
+    const big = createImage(600, 600, [1, 2, 3, 255]);
+    const out = await lenticularNode.compute(ctx({ frames: [big, BLUE] }, config()));
+    expect((out.interlaced as RasterImage).width).toBe(600);
+    // …and the depth map is unmoved by it.
+    expect((out.depth as RasterImage).width).toBe(100);
+  });
+
+  it('ignores PPI when sizing the artwork, but not when sizing the lens', async () => {
+    const base = await lenticularNode.compute(ctx({ frames: [RED, BLUE] }, config()));
+    const fine = await lenticularNode.compute(ctx({ frames: [RED, BLUE] }, config({ ppi: 400 })));
+    expect((fine.interlaced as RasterImage).width).toBe((base.interlaced as RasterImage).width);
+    expect((fine.depth as RasterImage).width).toBe(400);
   });
 
   it('rejects fewer than two frames', async () => {
@@ -108,6 +130,7 @@ describe('settingsFromConfig', () => {
       heightMm: 0.9,
       ri: 1.5,
       orientationDeg: 0,
+      stripSamples: 2,
     });
     // RI below 1 would invert the optics; height of 0 would divide by zero.
     expect(settingsFromConfig({ ri: 0.2, heightMm: 0 }).ri).toBeGreaterThan(1);

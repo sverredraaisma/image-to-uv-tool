@@ -6,18 +6,21 @@ import {
   depthPreview,
   describeGeometry,
   heightForViewAngle,
+  interlacedSize,
   lensGeometry,
   outputSize,
+  renderInterlaced,
   renderLenticular,
   switchFrames,
   withCalibrationValue,
   type CalibrationParam,
   type CalibrationSpec,
   type LenticularSettings,
+  type RenderOptions,
 } from './lenticular';
 import type { RasterImage } from '../types';
 
-/** Small, fast test settings: 100 px wide, 10 px per lenticule. */
+/** Small, fast test settings: a 100 px depth raster, 10 px per lenticule. */
 const settings = (over: Partial<LenticularSettings> = {}): LenticularSettings => ({
   widthMm: 25.4,
   ppi: 100,
@@ -26,6 +29,7 @@ const settings = (over: Partial<LenticularSettings> = {}): LenticularSettings =>
   heightMm: 5,
   ri: 1.5,
   orientationDeg: 0,
+  stripSamples: 2,
   ...over,
 });
 
@@ -36,11 +40,21 @@ const RED = solid([255, 0, 0]);
 const BLUE = solid([0, 0, 255]);
 const GREEN = solid([0, 255, 0]);
 
+/**
+ * The artwork sizes itself now, so the interlace tests pin it to the same
+ * 100×100 raster as the depth map: 10 px per lenticule, whatever the frame
+ * count. {@link interlacedSize} is covered on its own below.
+ */
+const ART = { width: 100, height: 100 };
+const renderAt = (frames: RasterImage[], s: LenticularSettings, options: RenderOptions = {}) =>
+  renderLenticular(frames, s, { interlacedSize: ART, ...options });
+
 const pixelAt = (img: RasterImage, x: number, y: number) => {
   const i = (y * img.width + x) * 4;
   return [img.data[i], img.data[i + 1], img.data[i + 2]];
 };
-const depthAt = (r: { depth: Uint16Array; width: number }, x: number, y: number) => r.depth[y * r.width + x];
+const depthAt = (r: { depth: Uint16Array; depthWidth: number }, x: number, y: number) =>
+  r.depth[y * r.depthWidth + x];
 /** Spread-free max — these buffers are millions of entries long. */
 const maxOf = (values: Uint16Array) => values.reduce((m, v) => (v > m ? v : m), 0);
 
@@ -120,10 +134,64 @@ describe('outputSize', () => {
   });
 });
 
+describe('interlacedSize', () => {
+  // 25.4 mm at 10 LPI = 10 lenticules, so the interlace floor is
+  // 10 × frames × stripSamples pixels wide.
+  it('takes the interlace floor when the artwork is small', () => {
+    expect(interlacedSize(settings(), [RED, BLUE])).toEqual({ width: 40, height: 40 });
+    expect(interlacedSize(settings({ stripSamples: 4 }), [RED, BLUE]).width).toBe(80);
+    expect(interlacedSize(settings(), [RED, GREEN, BLUE]).width).toBe(60);
+  });
+
+  it('keeps the highest-resolution frame instead of downsampling it', () => {
+    const big = solid([1, 2, 3], 900, 900);
+    expect(interlacedSize(settings(), [RED, big]).width).toBe(900);
+    // …but never drops below the interlace floor for it: 500 lenticules × 2
+    // frames × 2 samples outvotes the 900 px source.
+    expect(interlacedSize(settings({ lpi: 500 }), [RED, big]).width).toBe(2000);
+  });
+
+  it('takes its aspect ratio from the first frame only', () => {
+    const wide = solid([0, 0, 0], 400, 100);
+    expect(interlacedSize(settings(), [wide, RED])).toEqual({ width: 400, height: 100 });
+    expect(interlacedSize(settings(), [RED, wide])).toEqual({ width: 400, height: 400 });
+  });
+
+  it('ignores PPI entirely — that is the depth map’s business', () => {
+    const a = interlacedSize(settings({ ppi: 300 }), [RED, BLUE]);
+    const b = interlacedSize(settings({ ppi: 5000 }), [RED, BLUE]);
+    expect(a).toEqual(b);
+    expect(outputSize(settings({ ppi: 300 }), RED)).not.toEqual(outputSize(settings({ ppi: 5000 }), RED));
+  });
+
+  it('is what renderLenticular actually rasters the artwork at', () => {
+    const s = settings({ ppi: 1440 });
+    const r = renderLenticular([RED, BLUE], s);
+    expect({ width: r.interlaced.width, height: r.interlaced.height }).toEqual(
+      interlacedSize(s, [RED, BLUE]),
+    );
+    // The depth map keeps the printer's raster, far larger than the artwork.
+    expect({ width: r.depthWidth, height: r.depthHeight }).toEqual(outputSize(s, RED));
+    expect(r.depthWidth).toBeGreaterThan(r.interlaced.width * 10);
+  });
+
+  it('renders the same interlace whatever raster it lands on', () => {
+    const s = settings();
+    const small = renderInterlaced([RED, BLUE], s); // 40 px, 2 px per strip
+    const large = renderInterlaced([RED, BLUE], s, { interlacedSize: ART }); // 100 px
+    // Same physical strips, so the same colour at the same fraction across.
+    for (const f of [0.05, 0.2, 0.35, 0.55, 0.7, 0.95]) {
+      expect(pixelAt(small, Math.floor(f * small.width), 0)).toEqual(
+        pixelAt(large, Math.floor(f * large.width), 0),
+      );
+    }
+  });
+});
+
 describe('renderLenticular — interlacing', () => {
   it('gives each frame an equal slice of every lenticule', () => {
-    const r = renderLenticular([RED, BLUE], settings());
-    expect(r.width).toBe(100);
+    const r = renderAt([RED, BLUE], settings());
+    expect(r.interlaced.width).toBe(100);
     // 10 px per lenticule, 2 frames → 5 px each, repeating.
     for (let x = 0; x < 5; x++) expect(pixelAt(r.interlaced, x, 0)).toEqual([255, 0, 0]);
     for (let x = 5; x < 10; x++) expect(pixelAt(r.interlaced, x, 0)).toEqual([0, 0, 255]);
@@ -132,26 +200,26 @@ describe('renderLenticular — interlacing', () => {
   });
 
   it('splits three frames across the lenticule', () => {
-    const r = renderLenticular([RED, GREEN, BLUE], settings());
+    const r = renderAt([RED, GREEN, BLUE], settings());
     expect(pixelAt(r.interlaced, 0, 0)).toEqual([255, 0, 0]);
     expect(pixelAt(r.interlaced, 4, 0)).toEqual([0, 255, 0]);
     expect(pixelAt(r.interlaced, 8, 0)).toEqual([0, 0, 255]);
   });
 
   it('phase shifts the strips within the lenticule', () => {
-    const r = renderLenticular([RED, BLUE], settings({ phase: 0.5 }));
+    const r = renderAt([RED, BLUE], settings({ phase: 0.5 }));
     expect(pixelAt(r.interlaced, 0, 0)).toEqual([0, 0, 255]);
     expect(pixelAt(r.interlaced, 5, 0)).toEqual([255, 0, 0]);
   });
 
   it('wraps a phase outside 0–1 instead of drifting', () => {
-    const a = renderLenticular([RED, BLUE], settings({ phase: 0.25 }));
-    const b = renderLenticular([RED, BLUE], settings({ phase: 2.25 }));
+    const a = renderAt([RED, BLUE], settings({ phase: 0.25 }));
+    const b = renderAt([RED, BLUE], settings({ phase: 2.25 }));
     expect(b.interlaced.data).toEqual(a.interlaced.data);
   });
 
   it('runs the strips along y when the orientation is 90°', () => {
-    const r = renderLenticular([RED, BLUE], settings({ orientationDeg: 90 }));
+    const r = renderAt([RED, BLUE], settings({ orientationDeg: 90 }));
     // Constant across a row, alternating down the column.
     expect(pixelAt(r.interlaced, 0, 0)).toEqual(pixelAt(r.interlaced, 37, 0));
     expect(pixelAt(r.interlaced, 0, 0)).toEqual([255, 0, 0]);
@@ -169,7 +237,7 @@ describe('renderLenticular — interlacing', () => {
         ramp.data[i + 3] = 255;
       }
     }
-    const r = renderLenticular([ramp, ramp], settings());
+    const r = renderAt([ramp, ramp], settings());
     const first = pixelAt(r.interlaced, 0, 0)[0];
     for (let x = 1; x < 10; x++) expect(pixelAt(r.interlaced, x, 0)[0]).toBe(first);
     // …and the next lenticule steps to a new value.
@@ -181,9 +249,15 @@ describe('renderLenticular — interlacing', () => {
     expect(() => renderLenticular([], settings())).toThrow(/at least 2 images/);
   });
 
-  it('refuses a render above the pixel budget', () => {
+  it('refuses a render above the pixel budget, before rendering anything', () => {
+    // The depth raster blows the budget while the artwork alone would not, so
+    // this only returns promptly if both are checked up front.
     expect(() => renderLenticular([RED, BLUE], settings({ widthMm: 5000, ppi: 1440 }))).toThrow(
-      /Reduce Width/,
+      /Depth map would be .* Reduce Width \(mm\) or PPI/s,
+    );
+    // …and an artwork too big in its own right is caught on its own terms.
+    expect(() => renderLenticular([RED, BLUE], settings({ widthMm: 5000, lpi: 2000 }))).toThrow(
+      /Interlaced artwork would be/,
     );
     expect(MAX_OUTPUT_PIXELS).toBeGreaterThan(30_000_000);
   });
@@ -230,9 +304,9 @@ describe('renderLenticular — gloss depth map', () => {
   it('previews as an 8-bit greyscale image of the same size', () => {
     const r = renderLenticular([RED, BLUE], settings());
     const preview = depthPreview(r);
-    expect(preview.width).toBe(r.width);
-    expect(preview.height).toBe(r.height);
-    const i = (0 * r.width + 5) * 4;
+    expect(preview.width).toBe(r.depthWidth);
+    expect(preview.height).toBe(r.depthHeight);
+    const i = (0 * r.depthWidth + 5) * 4;
     expect(preview.data[i]).toBe(r.depth[5] >>> 8);
     expect(preview.data[i]).toBe(preview.data[i + 1]);
     expect(preview.data[i + 3]).toBe(255);
@@ -274,9 +348,9 @@ describe('calibration sheets', () => {
     // Band 0 (top half) has 10 px lenticules, band 1 (bottom half) has 5 px:
     // the peak of band 1's second lenticule lands where band 0 has a trough.
     const topEdge = depthAt(r, 0, 5);
-    const bottomEdge = depthAt(r, 0, r.height - 5);
+    const bottomEdge = depthAt(r, 0, r.depthHeight - 5);
     expect(depthAt(r, 5, 5)).toBeGreaterThan(topEdge);
-    expect(depthAt(r, 5, r.height - 5)).toBeCloseTo(bottomEdge, -2);
+    expect(depthAt(r, 5, r.depthHeight - 5)).toBeCloseTo(bottomEdge, -2);
   });
 
   it('normalises every band against the tallest stack on the sheet', () => {
@@ -286,18 +360,20 @@ describe('calibration sheets', () => {
     expect(r.depthScaleMm).toBeCloseTo(3, 6);
     // The shorter band must not reach full white — that comparability is the
     // whole point of a height calibration sheet.
-    const shortBandPeak = maxOf(r.depth.slice(0, r.width * 20));
+    const shortBandPeak = maxOf(r.depth.slice(0, r.depthWidth * 20));
     expect(shortBandPeak).toBeLessThan(65535 * 0.45);
   });
 
-  it('leaves a blank gutter between bands', () => {
-    const r = renderLenticular([RED, BLUE], settings(), {
+  it('leaves a blank gutter between bands, in millimetres on both rasters', () => {
+    // 1 mm of gutter on a 25.4 mm sheet: just under 4 px of the 100 px rasters.
+    const r = renderAt([RED, BLUE], settings(), {
       calibration: { param: 'lpi', min: 10, max: 20, bands: 2 },
-      bandGapPx: 3,
+      bandGapMm: 1,
     });
     expect(depthAt(r, 5, 0)).toBe(0);
     expect(pixelAt(r.interlaced, 5, 0)).toEqual([255, 255, 255]);
     expect(depthAt(r, 5, 4)).toBeGreaterThan(0);
+    expect(pixelAt(r.interlaced, 5, 4)).not.toEqual([255, 255, 255]);
   });
 });
 
@@ -355,10 +431,10 @@ describe('auto height for an LPI sweep', () => {
     });
     // Coarse band keeps the settings' own height and sets the scale…
     expect(r.depthScaleMm).toBeCloseTo(5, 6);
-    expect(maxOf(r.depth.slice(0, r.width * 40))).toBeGreaterThan(65000);
+    expect(maxOf(r.depth.slice(0, r.depthWidth * 40))).toBeGreaterThan(65000);
     // …the 20 LPI band needs half the stack for the same cone, so it tops out
     // at half the depth value.
-    const fineBandPeak = maxOf(r.depth.slice(r.width * 60));
+    const fineBandPeak = maxOf(r.depth.slice(r.depthWidth * 60));
     expect(fineBandPeak / 65535).toBeCloseTo(0.5, 2);
   });
 });
@@ -382,38 +458,44 @@ describe('switchFrames', () => {
   });
 
   it('interlaces into a hard black/white switch on the artwork raster', () => {
-    const art = createImage(40, 10, [12, 34, 56, 255]);
     const s = settings();
-    const size = outputSize(s, art);
-    const r = renderLenticular(switchFrames(2), s, { size });
-    // Same raster as the artwork sheet, so the two overlay exactly…
-    expect(r.width).toBe(size.width);
-    expect(r.height).toBe(size.height);
-    // …and each lenticule is half white, half black.
-    for (let x = 0; x < 5; x++) expect(pixelAt(r.interlaced, x, 0)).toEqual([255, 255, 255]);
-    for (let x = 5; x < 10; x++) expect(pixelAt(r.interlaced, x, 0)).toEqual([0, 0, 0]);
+    // The 1×1 switch frames carry no aspect of their own, so the artwork's
+    // raster is handed in — that is what makes the two sheets overlay.
+    const artwork = createImage(400, 100, [12, 34, 56, 255]);
+    const size = interlacedSize(s, [artwork, artwork]);
+    const img = renderInterlaced(switchFrames(2), s, { interlacedSize: size });
+    expect(img.width).toBe(size.width);
+    expect(img.height).toBe(size.height);
+    // Each lenticule is half white, half black. 400 px over 10 lenticules.
+    for (let x = 0; x < 20; x++) expect(pixelAt(img, x, 0)).toEqual([255, 255, 255]);
+    for (let x = 20; x < 40; x++) expect(pixelAt(img, x, 0)).toEqual([0, 0, 0]);
   });
 });
 
 describe('describeGeometry', () => {
-  const size = { width: 5669, height: 4252 };
+  const depth = { width: 5669, height: 4252 };
+  const art = { width: 1418, height: 1063 };
 
-  it('summarises pitch, sag, base and viewing angle', () => {
-    const s = settings({ lpi: 45, ppi: 1440, heightMm: 0.9 });
-    const text = describeGeometry(s, lensGeometry(s), 2, size);
+  it('reports both rasters, and the pitch on each', () => {
+    const s = settings({ widthMm: 100, lpi: 45, ppi: 1440, heightMm: 0.9 });
+    const text = describeGeometry(s, lensGeometry(s), 2, depth, art);
     expect(text).toContain('2 frames');
-    expect(text).toContain('5669×4252 px @ 1440 PPI');
-    expect(text).toContain('16.00 px per frame strip');
+    expect(text).toContain('Depth map 5669×4252 px @ 1440 PPI');
+    expect(text).toContain('artwork 1418×1063 px');
+    expect(text).toContain('32.00 px of lens profile'); // 1440 / 45
+    expect(text).toContain('4.00 px per frame strip'); // 1418 px / 177 lenticules / 2
     expect(text).not.toContain('⚠');
   });
 
   it('warns when the lens cannot focus in the given height', () => {
     const s = settings({ lpi: 45, ppi: 1440, heightMm: 0.4 });
-    expect(describeGeometry(s, lensGeometry(s), 2, size)).toContain('cannot focus');
+    expect(describeGeometry(s, lensGeometry(s), 2, depth, art)).toContain('cannot focus');
   });
 
-  it('warns when a frame strip is too thin to print', () => {
-    const s = settings({ lpi: 100, ppi: 300 });
-    expect(describeGeometry(s, lensGeometry(s), 4, size)).toContain('per frame strip — raise PPI');
+  it('warns when the printer raster is too coarse to shape the lens', () => {
+    const s = settings({ lpi: 100, ppi: 300 }); // 3 px per lenticule
+    expect(describeGeometry(s, lensGeometry(s), 4, depth, art)).toContain(
+      'the printed lens will be terraced',
+    );
   });
 });

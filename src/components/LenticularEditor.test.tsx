@@ -52,6 +52,13 @@ describe('LenticularEditor', () => {
     expect(screen.getByText('Flat base under lens')).toBeInTheDocument();
   });
 
+  it('reports the two rasters separately once frames are connected', async () => {
+    const id = await graphWithFrames(); // 25.4 mm, 100 PPI, 10 LPI, 2 frames
+    render(<LenticularEditor nodeId={id} />);
+    expect(screen.getByText('100 × 100 px @ 100 PPI')).toBeInTheDocument(); // the lens
+    expect(screen.getByText('40 × 40 px')).toBeInTheDocument(); // the artwork
+  });
+
   it('asks for frames and disables the downloads until two are connected', () => {
     const id = s().addNode('lenticular');
     render(<LenticularEditor nodeId={id} />);

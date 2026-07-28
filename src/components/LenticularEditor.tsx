@@ -6,13 +6,15 @@ import { downloadBlob } from '../lib/download';
 import { encodeGray16Png } from '../lib/png16';
 import {
   calibrationValues,
+  interlacedSize,
   lensGeometry,
   outputSize,
-  renderLenticular,
+  renderDepthMap,
+  renderInterlaced,
   switchFrames,
   type CalibrationParam,
   type CalibrationSpec,
-  type LenticularRender,
+  type DepthMapResult,
 } from '../lib/lenticular';
 import { settingsFromConfig } from '../nodes/lenticular';
 import { bool, num } from '../nodes/helpers';
@@ -51,7 +53,8 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
   if (!node) return null;
   const settings = settingsFromConfig(node.config);
   const geometry = lensGeometry(settings);
-  const size = frames[0] ? outputSize(settings, frames[0]) : null;
+  const depthSize = frames[0] ? outputSize(settings, frames[0]) : null;
+  const artSize = frames.length >= 2 ? interlacedSize(settings, frames) : null;
   const mm = (v: number) => `${v.toFixed(3)} mm`;
 
   const autoHeight = bool(node.config.lpiAutoHeight, true);
@@ -63,8 +66,8 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
     autoHeight,
   });
 
-  const downloadDepth16 = (render: LenticularRender, name: string) => {
-    const png = encodeGray16Png(render.width, render.height, render.depth);
+  const downloadDepth16 = (map: DepthMapResult, name: string) => {
+    const png = encodeGray16Png(map.width, map.height, map.depth);
     downloadBlob(new Blob([png as BlobPart], { type: 'image/png' }), name);
   };
 
@@ -84,34 +87,36 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
 
   const downloadMain = () =>
     run('depth', async () => {
-      const render = renderLenticular(frames, settings);
-      downloadDepth16(render, `lenticular-depth16-${settings.lpi}lpi-${slug(settings.heightMm)}mm.png`);
+      const map = renderDepthMap(frames, settings);
+      downloadDepth16(map, `lenticular-depth16-${settings.lpi}lpi-${slug(settings.heightMm)}mm.png`);
     });
+
+  // A blank gutter keeps neighbouring bands from bleeding into each other on
+  // press, so a band that flips cleanly is unambiguous.
+  const BAND_GAP_MM = 0.4;
 
   const downloadCalibration = (calib: (typeof CALIBRATIONS)[number]) =>
     run(calib.param, async () => {
       const spec = calibrationSpec(calib);
       const values = calibrationValues(spec);
-      // A blank gutter (~0.4 mm) keeps neighbouring bands from bleeding into
-      // each other on press, so a band that flips cleanly is unambiguous.
-      const bandGapPx = Math.round((settings.ppi / 25.4) * 0.4);
-      const render = renderLenticular(frames, settings, { calibration: spec, bandGapPx });
+      const options = { calibration: spec, bandGapMm: BAND_GAP_MM };
+      const art = renderInterlaced(frames, settings, options);
       const stem = `lenticular-calib-${calib.param}-${slug(values[0])}-to-${slug(values[values.length - 1])}-${values.length}bands`;
-      downloadBlob(await platform.encodePngBlob(render.interlaced), `${stem}-interlaced.png`);
+      downloadBlob(await platform.encodePngBlob(art), `${stem}-interlaced.png`);
 
       // The same sheet with the artwork replaced by a hard white→black switch:
       // where the print flips, with none of the art's own detail in the way.
       // Forced onto the artwork's raster so the two sheets overlay exactly.
-      const switched = renderLenticular(switchFrames(frames.length), settings, {
-        calibration: spec,
-        bandGapPx,
-        size: { width: render.width, height: render.height },
+      const switched = renderInterlaced(switchFrames(frames.length), settings, {
+        ...options,
+        interlacedSize: { width: art.width, height: art.height },
       });
-      downloadBlob(await platform.encodePngBlob(switched.interlaced), `${stem}-switch.png`);
+      downloadBlob(await platform.encodePngBlob(switched), `${stem}-switch.png`);
 
       // The depth scale rides in the filename: with auto height each LPI band
       // gets its own stack, so "what does white mean" changes per sheet.
-      downloadDepth16(render, `${stem}-depth16-max${slug(render.depthScaleMm)}mm.png`);
+      const map = renderDepthMap(frames, settings, options);
+      downloadDepth16(map, `${stem}-depth16-max${slug(map.scaleMm)}mm.png`);
     });
 
   return (
@@ -133,8 +138,10 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
         <dd>{mm(geometry.focusMm)}</dd>
         <dt>Viewing angle</dt>
         <dd>{geometry.viewAngleDeg.toFixed(1)}°</dd>
-        <dt>Output</dt>
-        <dd>{size ? `${size.width} × ${size.height} px` : '— connect frames'}</dd>
+        <dt>Depth map</dt>
+        <dd>{depthSize ? `${depthSize.width} × ${depthSize.height} px @ ${settings.ppi} PPI` : '—'}</dd>
+        <dt>Artwork</dt>
+        <dd>{artSize ? `${artSize.width} × ${artSize.height} px` : '— connect frames'}</dd>
       </dl>
 
       {!geometry.feasible && (
@@ -154,7 +161,9 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
       <h4>Downloads</h4>
       <p className="lenticular-note">
         The 16-bit depth map is the printable gloss height field: 65535 = {mm(geometry.totalMm)}. The
-        node&apos;s Gloss depth output is an 8-bit preview only.
+        node&apos;s Gloss depth output is an 8-bit preview only. It stays on the PPI raster because it{' '}
+        <em>is</em> the lens; the interlaced artwork is flat ink, so it ships at the smallest size that keeps
+        both the interlace and your source resolution — scale it to the sheet in the printing tool.
       </p>
       <div className="lenticular-actions">
         <button type="button" className="btn" disabled={frames.length < 2 || !!busy} onClick={downloadMain}>
