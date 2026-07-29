@@ -3,6 +3,7 @@ import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
 import { PreviewModal } from './components/PreviewModal';
 import { SettingsModal } from './components/SettingsModal';
+import { HelpModal } from './components/HelpModal';
 import { Toasts } from './components/Toasts';
 import { escapeTarget, handleShortcut, type ShortcutEvent } from './components/keyboard';
 import { decodeGraphFromHash } from './lib/shareLink';
@@ -27,11 +28,13 @@ export default function App() {
       const s = useStore.getState();
       if (e.key === 'Escape') {
         const target = escapeTarget({
+          hasHelp: !!s.helpNodeType,
           hasPreview: !!s.preview,
           hasEditor: !!s.editorNodeId,
           hasPending: !!s.pendingConnection,
         });
-        if (target === 'preview') s.closePreview();
+        if (target === 'help') s.openHelp(null);
+        else if (target === 'preview') s.closePreview();
         else if (target === 'editor') s.openEditor(null);
         else if (target === 'pending') s.cancelPendingConnection();
         if (target) e.preventDefault();
@@ -65,6 +68,7 @@ export default function App() {
       </main>
       <PreviewModal />
       <SettingsModal />
+      <HelpModal />
       <Toasts />
     </div>
   );

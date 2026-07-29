@@ -53,13 +53,16 @@ export interface EscapeState {
   hasPreview: boolean;
   hasEditor: boolean;
   hasPending: boolean;
+  hasHelp?: boolean;
 }
 
 /**
- * What a top-level Escape should dismiss, most-modal first: the preview modal,
- * then the settings editor, then an in-progress connection. `null` = nothing.
+ * What a top-level Escape should dismiss, most-modal first: the help window,
+ * then the preview modal, then the settings editor, then an in-progress
+ * connection. `null` = nothing.
  */
-export function escapeTarget(s: EscapeState): 'preview' | 'editor' | 'pending' | null {
+export function escapeTarget(s: EscapeState): 'help' | 'preview' | 'editor' | 'pending' | null {
+  if (s.hasHelp) return 'help';
   if (s.hasPreview) return 'preview';
   if (s.hasEditor) return 'editor';
   if (s.hasPending) return 'pending';

@@ -415,31 +415,49 @@ textarea {
   flex-direction: column;
   gap: 6px;
 }
+/* Label left, control right, and the control column is exactly half the node —
+   every field lines up regardless of what kind of control it holds. */
 .config-field {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 50%;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
 .config-field .config-label {
   color: var(--text-dim);
   font-size: 11px;
+  /* Long labels shorten rather than pushing the control out of alignment. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.config-field select,
-.config-field input[type='text'] {
-  flex: 1 1 auto;
-  min-width: 90px;
-  max-width: 170px;
-}
-.config-field input[type='number'] {
-  width: 74px;
-}
-.config-field textarea {
+.config-field > :not(.config-label) {
   width: 100%;
+  min-width: 0;
 }
+.config-field input[type='color'] {
+  height: 26px;
+  padding: 2px;
+}
+/* A stretched checkbox is just a big square: keep it its own size, parked at
+   the start of the same half-width column so the fields still read as a grid. */
+.config-field input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  justify-self: start;
+}
+/* A textarea gets the whole width, with its label above it. */
 .config-field:has(textarea) {
-  flex-direction: column;
-  align-items: stretch;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+/* Half of a node is a sensible control; half of a 720px modal is not — there
+   the controls share one fixed column instead. */
+.modal .config-field {
+  grid-template-columns: 1fr 220px;
+}
+.modal .config-field:has(textarea) {
+  grid-template-columns: 1fr;
 }
 .config-advanced {
   margin-top: 4px;
@@ -698,6 +716,101 @@ textarea {
   padding: 16px;
   overflow: auto;
 }
+/* ---------------- Node help window ---------------- */
+.help-modal {
+  width: 720px;
+}
+.help-body {
+  font-size: 13px;
+  line-height: 1.55;
+}
+.help-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.help-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.help-badge-ai {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.help-summary {
+  margin: 0 0 4px;
+}
+.help-heading {
+  margin: 18px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+.help-uses,
+.help-tips {
+  margin: 0;
+  padding-left: 18px;
+}
+.help-uses li,
+.help-tips li {
+  margin-bottom: 8px;
+}
+.help-chain {
+  margin-top: 3px;
+  padding: 3px 8px;
+  border-left: 2px solid var(--accent);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.help-ports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.help-ports-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.help-port {
+  padding: 3px 0;
+}
+.help-port-none {
+  color: var(--text-dim);
+}
+.help-port-type,
+.help-port-flag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.help-port-flag {
+  color: var(--accent);
+}
+.help-settings,
+.help-description {
+  color: var(--text-dim);
+}
+.help-description {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
 .preview-body {
   display: flex;
   flex-direction: column;

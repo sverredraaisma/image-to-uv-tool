@@ -310,6 +310,134 @@ export const EXAMPLES: Example[] = [
     },
   },
   {
+    name: 'Lenticular → two-frame flip',
+    description:
+      'The plain lenticular job: two frames interlaced under a lens array, so tilting the sheet swaps a ' +
+      'dot for a ring. Press Run ▶ — it renders the artwork and the gloss lens map that focuses on it.',
+    graph: {
+      version: 1,
+      nodes: [
+        // Two frames that are unmistakably different at a glance, built from
+        // local nodes so the example computes without an upload.
+        {
+          id: 'dot',
+          type: 'radialGradient',
+          position: { x: 60, y: 90 },
+          config: {
+            width: 512,
+            height: 512,
+            mode: 'radial',
+            from: '#ffffff',
+            to: '#000000',
+            radius: 0.45,
+            innerRadius: 0,
+            angle: 0,
+            feather: 0.05,
+          },
+        },
+        {
+          id: 'ring',
+          type: 'radialGradient',
+          position: { x: 60, y: 330 },
+          config: {
+            width: 512,
+            height: 512,
+            mode: 'ring',
+            from: '#000000',
+            to: '#ffffff',
+            radius: 0.82,
+            innerRadius: 0.56,
+            angle: 0,
+            feather: 0.03,
+          },
+        },
+        {
+          id: 'print',
+          type: 'lenticular',
+          position: { x: 420, y: 200 },
+          // Small and coarse so Run stays quick: a 1181 px lens map, not 32 MP.
+          // 50 LPI needs at least 0.762 mm of gloss to focus, so 0.9 is fine.
+          config: {
+            widthMm: 50,
+            ppi: 600,
+            lpi: 50,
+            phase: 0,
+            heightMm: 0.9,
+            ri: 1.5,
+            orientationDeg: 0,
+            stripSamples: 2,
+            calibBands: 9,
+            heightMin: 0.6,
+            heightMax: 1.4,
+            riMin: 1.4,
+            riMax: 1.6,
+            lpiMin: 40,
+            lpiMax: 60,
+            lpiAutoHeight: true,
+          },
+        },
+      ],
+      // Frames interlace in connection order: dot first, ring second.
+      edges: [wire('dot', 'print', 'out', 'frames'), wire('ring', 'print', 'out', 'frames')],
+    },
+  },
+  {
+    name: 'Lenticular → animated fireplace',
+    description:
+      'A whole GIF printed as one lenticular: the fire loop is resampled to 6 frames, and tilting the ' +
+      'sheet plays the animation and repeats it. Press Run ▶ on the print node.',
+    graph: {
+      version: 1,
+      nodes: [
+        {
+          id: 'gif',
+          type: 'animationInput',
+          position: { x: 60, y: 200 },
+          config: {
+            // Shipped in public/, so the example runs with no upload.
+            src: '/fireplace-fire.gif',
+            srcRef: '',
+            name: 'fireplace-fire.gif',
+            // 6 frames fit comfortably under a 50 LPI lens at 600 PPI with two
+            // artwork pixels per strip (600 ÷ 50 ÷ 2 = 6).
+            frameCount: 6,
+            loop: 'forward',
+            maxSize: 512,
+            cycles: 1,
+            reverse: false,
+            ppi: 600,
+            lpi: 50,
+          },
+        },
+        {
+          id: 'print',
+          type: 'lenticular',
+          position: { x: 420, y: 200 },
+          config: {
+            widthMm: 50,
+            ppi: 600,
+            lpi: 50,
+            phase: 0,
+            heightMm: 0.9,
+            ri: 1.5,
+            orientationDeg: 0,
+            stripSamples: 2,
+            calibBands: 9,
+            heightMin: 0.6,
+            heightMax: 1.4,
+            riMin: 1.4,
+            riMax: 1.6,
+            lpiMin: 40,
+            lpiMax: 60,
+            lpiAutoHeight: true,
+          },
+        },
+      ],
+      // One wire carries every frame: the Sequence expands inside the print.
+      edges: [wire('gif', 'print', 'frames', 'frames')],
+    },
+  },
+  {
     name: 'Lens Grid → loading spinner',
     description:
       'The web loading spinner, printed: a ring of 12 graduated ticks on a 2×2 lens grid, so the bright ' +

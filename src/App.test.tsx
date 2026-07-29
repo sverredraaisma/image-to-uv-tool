@@ -60,4 +60,20 @@ describe('App smoke test', () => {
     await userEvent.click(screen.getByText('Prompt Input'));
     expect(screen.queryByText('Start building')).not.toBeInTheDocument();
   });
+
+  it('every node carries a ? button that opens its help window', () => {
+    useStore.getState().loadGraph({
+      version: 1,
+      nodes: [{ id: 'p', type: 'promptInput', position: { x: 0, y: 0 }, config: {} }],
+      edges: [],
+    });
+    render(<App />);
+    // fireEvent, not userEvent: a real mousedown inside the canvas starts React
+    // Flow's d3 drag, which has nowhere to go in jsdom.
+    fireEvent.click(screen.getByLabelText('What is Prompt Input for?'));
+    expect(screen.getByText('Prompt Input · what is this?')).toBeInTheDocument();
+    expect(screen.getByText("What it's for")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByText('Prompt Input · what is this?')).not.toBeInTheDocument();
+  });
 });

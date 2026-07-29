@@ -229,6 +229,11 @@ export interface StoreState {
    */
   nodeSizes: (() => Record<string, { width: number; height: number }>) | null;
   editorNodeId: string | null;
+  /**
+   * Node *type* whose help window is open (help is per definition, not per
+   * instance), so deleting the node it was opened from can't strand it.
+   */
+  helpNodeType: string | null;
   preview: PreviewState | null;
   toasts: Toast[];
   /** Bumped by autoFormat so the canvas can re-fit the view. Runtime-only. */
@@ -283,6 +288,8 @@ export interface StoreState {
   setViewportCenter: (fn: (() => { x: number; y: number }) | null) => void;
   setNodeSizes: (fn: (() => Record<string, { width: number; height: number }>) | null) => void;
   openEditor: (id: string | null) => void;
+  /** Open (or close, with null) the help window for a node type. */
+  openHelp: (type: string | null) => void;
   openPreview: (value: DataValue, title: string) => void;
   /**
    * Preview a node's output at full resolution. If it's already up to date the
@@ -372,6 +379,7 @@ export const useStore = create<StoreState>()(
       viewportCenter: null,
       nodeSizes: null,
       editorNodeId: null,
+      helpNodeType: null,
       preview: null,
       toasts: [],
       arrangeNonce: 0,
@@ -733,6 +741,10 @@ export const useStore = create<StoreState>()(
       setViewportCenter: (fn) => set({ viewportCenter: fn }),
       setNodeSizes: (fn) => set({ nodeSizes: fn }),
       openEditor: (id) => set({ editorNodeId: id }),
+      // Only a type the registry can actually render help for is allowed to
+      // land here: an unknown one would leave the app believing a window is
+      // open (swallowing Escape) while nothing is on screen.
+      openHelp: (type) => set({ helpNodeType: type && getNodeDefSafe(type) ? type : null }),
       openPreview: (value, title) => {
         previewToken++; // supersede any pending on-demand render
         set({ preview: { value, title } });
