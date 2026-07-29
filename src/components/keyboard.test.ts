@@ -59,7 +59,8 @@ describe('handleShortcut', () => {
 });
 
 describe('escapeTarget', () => {
-  it('prioritises preview > editor > pending, else null', () => {
+  it('prioritises help > preview > editor > pending, else null', () => {
+    expect(escapeTarget({ hasHelp: true, hasPreview: true, hasEditor: true, hasPending: true })).toBe('help');
     expect(escapeTarget({ hasPreview: true, hasEditor: true, hasPending: true })).toBe('preview');
     expect(escapeTarget({ hasPreview: false, hasEditor: true, hasPending: true })).toBe('editor');
     expect(escapeTarget({ hasPreview: false, hasEditor: false, hasPending: true })).toBe('pending');

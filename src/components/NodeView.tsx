@@ -47,6 +47,7 @@ export function NodeView({ id, selected }: NodeProps) {
   const toggleBypass = useStore((s) => s.toggleBypass);
   const removeNode = useStore((s) => s.removeNode);
   const openEditor = useStore((s) => s.openEditor);
+  const openHelp = useStore((s) => s.openHelp);
   const openPreview = useStore((s) => s.openPreview);
   const requestPreview = useStore((s) => s.requestPreview);
   const updateNodeConfig = useStore((s) => s.updateNodeConfig);
@@ -157,6 +158,15 @@ export function NodeView({ id, selected }: NodeProps) {
           </span>
         )}
         <span className="node-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            title="What is this node for?"
+            aria-label={`What is ${def.label} for?`}
+            onClick={() => openHelp(node.type)}
+          >
+            ?
+          </button>
           <button
             type="button"
             className="icon-btn"

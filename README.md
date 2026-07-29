@@ -37,6 +37,9 @@ Then open the dev server URL. Paste your Replicate API key in the top-left field
   selected node.
 - Every input and output shows a **small preview**. Click it to open a large view
   with a **Download** button (PNG for images, `.stl` for meshes, `.txt` for text).
+  A Sequence (a decoded animation) plays back there, with a frame slider.
+- **?** on any node header opens its help window: what the node is, one or more
+  worked examples of what people build with it, its ports and its settings.
 
 ### Up-to-date vs. out-of-date
 

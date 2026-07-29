@@ -698,6 +698,101 @@ textarea {
   padding: 16px;
   overflow: auto;
 }
+/* ---------------- Node help window ---------------- */
+.help-modal {
+  width: 720px;
+}
+.help-body {
+  font-size: 13px;
+  line-height: 1.55;
+}
+.help-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.help-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.help-badge-ai {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.help-summary {
+  margin: 0 0 4px;
+}
+.help-heading {
+  margin: 18px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+.help-uses,
+.help-tips {
+  margin: 0;
+  padding-left: 18px;
+}
+.help-uses li,
+.help-tips li {
+  margin-bottom: 8px;
+}
+.help-chain {
+  margin-top: 3px;
+  padding: 3px 8px;
+  border-left: 2px solid var(--accent);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.help-ports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.help-ports-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.help-port {
+  padding: 3px 0;
+}
+.help-port-none {
+  color: var(--text-dim);
+}
+.help-port-type,
+.help-port-flag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.help-port-flag {
+  color: var(--accent);
+}
+.help-settings,
+.help-description {
+  color: var(--text-dim);
+}
+.help-description {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
 .preview-body {
   display: flex;
   flex-direction: column;
