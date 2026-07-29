@@ -15,22 +15,36 @@ export function ValuePreview({
   /** Allow clicking even without a cached value (to render it on demand). */
   renderable?: boolean;
 }) {
+  // A sequence previews as its first frame with a frame-count badge.
+  const frame = value?.kind === 'sequence' ? value.frames[0] : value?.kind === 'image' ? value : null;
+
   const thumb = useMemo(() => {
-    if (value?.kind === 'image') {
+    if (frame) {
       try {
-        return rasterToThumbnail(value, size * 2);
+        return rasterToThumbnail(frame, size * 2);
       } catch {
         return null;
       }
     }
     return null;
-  }, [value, size]);
+  }, [frame, size]);
 
   const style = { width: size, height: size };
 
   let inner;
   if (!value) {
     inner = <span className="preview-empty">–</span>;
+  } else if (value.kind === 'sequence') {
+    inner = (
+      <>
+        {thumb ? (
+          <img src={thumb} alt="preview" className="preview-img" />
+        ) : (
+          <span className="preview-empty">▦</span>
+        )}
+        <span className="preview-badge">×{value.frames.length}</span>
+      </>
+    );
   } else if (value.kind === 'image' && thumb) {
     inner = <img src={thumb} alt="preview" className="preview-img" />;
   } else if (value.kind === 'text') {

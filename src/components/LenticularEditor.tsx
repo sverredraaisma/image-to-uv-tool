@@ -256,7 +256,11 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
       const values = s.edges
         .filter((e) => e.target === nodeId && e.targetHandle === 'frames')
         .map((e) => s.runtime[e.source]?.outputs?.[e.sourceHandle]);
-      return values.filter((v): v is RasterImage => !!v && v.kind === 'image');
+      // A Sequence on one wire (a decoded GIF) contributes all of its frames,
+      // in order — the same flattening the node itself does.
+      return values.flatMap((v) =>
+        v?.kind === 'sequence' ? v.frames : v?.kind === 'image' ? [v as RasterImage] : [],
+      );
     }),
   );
 

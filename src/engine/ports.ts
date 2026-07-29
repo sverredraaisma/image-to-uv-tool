@@ -8,7 +8,7 @@
 import type { NodeConfig, NodeDefinition, PortSpec, PortType } from '../types';
 import { DEFAULT_GRID, clampGrid, gridCells } from '../lib/lenticular';
 
-const PORT_TYPES: readonly PortType[] = ['image', 'mask', 'text', 'stl'];
+const PORT_TYPES: readonly PortType[] = ['image', 'mask', 'text', 'stl', 'sequence'];
 
 export function asPortType(v: unknown, fallback: PortType = 'image'): PortType {
   return typeof v === 'string' && (PORT_TYPES as readonly string[]).includes(v) ? (v as PortType) : fallback;

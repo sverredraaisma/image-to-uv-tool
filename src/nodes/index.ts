@@ -1,5 +1,6 @@
 import { registerNode, allNodeDefs } from '../engine/registry';
 import { localNodes } from './local';
+import { animationNodes } from './animation';
 import { aiNodes } from './ai';
 import { llmNodes } from './llm';
 import { lenticularNodes } from './lenticular';
@@ -13,6 +14,7 @@ export function registerBuiltinNodes(): void {
   if (registered) return;
   const all = [
     ...localNodes,
+    ...animationNodes,
     ...aiNodes,
     ...llmNodes,
     ...lenticularNodes,

@@ -68,6 +68,14 @@ export function NodeView({ id, selected }: NodeProps) {
   const inlineFields = (def.configFields ?? []).filter((f) => !f.advanced);
   const hasPopup = (def.configFields ?? []).some((f) => f.advanced) || !!def.customEditor;
 
+  // The two nodes whose source is an uploaded file rather than a config value.
+  const upload =
+    node.type === 'imageInput'
+      ? { accept: 'image/*', label: 'Upload image…' }
+      : node.type === 'animationInput'
+        ? { accept: 'image/gif,image/webp,image/apng,image/png,image/*', label: 'Upload animation…' }
+        : null;
+
   const portClass = (side: ConnectionSide, portId: string) => {
     let cls = `port port-${side}`;
     if (pending) {
@@ -186,13 +194,13 @@ export function NodeView({ id, selected }: NodeProps) {
       </div>
 
       <div className="node-body">
-        {node.type === 'imageInput' && (
+        {upload && (
           <div className="image-upload nodrag">
             <label className="upload-btn">
-              {String(node.config.name || '') || 'Upload image…'}
+              {String(node.config.name || '') || upload.label}
               <input
                 type="file"
-                accept="image/*"
+                accept={upload.accept}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;

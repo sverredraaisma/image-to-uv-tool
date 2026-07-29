@@ -63,7 +63,16 @@ export function findReadyAutoNodes(
 }
 
 const kindForPort = (t: PortSpec['type']): DataValue['kind'] =>
-  t === 'text' ? 'text' : t === 'stl' ? 'stl' : 'image';
+  t === 'text' ? 'text' : t === 'stl' ? 'stl' : t === 'sequence' ? 'sequence' : 'image';
+
+/**
+ * Can this value stand in for a port of that kind when bypassing? Exact kind
+ * normally, plus the image/sequence equivalence the ports themselves allow.
+ */
+const fits = (value: DataValue, want: DataValue['kind']): boolean =>
+  value.kind === want ||
+  (want === 'image' && value.kind === 'sequence') ||
+  (want === 'sequence' && value.kind === 'image');
 
 /**
  * Outputs for a muted (bypassed) node: forward the first type-compatible input
@@ -81,7 +90,7 @@ export function bypassOutputs(
     for (const p of inputPorts) {
       const raw = inputs[p.id];
       const val = Array.isArray(raw) ? raw[0] : raw;
-      if (val && val.kind === want) {
+      if (val && fits(val, want)) {
         result[o.id] = val;
         break;
       }

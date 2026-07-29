@@ -1,15 +1,33 @@
-import type { DataValue, RasterImage, TextValue } from '../types';
+import type { DataValue, RasterImage, SequenceValue, TextValue } from '../types';
 
-/** Coerce a resolved input to a single image (first if it was a `multiple`). */
+/**
+ * Coerce a resolved input to a single image (first if it was a `multiple`).
+ * A sequence collapses to its first frame, so every single-image node keeps
+ * working when an animation is wired into it.
+ */
 export function asImage(value: DataValue | DataValue[] | undefined): RasterImage | undefined {
   const v = Array.isArray(value) ? value[0] : value;
+  if (v?.kind === 'sequence') return v.frames[0];
   return v && v.kind === 'image' ? v : undefined;
 }
 
-/** Coerce a resolved input to an array of images. */
+/** Coerce a resolved input to an array of images, flattening any sequences. */
 export function asImages(value: DataValue | DataValue[] | undefined): RasterImage[] {
   const arr = Array.isArray(value) ? value : value ? [value] : [];
-  return arr.filter((v): v is RasterImage => v.kind === 'image');
+  const out: RasterImage[] = [];
+  for (const v of arr) {
+    if (v.kind === 'image') out.push(v);
+    else if (v.kind === 'sequence') out.push(...v.frames);
+  }
+  return out;
+}
+
+/** Coerce a resolved input to a sequence; a lone image becomes one frame. */
+export function asSequence(value: DataValue | DataValue[] | undefined): SequenceValue | undefined {
+  const v = Array.isArray(value) ? value[0] : value;
+  if (v?.kind === 'sequence') return v;
+  if (v?.kind === 'image') return { kind: 'sequence', frames: [v] };
+  return undefined;
 }
 
 export function asText(value: DataValue | DataValue[] | undefined): string | undefined {

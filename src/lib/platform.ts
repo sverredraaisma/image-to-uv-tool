@@ -4,10 +4,16 @@
 
 import type { NodeConfig, RasterImage, StlValue } from '../types';
 import type { HeightmapOptions } from './stl';
+import type { DecodedAnimation } from './gif';
 
 export interface Platform {
   /** Decode a data URL / object URL / http URL into a raster image. */
   decodeImage(src: string): Promise<RasterImage>;
+  /**
+   * Decode an animated image (GIF / animated WebP / APNG) into its composited
+   * frames. A still image decodes to a single frame.
+   */
+  decodeAnimation(src: string, maxFrames?: number): Promise<DecodedAnimation>;
   /** Encode as a PNG data URL. */
   encodePng(img: RasterImage): string;
   /** Encode as a PNG Blob (for downloads). */
@@ -30,6 +36,7 @@ const notReady = (): never => {
 
 export const platform: Platform = {
   decodeImage: notReady,
+  decodeAnimation: notReady,
   encodePng: notReady,
   encodePngBlob: notReady,
   fetchImage: notReady,

@@ -33,7 +33,8 @@ export const lenticularNode: NodeDefinition = {
   category: 'UV',
   description:
     'Interlace 2+ images under a lens array and emit the gloss lens array that focuses on them. ' +
-    'Connect the frames in viewing order. Height/RI/LPI decide the lens sag and the flat base beneath it; ' +
+    'Connect the frames in viewing order, or wire in a single Animation Input Sequence to print a whole ' +
+    'GIF — its frames expand in place. Height/RI/LPI decide the lens sag and the flat base beneath it; ' +
     'open the editor for the 16-bit depth map and Height/RI/LPI calibration sheets. ' +
     'The depth map is on the PPI raster (it is the lens); the artwork is only as big as the interlace and ' +
     'the source images need — scale it to the sheet at print time. Manual: click Run.',

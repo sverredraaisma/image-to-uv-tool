@@ -6,7 +6,7 @@
 // (uploading a file, rendering a preview, talking to Replicate).
 
 /** Semantic type of a port, used for connection-compatibility checks. */
-export type PortType = 'image' | 'mask' | 'text' | 'stl';
+export type PortType = 'image' | 'mask' | 'text' | 'stl' | 'sequence';
 
 /** A raw RGBA raster image. `data` length must equal width * height * 4. */
 export interface RasterImage {
@@ -28,8 +28,24 @@ export interface StlValue {
   triangles: Float32Array;
 }
 
+/**
+ * An ordered bundle of frames travelling down a single edge — a decoded GIF /
+ * animated WebP, or any other run of images that belong together.
+ *
+ * It exists so one wire can carry a whole animation: the lenticular node takes
+ * N frames, and dragging N edges out of an animation by hand would be absurd.
+ * Nodes that only understand one image take the first frame (see `asImage`),
+ * which keeps every existing image node usable with a sequence plugged in.
+ */
+export interface SequenceValue {
+  kind: 'sequence';
+  frames: RasterImage[];
+  /** Per-frame display duration in ms; same length as `frames`. */
+  delaysMs?: number[];
+}
+
 /** Any value that can travel along an edge / sit on a port. */
-export type DataValue = RasterImage | TextValue | StlValue;
+export type DataValue = RasterImage | TextValue | StlValue | SequenceValue;
 
 /** Kind string of a DataValue, for runtime checks. */
 export type DataKind = DataValue['kind'];
