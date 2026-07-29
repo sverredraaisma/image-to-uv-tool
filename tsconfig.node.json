@@ -13,7 +13,13 @@
 
     "strict": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+
+    // vite.config.ts is run by Node, so it needs Node's globals (process.env).
+    // Pinned explicitly: without a `types` list TypeScript pulls in every
+    // @types package it can reach — including any in a *parent* directory of
+    // the checkout, which is machine-specific and absent in CI.
+    "types": ["node"]
   },
   "include": ["vite.config.ts"]
 }

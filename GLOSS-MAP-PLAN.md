@@ -3,12 +3,12 @@
 Goal: given an arbitrary input artwork, produce a **spot-gloss (varnish) map** for UV
 printing that looks intentional — glossy where a human designer would put it — using
 **no generative AI**. Everything below is either classical image processing (pure
-`lib/image.ts` ops) or *discriminative* model inference the pipeline already uses
+`lib/image.ts` ops) or _discriminative_ model inference the pipeline already uses
 (Depth Anything, BiRefNet, Grounded SAM analyse the artist's pixels; they don't
 synthesise new ones).
 
-The heightmap flow already works. Gloss is the same shape of problem — *derive a
-greyscale control map from the art, then condition it for the printer* — so most of
+The heightmap flow already works. Gloss is the same shape of problem — _derive a
+greyscale control map from the art, then condition it for the printer_ — so most of
 this plan reuses the existing node graph, plus a handful of small new local nodes.
 
 ---
@@ -18,30 +18,30 @@ this plan reuses the existing node graph, plus a handful of small new local node
 A gloss map is not a picture; it's a deposition mask. Print-shop practice for spot
 UV gives us concrete quality rules, and each one maps to a processing step:
 
-| Rule | Why | Pipeline consequence |
-| --- | --- | --- |
-| Gloss should land on *meaningful* features | Random gloss reads as printing error | Derive from signals in §2, not global filters alone |
-| Minimum feature size ≈ 0.5–1 mm | Sub-droplet speckles read as dirt and don't jet reliably | Despeckle / remove-small-regions step |
-| No pinholes inside gloss shapes | Tiny matte holes look like defects | Morphological close |
-| Choke gloss 1–2 px inside colour edges | Registration misalignment otherwise leaves a shiny halo next to the shape | Erode as last step |
-| Edges hard, not anti-aliased | Grey edge pixels dither into a fringe of scattered varnish dots | Binarise **last**, at final resolution |
-| Total coverage roughly 5–30 % | 90 % coverage is just a gloss coat; contrast with matte is the effect | Coverage % readout in the preview |
-| Gloss amplifies relief | Shiny peaks + matte valleys is the classic tactile-print look | Reuse the depth map already in the graph |
+| Rule                                       | Why                                                                       | Pipeline consequence                                |
+| ------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------- |
+| Gloss should land on _meaningful_ features | Random gloss reads as printing error                                      | Derive from signals in §2, not global filters alone |
+| Minimum feature size ≈ 0.5–1 mm            | Sub-droplet speckles read as dirt and don't jet reliably                  | Despeckle / remove-small-regions step               |
+| No pinholes inside gloss shapes            | Tiny matte holes look like defects                                        | Morphological close                                 |
+| Choke gloss 1–2 px inside colour edges     | Registration misalignment otherwise leaves a shiny halo next to the shape | Erode as last step                                  |
+| Edges hard, not anti-aliased               | Grey edge pixels dither into a fringe of scattered varnish dots           | Binarise **last**, at final resolution              |
+| Total coverage roughly 5–30 %              | 90 % coverage is just a gloss coat; contrast with matte is the effect     | Coverage % readout in the preview                   |
+| Gloss amplifies relief                     | Shiny peaks + matte valleys is the classic tactile-print look             | Reuse the depth map already in the graph            |
 
 Two workflow principles fall out of this:
 
 1. **Stay greyscale until the very end.** Every signal below produces a soft 0–255
    "glossiness" map; shaping (curves/levels), mixing (max/multiply) and smoothing all
    happen in greyscale. Threshold → despeckle → choke is the final, shared tail.
-2. **Binarise at print resolution.** Resize *before* the threshold, never after —
+2. **Binarise at print resolution.** Resize _before_ the threshold, never after —
    scaling a binary mask re-introduces grey edges.
 
 ---
 
 ## 2. Signals: where should gloss go? (all non-generative)
 
-No single detector works for all art. The plan is a small set of *composable
-signals*, each cheap, each already ~80 % supported by existing nodes. A user picks
+No single detector works for all art. The plan is a small set of _composable
+signals_, each cheap, each already ~80 % supported by existing nodes. A user picks
 one or blends several with `Combine (max)` — exactly how the heightmap graph blends
 depth with the original.
 
@@ -55,7 +55,7 @@ rather than inventing content.
 Detection is classical (dichromatic reflection model): painted speculars are
 **locally bright** and **desaturated relative to their surroundings**.
 
-- *Locally* bright, not globally: `highlight = max(0, lum − blur(lum, R) − bias)`
+- _Locally_ bright, not globally: `highlight = max(0, lum − blur(lum, R) − bias)`
   (a positive high-pass / white top-hat). A big radius `R` makes a white sky score
   zero while a small glint on a dark cheek scores high.
 - Desaturation weighting: multiply by `(1 − S)^k` (HSV saturation) so vivid flat
@@ -70,7 +70,7 @@ Gloss the top N % of luminance (bright-tone gloss) or the bottom N % (**dark-lux
 gloss** — spot varnish on deep blacks is a classic premium-print move and works
 beautifully on posters). Needs `Levels`/`Curves` (exist) plus an **Auto Threshold**
 node (§3.2), because a fixed 0–255 threshold breaks on dark or pale art — the
-threshold must be a *percentile* of the actual histogram (or Otsu).
+threshold must be a _percentile_ of the actual histogram (or Otsu).
 
 ### 2.3 Vivid-colour gloss
 
@@ -90,7 +90,7 @@ The heightmap workflow already runs Depth Anything. `Grey depth → Levels (isol
 the near band) → tail` glosses the foreground subject so it pops off a matte
 background. Marginal cost: zero (the prediction is already cached).
 
-Related: **gloss the relief peaks** — feed the *finished heightmap itself* through
+Related: **gloss the relief peaks** — feed the _finished heightmap itself_ through
 `Auto Threshold (top ~20 %)` and the raised areas of the print become the shiny
 areas. Strong default for tactile prints; costs nothing.
 
@@ -160,7 +160,7 @@ holes below `minHoleArea`. Config in px² now; a DPI-aware "mm" field can come l
 ### 3.5 `Gloss Preview` — the feedback loop that makes everything else work
 
 You cannot judge a varnish mask by staring at black-and-white blobs. This node
-*simulates the print*:
+_simulates the print_:
 
 - **Inputs:** `art` (image), `gloss` (mask), `heightmap` (optional image).
 - **Config:** light azimuth + elevation, shininess exponent, intensity.
@@ -176,9 +176,9 @@ Deterministic canvas math, ~80 lines, testable ("gloss=black in ⇒ preview == a
 "coverage of a half-white mask = 50 %"). A later polish step can add a
 `customEditor` (the Curves/AreaPicker pattern) to drag the light interactively.
 
-*(Optional, phase G3: a `Saliency` node — spectral-residual saliency is ~50 lines
+_(Optional, phase G3: a `Saliency` node — spectral-residual saliency is ~50 lines
 with no model download — but BiRefNet already covers subject-level saliency, so
-this is not on the critical path.)*
+this is not on the critical path.)_
 
 ---
 
@@ -212,7 +212,7 @@ node catalog documents workflows. Ship gloss as **recipes first, nodes second** 
 the heightmap flow proved the composable-graph approach; gloss should feel the same.
 
 1. **Spot gloss — painted highlights (no AI)**: Image Input → Highlight Extract →
-   tail → Gloss Preview. Works offline, no API key, instant. *The flagship demo.*
+   tail → Gloss Preview. Works offline, no API key, instant. _The flagship demo._
 2. **Spot gloss — relief peaks**: existing heightmap graph + Auto Threshold branch
    off the heightmap → tail → Gloss Preview (heightmap wired in, so the preview
    shows shiny raised areas). One extra branch on the graph users already have.
@@ -228,12 +228,12 @@ print, not a mask.
 
 ## 6. Implementation phases
 
-| Phase | Scope | Size | Risk |
-| --- | --- | --- | --- |
-| **G0** | §3.3 HSV channels, §3.2 Auto Threshold, §3.1 Highlight Extract, §3.4 Despeckle + open/close; pure ops + worker registry + tests | ~1 day | Low — additive, follows `singleImageOp` pattern |
-| **G1** | §3.5 Gloss Preview node with coverage stat | ~½–1 day | Low — pure math; reuses `normalMap` gradients |
-| **G2** | Example templates (§5) + README catalog rows + a short "gloss map" docs section with the §1 rules | ~½ day | None |
-| **G3** (later) | Interactive light-drag editor for the preview; DPI/mm-aware Despeckle sizing; Saliency node; multi-level gloss guidance | as needed | Low |
+| Phase          | Scope                                                                                                                           | Size      | Risk                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------- |
+| **G0**         | §3.3 HSV channels, §3.2 Auto Threshold, §3.1 Highlight Extract, §3.4 Despeckle + open/close; pure ops + worker registry + tests | ~1 day    | Low — additive, follows `singleImageOp` pattern |
+| **G1**         | §3.5 Gloss Preview node with coverage stat                                                                                      | ~½–1 day  | Low — pure math; reuses `normalMap` gradients   |
+| **G2**         | Example templates (§5) + README catalog rows + a short "gloss map" docs section with the §1 rules                               | ~½ day    | None                                            |
+| **G3** (later) | Interactive light-drag editor for the preview; DPI/mm-aware Despeckle sizing; Saliency node; multi-level gloss guidance         | as needed | Low                                             |
 
 Test strategy mirrors the codebase: every new `lib/image.ts` op gets direct Vitest
 coverage (synthetic images with known answers — e.g. a single bright pixel on grey
