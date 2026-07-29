@@ -1416,7 +1416,9 @@ export function applyCurve(img: RasterImage, lut: Uint8Array, channel: CurveChan
 // Gloss / spot-varnish map generation. A gloss map is a deposition mask: derive
 // a greyscale "glossiness" signal from the art (highlight extract), condition it
 // for the printer (auto threshold + despeckle), and simulate the print (gloss
-// preview). See GLOSS-MAP-PLAN.md.
+// preview). The printer constraints that drive it: gloss lands on meaningful
+// features, no sub-millimetre speckles (they read as dirt and jet unreliably),
+// no pinholes inside a gloss shape, and coverage in the 5–30% range.
 // ---------------------------------------------------------------------------
 
 export interface HighlightExtractOptions {
