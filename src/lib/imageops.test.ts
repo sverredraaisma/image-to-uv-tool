@@ -493,6 +493,21 @@ describe('radialGradient', () => {
     expect(lum(img, 0, 0)).toBe(0); // corner, well outside
   });
 
+  it('reads the two ring radii as an unordered pair', () => {
+    const ring = (radius: number, innerRadius: number) =>
+      radialGradient(64, 64, BLACK, WHITE, opts({ mode: 'ring', radius, innerRadius }));
+    // Swapped radii draw the band the author meant, not an empty image.
+    expect(ring(0.5, 0.9).data).toEqual(ring(0.9, 0.5).data);
+    expect(lum(ring(0.5, 0.9), 32, 10)).toBe(255);
+  });
+
+  it('leaves the other modes’ radius alone, whatever the inner radius says', () => {
+    // innerRadius > radius must not enlarge a radial ramp's outer edge.
+    const a = radialGradient(64, 64, BLACK, WHITE, opts({ radius: 0.5, innerRadius: 0.9 }));
+    const b = radialGradient(64, 64, BLACK, WHITE, opts({ radius: 0.5, innerRadius: 0 }));
+    expect(a.data).toEqual(b.data);
+  });
+
   it('softens both ring edges with feather', () => {
     const hard = radialGradient(128, 128, BLACK, WHITE, opts({ mode: 'ring', radius: 0.8 }));
     const soft = radialGradient(128, 128, BLACK, WHITE, opts({ mode: 'ring', radius: 0.8, feather: 0.2 }));

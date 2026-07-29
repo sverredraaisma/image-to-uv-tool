@@ -9,6 +9,7 @@ import {
   interlacedSize,
   lensGeometry,
   outputSize,
+  renderDepthMap,
   renderInterlaced,
   renderLenticular,
   switchFrames,
@@ -247,6 +248,9 @@ describe('renderLenticular — interlacing', () => {
   it('refuses fewer than two frames', () => {
     expect(() => renderLenticular([RED], settings())).toThrow(/at least 2 images/);
     expect(() => renderLenticular([], settings())).toThrow(/at least 2 images/);
+    // …and each half refuses on its own terms, so a direct call can't slip past.
+    expect(() => renderInterlaced([RED], settings())).toThrow(/at least 2 images/);
+    expect(() => renderDepthMap([RED], settings())).toThrow(/at least 2 images/);
   });
 
   it('refuses a render above the pixel budget, before rendering anything', () => {

@@ -89,11 +89,11 @@ export interface RadialGradientOptions {
   mode: RadialMode;
   /** Outer edge, as a fraction of half the shorter side. */
   radius: number;
-  /** `ring` only: inner edge, same units. */
+  /** `ring` only: inner edge, same units. Swapped with `radius` if larger. */
   innerRadius: number;
   /** `conic` only: where the sweep starts, degrees clockwise from 12 o'clock. */
   angle: number;
-  /** `ring` only: edge softness as a fraction of the radius. Also antialiases. */
+  /** `ring` only: edge softness, in the same units as `radius`. Antialiases. */
   feather: number;
 }
 
@@ -120,8 +120,15 @@ export function radialGradient(
   const cx = width / 2;
   const cy = height / 2;
   const unit = Math.max(1e-6, Math.min(width, height) / 2);
-  const outer = Math.max(1e-6, options.radius) * unit;
-  const inner = Math.max(0, options.innerRadius) * unit;
+  const radius = Math.max(1e-6, options.radius) * unit;
+  const innerRadius = Math.max(0, options.innerRadius) * unit;
+  // A ring is the band *between* two radii, so it reads them as an unordered
+  // pair: a saved or hand-edited graph with the two swapped draws the band the
+  // author meant rather than nothing at all. The other modes ignore the inner
+  // radius entirely, so leave their outer radius exactly as configured.
+  const ring = options.mode === 'ring';
+  const outer = ring ? Math.max(radius, innerRadius) : radius;
+  const inner = ring ? Math.min(radius, innerRadius) : innerRadius;
   const feather = Math.max(0, options.feather) * unit;
   // Sweep clockwise from 12 o'clock, the direction a spinner turns; a positive
   // start angle carries the seam clockwise with it.

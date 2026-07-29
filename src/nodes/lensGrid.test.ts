@@ -156,6 +156,7 @@ describe('renderGridInterlaced', () => {
 
   it('insists on exactly grid² views', () => {
     expect(() => renderGridInterlaced([LU, RU, LD], settings())).toThrow(/2×2 lens grid needs 4 images/);
+    expect(() => renderGridDepthMap([LU, RU, LD], settings())).toThrow(/2×2 lens grid needs 4 images/);
     expect(() => renderGridInterlaced([...QUAD, LU], settings())).toThrow(/got 5/);
     expect(() => renderGridInterlaced(QUAD, settings({ grid: 3 }))).toThrow(/3×3 lens grid needs 9/);
   });

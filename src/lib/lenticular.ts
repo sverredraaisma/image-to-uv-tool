@@ -440,7 +440,7 @@ export function renderDepthMap(
   settings: LenticularSettings,
   options: RenderOptions = {},
 ): DepthMapResult {
-  if (frames.length < 1) throw new Error('Lenticular print needs at least 2 images');
+  if (frames.length < 2) throw new Error('Lenticular print needs at least 2 images');
   const size = outputSize(settings, frames[0]);
   const { width, height } = size;
   checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI');
@@ -674,6 +674,7 @@ export function renderGridDepthMap(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): DepthMapResult {
+  requireGridViews(views, settings.grid);
   const size = outputSize(settings, views[0]);
   const { width, height } = size;
   checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI');
