@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+// Imported through Vite as a base64 data URL, so the test needs no filesystem
+// access (the app tsconfig deliberately has no Node types).
+import fireplaceGif from '../../public/fireplace-fire.gif?inline';
 import { decodeGif, interlacedRows, isGif, lzwDecode } from './gif';
 
 // --- A minimal GIF writer, so tests can state exactly what bytes to decode ---
@@ -255,6 +258,22 @@ describe('decodeGif', () => {
     });
     expect(decodeGif(bytes, 2).frames).toHaveLength(2);
     expect(() => decodeGif(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]))).toThrow(/Not a GIF/);
+  });
+
+  it('decodes the shipped fireplace GIF, frames and all', () => {
+    // The file behind the "Lenticular → animated fireplace" example: a real
+    // multi-frame GIF from a real encoder, not one this test wrote.
+    const gif = decodeGif(Uint8Array.from(atob(fireplaceGif.split(',')[1]), (c) => c.charCodeAt(0)));
+    expect(gif.width).toBe(480);
+    expect(gif.height).toBe(400);
+    expect(gif.frames.length).toBeGreaterThan(1);
+    for (const f of gif.frames) {
+      expect(f.image.data).toHaveLength(480 * 400 * 4);
+      expect(f.delayMs).toBeGreaterThan(0);
+    }
+    // Consecutive frames must actually differ, or the animation is a still.
+    const [a, b] = gif.frames;
+    expect(a.image.data.some((v, i) => v !== b.image.data[i])).toBe(true);
   });
 
   it('reads the NETSCAPE loop count', () => {
