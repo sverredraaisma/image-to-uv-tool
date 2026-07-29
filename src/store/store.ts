@@ -741,7 +741,10 @@ export const useStore = create<StoreState>()(
       setViewportCenter: (fn) => set({ viewportCenter: fn }),
       setNodeSizes: (fn) => set({ nodeSizes: fn }),
       openEditor: (id) => set({ editorNodeId: id }),
-      openHelp: (type) => set({ helpNodeType: type }),
+      // Only a type the registry can actually render help for is allowed to
+      // land here: an unknown one would leave the app believing a window is
+      // open (swallowing Escape) while nothing is on screen.
+      openHelp: (type) => set({ helpNodeType: type && getNodeDefSafe(type) ? type : null }),
       openPreview: (value, title) => {
         previewToken++; // supersede any pending on-demand render
         set({ preview: { value, title } });

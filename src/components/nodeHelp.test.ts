@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import '../nodes'; // register built-ins
 import { allNodeDefs } from '../engine/registry';
+import { useStore } from '../store/store';
 import { NODE_HELP, helpFor } from './nodeHelp';
 
 const defs = allNodeDefs();
@@ -29,6 +30,16 @@ describe('node help', () => {
       for (const tip of help.tips ?? []) if (!tip.trim()) problems.push(`${type}: empty tip`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('never opens for a node type the registry does not know', () => {
+    const { openHelp } = useStore.getState();
+    openHelp('no-such-node');
+    expect(useStore.getState().helpNodeType).toBeNull();
+    openHelp('blur');
+    expect(useStore.getState().helpNodeType).toBe('blur');
+    openHelp(null);
+    expect(useStore.getState().helpNodeType).toBeNull();
   });
 
   it('falls back to something useful for an unknown node', () => {

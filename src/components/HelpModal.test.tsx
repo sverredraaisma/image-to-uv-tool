@@ -48,9 +48,12 @@ describe('HelpModal', () => {
     expect(useStore.getState().helpNodeType).toBeNull();
   });
 
-  it('ignores a node type that is not registered', () => {
+  it('ignores a node type that is not registered, and does not stay half-open', () => {
     useStore.getState().openHelp('nope');
     const { container } = render(<HelpModal />);
     expect(container).toBeEmptyDOMElement();
+    // Nothing is on screen, so nothing may think a window is open either —
+    // otherwise Escape would be swallowed by an invisible modal.
+    expect(useStore.getState().helpNodeType).toBeNull();
   });
 });
