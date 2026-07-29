@@ -11,11 +11,18 @@ const MIN = 214;
 const MAX = 320;
 const CHAR = 6.6;
 
+/** Node body padding (8px each side) plus the label→control gap (8px). */
+const FIELD_CHROME = 8 * 2 + 8;
+
 /**
  * Pick a comfortable node width from its content: the longest port label (which
  * sits next to a fixed-size preview) and the longest inline field label, plus a
  * little extra for multiline text fields. Simple nodes stay compact; busy ones
  * grow up to a cap.
+ *
+ * A field's control column is exactly half the node body (see `.config-field`
+ * in index.css), so the label only gets the other half — hence the doubling.
+ * Past the cap the label ellipsises instead of the node growing forever.
  */
 export function nodeWidth(def: NodeLayoutInfo): number {
   const longestPort = [...def.inputs, ...def.outputs].reduce((m, p) => Math.max(m, p.label.length), 0);
@@ -24,7 +31,7 @@ export function nodeWidth(def: NodeLayoutInfo): number {
   const hasMultiline = fields.some((f) => f.kind === 'text' && f.multiline);
 
   const portW = longestPort * CHAR + 46 /* preview */ + 46; /* handle + gaps */
-  const fieldW = longestField * CHAR + 132; /* control + padding */
+  const fieldW = longestField ? longestField * CHAR * 2 + FIELD_CHROME : 0;
   const width = Math.max(MIN, portW, fieldW, hasMultiline ? 250 : 0);
   return Math.round(Math.min(MAX, width));
 }

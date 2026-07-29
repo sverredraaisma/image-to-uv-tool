@@ -113,7 +113,10 @@ export function ConfigFields({
     const set = (v: unknown) => updateNodeConfig(nodeId, { [field.key]: v });
     return (
       <label className="config-field" key={field.key}>
-        <span className="config-label">{field.label}</span>
+        {/* title: the label column is half the node, so long labels ellipsise. */}
+        <span className="config-label" title={field.label}>
+          {field.label}
+        </span>
         {field.kind === 'number' && (
           <DebouncedTextControl
             kind="number"

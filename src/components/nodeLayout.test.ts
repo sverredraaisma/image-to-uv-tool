@@ -24,6 +24,14 @@ describe('nodeWidth', () => {
     expect(w).toBeGreaterThanOrEqual(250);
   });
 
+  it('leaves a field label the half of the node its control does not take', () => {
+    // 'Height calib. min' is 17 chars: 17 × 6.6 × 2 + 24 of chrome.
+    const w = nodeWidth(def({ configFields: [{ label: 'Height calib. min', kind: 'number' }] }));
+    expect(w).toBe(248);
+    // Short labels still fit inside the minimum width.
+    expect(nodeWidth(def({ configFields: [{ label: 'PPI', kind: 'number' }] }))).toBe(214);
+  });
+
   it('ignores advanced fields and caps at the maximum', () => {
     const compact = nodeWidth(
       def({

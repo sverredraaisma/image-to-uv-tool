@@ -415,31 +415,49 @@ textarea {
   flex-direction: column;
   gap: 6px;
 }
+/* Label left, control right, and the control column is exactly half the node —
+   every field lines up regardless of what kind of control it holds. */
 .config-field {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 50%;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
 .config-field .config-label {
   color: var(--text-dim);
   font-size: 11px;
+  /* Long labels shorten rather than pushing the control out of alignment. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.config-field select,
-.config-field input[type='text'] {
-  flex: 1 1 auto;
-  min-width: 90px;
-  max-width: 170px;
-}
-.config-field input[type='number'] {
-  width: 74px;
-}
-.config-field textarea {
+.config-field > :not(.config-label) {
   width: 100%;
+  min-width: 0;
 }
+.config-field input[type='color'] {
+  height: 26px;
+  padding: 2px;
+}
+/* A stretched checkbox is just a big square: keep it its own size, parked at
+   the start of the same half-width column so the fields still read as a grid. */
+.config-field input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  justify-self: start;
+}
+/* A textarea gets the whole width, with its label above it. */
 .config-field:has(textarea) {
-  flex-direction: column;
-  align-items: stretch;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+/* Half of a node is a sensible control; half of a 720px modal is not — there
+   the controls share one fixed column instead. */
+.modal .config-field {
+  grid-template-columns: 1fr 220px;
+}
+.modal .config-field:has(textarea) {
+  grid-template-columns: 1fr;
 }
 .config-advanced {
   margin-top: 4px;
