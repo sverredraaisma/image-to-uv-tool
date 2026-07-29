@@ -21,6 +21,7 @@ import {
   pad,
   pixelate,
   posterize,
+  radialGradient,
   removeColor,
   sharpen,
   sobel,
@@ -28,6 +29,7 @@ import {
   tint,
   transform,
   vignette,
+  type RadialGradientOptions,
 } from './image';
 import type { RasterImage } from '../types';
 
@@ -448,5 +450,93 @@ describe('boxBlur', () => {
     expect([r, g, b]).toEqual([255, 255, 255]); // colour unpolluted
     expect(a).toBeGreaterThan(0);
     expect(a).toBeLessThan(255); // alpha feathered toward the transparent side
+  });
+});
+
+describe('radialGradient', () => {
+  const BLACK: [number, number, number, number] = [0, 0, 0, 255];
+  const WHITE: [number, number, number, number] = [255, 255, 255, 255];
+  const opts = (over: Partial<RadialGradientOptions> = {}): RadialGradientOptions => ({
+    mode: 'radial',
+    radius: 1,
+    innerRadius: 0.5,
+    angle: 0,
+    feather: 0,
+    ...over,
+  });
+  const lum = (img: RasterImage, x: number, y: number) => img.data[(y * img.width + x) * 4];
+
+  it('ramps from the centre outwards, flat at the radius', () => {
+    const img = radialGradient(64, 64, BLACK, WHITE, opts());
+    expect(lum(img, 32, 32)).toBeLessThan(12); // centre ≈ from
+    expect(lum(img, 32, 1)).toBeGreaterThan(240); // the top edge ≈ to
+    // Monotonic outwards, and clamped once past the radius.
+    expect(lum(img, 32, 20)).toBeLessThan(lum(img, 32, 10));
+    expect(lum(img, 0, 0)).toBe(255); // corner is beyond the inscribed circle
+  });
+
+  it('measures the radius against the shorter side, so aspect does not skew it', () => {
+    const wide = radialGradient(128, 64, BLACK, WHITE, opts());
+    // 32 px above centre is the radius on both axes of a 128×64 image.
+    expect(lum(wide, 64, 1)).toBeGreaterThan(240);
+    expect(lum(wide, 96, 32)).toBeGreaterThan(240);
+    expect(lum(wide, 127, 32)).toBe(255); // clamped well past it
+  });
+
+  it('fills only the band between the two radii in ring mode', () => {
+    const img = radialGradient(64, 64, BLACK, WHITE, opts({ mode: 'ring', radius: 0.9, innerRadius: 0.5 }));
+    // Radii of 0.5 and 0.9 on a 64 px image are 16 and 28.8 px from centre.
+    expect(lum(img, 32, 32)).toBe(0); // hole
+    expect(lum(img, 32, 21)).toBe(0); // still the hole, 10.5 px out
+    expect(lum(img, 32, 10)).toBe(255); // on the band, 22 px out
+    expect(lum(img, 32, 0)).toBe(0); // past the outer edge
+    expect(lum(img, 0, 0)).toBe(0); // corner, well outside
+  });
+
+  it('reads the two ring radii as an unordered pair', () => {
+    const ring = (radius: number, innerRadius: number) =>
+      radialGradient(64, 64, BLACK, WHITE, opts({ mode: 'ring', radius, innerRadius }));
+    // Swapped radii draw the band the author meant, not an empty image.
+    expect(ring(0.5, 0.9).data).toEqual(ring(0.9, 0.5).data);
+    expect(lum(ring(0.5, 0.9), 32, 10)).toBe(255);
+  });
+
+  it('leaves the other modes’ radius alone, whatever the inner radius says', () => {
+    // innerRadius > radius must not enlarge a radial ramp's outer edge.
+    const a = radialGradient(64, 64, BLACK, WHITE, opts({ radius: 0.5, innerRadius: 0.9 }));
+    const b = radialGradient(64, 64, BLACK, WHITE, opts({ radius: 0.5, innerRadius: 0 }));
+    expect(a.data).toEqual(b.data);
+  });
+
+  it('softens both ring edges with feather', () => {
+    const hard = radialGradient(128, 128, BLACK, WHITE, opts({ mode: 'ring', radius: 0.8 }));
+    const soft = radialGradient(128, 128, BLACK, WHITE, opts({ mode: 'ring', radius: 0.8, feather: 0.2 }));
+    // Row 11 is 52.5 px from the centre, just past the 51.2 px outer edge.
+    const justOutside = (img: RasterImage) => lum(img, 64, 11);
+    expect(justOutside(hard)).toBe(0); // a hard edge has already switched off
+    expect(justOutside(soft)).toBeGreaterThan(60); // a soft one is mid-fade
+    expect(justOutside(soft)).toBeLessThan(160);
+  });
+
+  it('sweeps once around the centre in conic mode, clockwise from 12 o’clock', () => {
+    const img = radialGradient(64, 64, BLACK, WHITE, opts({ mode: 'conic' }));
+    expect(lum(img, 32, 8)).toBeLessThan(20); // 12 o'clock ≈ start
+    expect(lum(img, 56, 32)).toBeCloseTo(64, -1); // 3 o'clock ≈ quarter way
+    expect(lum(img, 32, 56)).toBeCloseTo(128, -1); // 6 o'clock ≈ half way
+    expect(lum(img, 8, 32)).toBeCloseTo(191, -1); // 9 o'clock ≈ three-quarters
+  });
+
+  it('carries the conic seam clockwise with a positive start angle', () => {
+    const turned = radialGradient(64, 64, BLACK, WHITE, opts({ mode: 'conic', angle: 90 }));
+    expect(lum(turned, 56, 32)).toBeLessThan(20); // the seam moved to 3 o'clock
+    expect(lum(turned, 32, 8)).toBeCloseTo(191, -1); // 12 o'clock is now the tail
+  });
+
+  it('wraps a start angle outside one turn', () => {
+    const plain = radialGradient(32, 32, BLACK, WHITE, opts({ mode: 'conic' }));
+    for (const angle of [360, -360, 720]) {
+      const same = radialGradient(32, 32, BLACK, WHITE, opts({ mode: 'conic', angle }));
+      expect(same.data).toEqual(plain.data);
+    }
   });
 });

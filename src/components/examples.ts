@@ -309,4 +309,101 @@ export const EXAMPLES: Example[] = [
       ],
     },
   },
+  {
+    name: 'Lens Grid → loading spinner',
+    description:
+      'The web loading spinner, printed: a ring of 12 graduated ticks on a 2×2 lens grid, so the bright ' +
+      'tail chases you round as you turn the sheet.',
+    graph: {
+      version: 1,
+      nodes: [
+        // The throbber, built the way CSS builds it: a ring, times one sweep
+        // around the centre, stepped into ticks.
+        {
+          id: 'ring',
+          type: 'radialGradient',
+          position: { x: 40, y: 80 },
+          config: {
+            width: 512,
+            height: 512,
+            mode: 'ring',
+            from: '#000000',
+            to: '#ffffff',
+            radius: 0.82,
+            innerRadius: 0.56,
+            angle: 0,
+            feather: 0.03,
+          },
+        },
+        {
+          id: 'sweep',
+          type: 'radialGradient',
+          position: { x: 40, y: 300 },
+          config: {
+            width: 512,
+            height: 512,
+            mode: 'conic',
+            from: '#000000',
+            to: '#ffffff',
+            radius: 0.9,
+            innerRadius: 0.6,
+            angle: 0,
+            feather: 0.02,
+          },
+        },
+        // 12 discrete steps instead of a smooth tail: ticks stay legible at the
+        // ~98 px each view actually resolves to.
+        { id: 'ticks', type: 'posterize', position: { x: 300, y: 300 }, config: { levels: 12 } },
+        // Ring × ticks = the spinner, its bright tail at 12 o'clock.
+        { id: 's0', type: 'combine', position: { x: 520, y: 190 }, config: { mode: 'multiply' } },
+        // …and its three rotations. 90° CW walks the tail up → right → down → left.
+        { id: 'r90', type: 'transform', position: { x: 740, y: 60 }, config: { op: 'rotate90' } },
+        { id: 'r180', type: 'transform', position: { x: 740, y: 200 }, config: { op: 'rotate180' } },
+        { id: 'r270', type: 'transform', position: { x: 740, y: 340 }, config: { op: 'rotate270' } },
+        {
+          id: 'grid',
+          type: 'lensGrid',
+          position: { x: 990, y: 190 },
+          // Small and coarse so Run stays quick: a 1181 px lens map, not 32 MP.
+          // 50 LPI needs at least 0.762 mm of gloss to focus, so 0.9 is fine.
+          config: {
+            grid: 2,
+            widthMm: 50,
+            ppi: 600,
+            lpi: 50,
+            phase: 0,
+            phaseY: 0,
+            heightMm: 0.9,
+            ri: 1.5,
+            orientationDeg: 0,
+            mirrorViews: true,
+            stripSamples: 2,
+            calibBands: 9,
+            heightMin: 0.6,
+            heightMax: 1.4,
+            riMin: 1.4,
+            riMax: 1.6,
+            lpiMin: 40,
+            lpiMax: 60,
+            lpiAutoHeight: true,
+          },
+        },
+      ],
+      edges: [
+        edge('sweep', 'ticks'),
+        wire('ring', 's0', 'out', 'a'),
+        wire('ticks', 's0', 'out', 'b'),
+        edge('s0', 'r90'),
+        edge('s0', 'r180'),
+        edge('s0', 'r270'),
+        // Each view gets the rotation whose bright tail points nearest the way
+        // that view is looked at from — a constant 45° lag, so the tail keeps
+        // turning the same way as you walk round the print.
+        wire('s0', 'grid', 'out', 'c0r0'), // Left · Up    ← tail up
+        wire('r90', 'grid', 'out', 'c1r0'), // Right · Up   ← tail right
+        wire('r180', 'grid', 'out', 'c1r1'), // Right · Down ← tail down
+        wire('r270', 'grid', 'out', 'c0r1'), // Left · Down  ← tail left
+      ],
+    },
+  },
 ];

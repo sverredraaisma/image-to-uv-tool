@@ -5,6 +5,7 @@ import { AreaPickerEditor } from './AreaPickerEditor';
 import { SplitRegionEditor } from './SplitRegionEditor';
 import { CurvesEditor } from './CurvesEditor';
 import { Gloss3DEditor } from './Gloss3DEditor';
+import { LenticularEditor, LensGridEditor } from './LenticularEditor';
 import { ModelSchemaHint } from './ModelSchemaHint';
 import { Modal } from './Modal';
 
@@ -42,6 +43,8 @@ export function SettingsModal() {
           {def.customEditor === 'curves' && <CurvesEditor nodeId={editorNodeId} />}
           {isSplitRegion && <SplitRegionEditor nodeId={editorNodeId} />}
           {isGloss3d && <Gloss3DEditor nodeId={editorNodeId} />}
+          {def.customEditor === 'lenticular' && <LenticularEditor nodeId={editorNodeId} />}
+          {def.customEditor === 'lensGrid' && <LensGridEditor nodeId={editorNodeId} />}
           {isAi && <ModelSchemaHint nodeId={editorNodeId} model={String(node.config.model ?? '')} />}
         </>
       )}

@@ -30,6 +30,7 @@ import {
   opacity,
   pad,
   pasteImage,
+  radialGradient,
   removeColor,
   resize,
   resizeBilinear,
@@ -47,6 +48,7 @@ import {
   type CurvePoint,
   type MaskOp,
   type MorphOp,
+  type RadialMode,
   type TransformOp,
 } from '../lib/image';
 import { type Point } from '../lib/magicWand';
@@ -192,6 +194,64 @@ export const gradientNode: NodeDefinition = {
       hexToRgba(str(config.from, '#000000'), 255),
       hexToRgba(str(config.to, '#ffffff'), 255),
       str(config.direction, 'horizontal') === 'horizontal',
+    ),
+  }),
+};
+
+export const radialGradientNode: NodeDefinition = {
+  type: 'radialGradient',
+  label: 'Radial Gradient',
+  category: 'Input',
+  description:
+    'Circular gradients: radial (centre outwards), ring (a filled band, softened by Feather) or conic ' +
+    '(one sweep around the centre). Multiply a ring by a conic to build a dial or a loading spinner.',
+  autoRun: true,
+  inputs: [],
+  outputs: [{ id: 'out', label: 'Image', type: 'image' }],
+  configFields: [
+    { kind: 'number', key: 'width', label: 'Width', min: 1, step: 1 },
+    { kind: 'number', key: 'height', label: 'Height', min: 1, step: 1 },
+    {
+      kind: 'select',
+      key: 'mode',
+      label: 'Mode',
+      options: [
+        { value: 'radial', label: 'Radial (centre → edge)' },
+        { value: 'ring', label: 'Ring (filled band)' },
+        { value: 'conic', label: 'Conic (sweep around)' },
+      ],
+    },
+    { kind: 'color', key: 'from', label: 'From' },
+    { kind: 'color', key: 'to', label: 'To' },
+    { kind: 'number', key: 'radius', label: 'Radius (1 = inscribed)', min: 0.01, max: 2, step: 0.05 },
+    { kind: 'number', key: 'innerRadius', label: 'Inner radius (ring)', min: 0, max: 2, step: 0.05 },
+    { kind: 'number', key: 'angle', label: 'Start angle (°, conic)', min: -360, max: 360, step: 15 },
+    { kind: 'number', key: 'feather', label: 'Feather (ring)', min: 0, max: 1, step: 0.01, advanced: true },
+  ],
+  defaultConfig: () => ({
+    width: 512,
+    height: 512,
+    mode: 'radial' satisfies RadialMode,
+    from: '#000000',
+    to: '#ffffff',
+    radius: 0.9,
+    innerRadius: 0.6,
+    angle: 0,
+    feather: 0.02,
+  }),
+  compute: ({ config }) => ({
+    out: radialGradient(
+      Math.max(1, num(config.width, 512)),
+      Math.max(1, num(config.height, 512)),
+      hexToRgba(str(config.from, '#000000'), 255),
+      hexToRgba(str(config.to, '#ffffff'), 255),
+      {
+        mode: str(config.mode, 'radial') as RadialMode,
+        radius: num(config.radius, 0.9),
+        innerRadius: num(config.innerRadius, 0.6),
+        angle: num(config.angle, 0),
+        feather: num(config.feather, 0.02),
+      },
     ),
   }),
 };
@@ -1196,6 +1256,7 @@ export const localNodes: NodeDefinition[] = [
   promptInputNode,
   solidColorNode,
   gradientNode,
+  radialGradientNode,
   combineNode,
   compareNode,
   applyMaskNode,

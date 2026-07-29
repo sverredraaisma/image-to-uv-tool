@@ -6,6 +6,7 @@
 // previews and the scheduler are resolved.
 
 import type { NodeConfig, NodeDefinition, PortSpec, PortType } from '../types';
+import { DEFAULT_GRID, clampGrid, gridCells } from '../lib/lenticular';
 
 const PORT_TYPES: readonly PortType[] = ['image', 'mask', 'text', 'stl'];
 
@@ -42,6 +43,22 @@ const named = (config: NodeConfig, fallback: string): string => {
   return typeof n === 'string' && n.trim() ? n : fallback;
 };
 
+/**
+ * One required image input per cell of a Lens Grid's view grid, in row-major
+ * order, each named for where it is viewed from relative to head-on.
+ */
+export function lensGridInputs(config: NodeConfig): PortSpec[] {
+  // Absent or unparseable falls back to the node's own default, not to the
+  // minimum — a graph that lost the key must not silently shed inputs.
+  const raw = typeof config.grid === 'number' ? config.grid : parseFloat(String(config.grid));
+  return gridCells(clampGrid(Number.isFinite(raw) ? raw : DEFAULT_GRID)).map((cell) => ({
+    id: cell.id,
+    label: cell.label,
+    type: 'image' as const,
+    required: true,
+  }));
+}
+
 export interface ResolvedPorts {
   inputs: PortSpec[];
   outputs: PortSpec[];
@@ -65,6 +82,9 @@ export function nodePorts(node: { type: string; config: NodeConfig }, def?: Node
         inputs: [{ id: 'in', label: named(node.config, 'Output'), type: asPortType(node.config.type) }],
         outputs: [],
       };
+    // One input per cell of the view grid, named for where it is viewed from.
+    case 'lensGrid':
+      return { inputs: lensGridInputs(node.config), outputs: def?.outputs ?? [] };
     default:
       return { inputs: def?.inputs ?? [], outputs: def?.outputs ?? [] };
   }

@@ -996,6 +996,49 @@ textarea {
   line-height: 1.5;
 }
 
+/* ---------------- Lenticular print ---------------- */
+.lenticular-editor h4 {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.lenticular-geometry {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 12px;
+}
+.lenticular-geometry dt {
+  color: var(--text-dim);
+}
+.lenticular-geometry dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.lenticular-note {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.lenticular-warning {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--warn);
+}
+.lenticular-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* ---------------- Toasts ---------------- */
 .toast-stack {
   position: fixed;
