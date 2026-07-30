@@ -1,6 +1,6 @@
 """Draw the figures for docs/printed-lenses.md.
 
-    pip install matplotlib
+    pip install matplotlib numpy
     python docs/figures.py        # writes docs/images/*.png
 
 Nothing in the app depends on this — it is a one-off tool for regenerating the
