@@ -943,6 +943,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     tips: [
       'Each view resolves to a single pixel per lenslet, so views cost resolution fast — start at grid 2 or 3.',
       'Ports are named for where the view is seen from: Left · Up, Centre (neutral), Right · Down.',
+      'Hexagonal packing (the default) offsets every other row and pulls the rows √3/2 as far apart: the densest way to pack equal circles, so ~15% more lenslets fit and only 9% of the sheet is left flat instead of 21%. Switch to Square grid if you are laminating a ready-made square lens array.',
     ],
   },
 

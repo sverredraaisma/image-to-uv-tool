@@ -158,11 +158,24 @@ describe('interlacedSize', () => {
     expect(interlacedSize(settings(), [RED, wide])).toEqual({ width: 400, height: 400 });
   });
 
-  it('ignores PPI entirely — that is the depth map’s business', () => {
+  it('ignores PPI while the strips run along the pixels', () => {
     const a = interlacedSize(settings({ ppi: 300 }), [RED, BLUE]);
     const b = interlacedSize(settings({ ppi: 5000 }), [RED, BLUE]);
     expect(a).toEqual(b);
     expect(outputSize(settings({ ppi: 300 }), RED)).not.toEqual(outputSize(settings({ ppi: 5000 }), RED));
+    // 90° turns the strips through a right angle, which is still along them.
+    expect(interlacedSize(settings({ orientationDeg: 90 }), [RED, BLUE])).toEqual(a);
+    expect(interlacedSize(settings({ orientationDeg: -180 }), [RED, BLUE])).toEqual(a);
+  });
+
+  it('takes the printer’s raster once the strip edges are diagonal', () => {
+    // Off the axes, a strip edge falls between pixels, and the staircase along
+    // it can only be filed down with more pixels — up to one printed dot.
+    const s = settings({ orientationDeg: 23, ppi: 300 });
+    expect(interlacedSize(s, [RED, BLUE])).toEqual(outputSize(s, RED)); // 300 px, not 40
+    expect(interlacedSize({ ...s, ppi: 5000 }, [RED, BLUE]).width).toBe(5000);
+    // Still never below the interlace floor: 500 LPI × 2 × 2 beats 300 PPI.
+    expect(interlacedSize({ ...s, lpi: 500 }, [RED, BLUE]).width).toBe(2000);
   });
 
   it('is what renderLenticular actually rasters the artwork at', () => {

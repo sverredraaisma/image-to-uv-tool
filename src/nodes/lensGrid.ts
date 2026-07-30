@@ -6,6 +6,7 @@ import type { ComputeContext, NodeConfig, NodeDefinition, RasterImage } from '..
 import {
   DEFAULT_GRID,
   clampGrid,
+  clampPacking,
   depthPreview,
   describeGridGeometry,
   gridCellCounts,
@@ -24,6 +25,7 @@ export function gridSettingsFromConfig(config: NodeConfig): LensGridSettings {
   return {
     ...settingsFromConfig(config),
     grid: clampGrid(num(config.grid, DEFAULT_GRID)),
+    packing: clampPacking(config.packing),
     phaseY: num(config.phaseY, 0),
     mirrorViews: bool(config.mirrorViews, true),
   };
@@ -52,7 +54,9 @@ export const lensGridNode: NodeDefinition = {
     'Interlace a grid of views under a 2D lens array (rows and columns of lenslets), so the print ' +
     'moves both left/right and up/down. Every input is named for where it is viewed from relative to ' +
     'head-on — Left · Up, Centre, Right · Down. Same optics and calibration sheets as Lenticular Print; ' +
-    'a grid of N gives N² views, each resolving to one pixel per lenslet. Manual: click Run.',
+    'a grid of N gives N² views, each resolving to one pixel per lenslet. Lenslets pack hexagonally by ' +
+    'default (the densest arrangement, ~15% more lenses and less flat sheet than a square grid) — switch ' +
+    'to Square grid to line them up in rows and columns instead. Manual: click Run.',
   autoRun: false,
   customEditor: 'lensGrid',
   // Ports are resolved per instance from `grid` (see engine/ports.ts); these
@@ -65,6 +69,15 @@ export const lensGridNode: NodeDefinition = {
   ],
   configFields: [
     { kind: 'number', key: 'grid', label: 'Grid (N × N views)', min: 2, max: 6, step: 1 },
+    {
+      kind: 'select',
+      key: 'packing',
+      label: 'Lenslet packing',
+      options: [
+        { value: 'hex', label: 'Hexagonal (densest, 90.7% fill)' },
+        { value: 'square', label: 'Square grid (78.5% fill)' },
+      ],
+    },
     { kind: 'number', key: 'widthMm', label: 'Width (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'ppi', label: 'PPI', min: 1, step: 10 },
     { kind: 'number', key: 'lpi', label: 'LPI (lenslets/inch)', min: 1, step: 1 },
@@ -126,6 +139,7 @@ export const lensGridNode: NodeDefinition = {
   ],
   defaultConfig: () => ({
     grid: DEFAULT_GRID,
+    packing: 'hex',
     widthMm: 100,
     ppi: 1440,
     lpi: 45,
@@ -156,7 +170,10 @@ export const lensGridNode: NodeDefinition = {
     const settings = gridSettingsFromConfig(config);
     const depthSize = outputSize(settings, gathered[0]);
     const artSize = gridInterlacedSize(settings, gathered);
-    onProgress?.(`Interlacing ${gathered.length} views, lens map at ${depthSize.width}×${depthSize.height}…`);
+    onProgress?.(
+      `Interlacing ${gathered.length} views at ${artSize.width}×${artSize.height}, ` +
+        `lens map at ${depthSize.width}×${depthSize.height}…`,
+    );
     // Let the spinner paint before the render locks the main thread.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
