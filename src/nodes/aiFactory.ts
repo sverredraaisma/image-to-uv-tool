@@ -105,12 +105,22 @@ export function makeReplicateNode(spec: AiSpec): NodeDefinition {
   if (singleDefaultOutput) {
     configFields.push({ kind: 'text', key: 'outputKey', label: 'Output field key', advanced: true });
   }
+  // Every ordinary image node runs over a whole Sequence by itself. These do
+  // not, unless asked: one prediction per frame is one *charge* per frame, and
+  // a 32-frame GIF wired in by accident would be a 32× bill. Opt in per node.
+  configFields.push({
+    kind: 'boolean',
+    key: 'mapFrames',
+    label: 'Run on every frame of a sequence (one call per frame)',
+    advanced: true,
+  });
 
   const defaultConfig = () => {
     const cfg: Record<string, unknown> = {
       model: spec.model,
       extraInputs: '',
       outputKey: spec.outputKey ?? '',
+      mapFrames: false,
     };
     for (const p of spec.ports) {
       cfg[`${p.id}Key`] = p.key;
@@ -128,6 +138,8 @@ export function makeReplicateNode(spec: AiSpec): NodeDefinition {
     description: spec.description,
     genAI: spec.genAI ?? GENERATIVE_GROUPS.has(spec.group),
     autoRun: false,
+    // Frame-by-frame only when the node's own toggle says so — see the field.
+    mapsSequences: (config) => config.mapFrames === true,
     inputs,
     outputs: outputPorts.map((o) => ({ id: o.id, label: o.label, type: o.type })),
     configFields,

@@ -30,6 +30,7 @@ import { reconcileRuntime } from '../engine/reconcile';
 import { cloneFragment } from '../engine/clone';
 import { autoLayout } from '../engine/autoLayout';
 import { bypassOutputs, findReadyAutoNodes, gatherInputs } from '../engine/schedule';
+import { computeMaybeMapped } from '../engine/sequenceMap';
 import { platform } from '../lib/platform';
 import { isBlobRef } from '../lib/blobStore';
 import { createSafeStorage } from './safeStorage';
@@ -879,7 +880,9 @@ export const useStore = create<StoreState>()(
                   },
                 })),
             };
-            result = await def.compute(ctx);
+            // Once per frame when a Sequence is wired into an image input, so
+            // every ordinary image node works on an animation too.
+            result = await computeMaybeMapped(def, ports, ctx);
           }
 
           // Node deleted while running — drop the result, don't resurrect it.

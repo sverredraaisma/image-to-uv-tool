@@ -2,8 +2,9 @@ import type { DataValue, RasterImage, SequenceValue, TextValue } from '../types'
 
 /**
  * Coerce a resolved input to a single image (first if it was a `multiple`).
- * A sequence collapses to its first frame, so every single-image node keeps
- * working when an animation is wired into it.
+ * A sequence collapses to its first frame. Most image nodes never see one:
+ * `engine/sequenceMap.ts` runs them once per frame instead. This is the
+ * fallback for the nodes that opt out of that.
  */
 export function asImage(value: DataValue | DataValue[] | undefined): RasterImage | undefined {
   const v = Array.isArray(value) ? value[0] : value;

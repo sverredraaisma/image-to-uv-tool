@@ -129,6 +129,12 @@ export const NODE_HELP: Record<string, NodeHelp> = {
           'A 47-frame GIF cannot fit under a lenticule. Set Frames to 8 and the node resamples the motion evenly across the loop.',
       },
       {
+        title: 'Grade the whole animation at once',
+        detail:
+          'Wire the Sequence straight into any image node — Curves, Blur, Combine — and it runs once per frame, handing back the whole animation with its timings intact.',
+        chain: ['Animation Input', 'Curves', 'Gloss Preview'],
+      },
+      {
         title: 'Grab a single frame to work on',
         detail:
           'Send the Sequence into Sequence Frame to pull out frame 0 and treat it like any other image.',
@@ -136,6 +142,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       },
     ],
     tips: [
+      'A still wired alongside the animation is reused for every frame, which is how one overlay composites onto a whole GIF through Combine or Apply Mask.',
       'Frames must fit one lenticule: PPI ÷ LPI ÷ strip samples (32 at 1440 PPI / 45 LPI). The Info output does the arithmetic and warns you.',
       'Ping-pong makes tilting back play the motion in reverse, so the print never snaps — use it unless the source loops seamlessly.',
       'GIF decodes in every browser; WebP/APNG need a browser with WebCodecs, otherwise you get the first frame only.',
@@ -143,7 +150,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
   },
   frameSelect: {
     summary:
-      'Takes one frame out of a Sequence as an ordinary image. The bridge between the animation nodes and the ~90 nodes that only understand a single image.',
+      'Takes one frame out of a Sequence as an ordinary image, for when you want a still rather than the whole run — an image node fed the Sequence itself maps over every frame instead.',
     uses: [
       {
         title: 'Colour-grade a GIF frame',

@@ -9,6 +9,7 @@ import { topoSort } from './graph';
 import { getNodeDefSafe } from './registry';
 import { nodePorts } from './ports';
 import { gatherInputs, bypassOutputs } from './schedule';
+import { computeMaybeMapped } from './sequenceMap';
 
 export interface Subgraph {
   nodes: GraphNode[];
@@ -60,7 +61,9 @@ export async function evaluateSubgraph(
 
     const result: ComputeResult = node.bypassed
       ? bypassOutputs(ports.inputs, ports.outputs, nodeInputs)
-      : await def.compute({ ...ctx, inputs: nodeInputs, config: node.config });
+      : // Frame by frame when a Sequence reaches an image input, exactly as the
+        // same node would behave out in the main graph.
+        await computeMaybeMapped(def, ports, { ...ctx, inputs: nodeInputs, config: node.config });
     runtime[id] = { status: 'upToDate', outputs: result };
   }
   return outputs;
