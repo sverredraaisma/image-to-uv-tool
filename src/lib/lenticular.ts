@@ -547,13 +547,22 @@ export function depthPreview(render: LenticularRender): RasterImage {
 // at base height — and how those footprints tile the sheet (see LensPacking).
 // ---------------------------------------------------------------------------
 
-export interface LensGridSettings extends LenticularSettings {
-  /** Lenslets per side of one view grid: 2 = 2×2 (4 views), 3 = 3×3 (9). */
-  grid: number;
+/**
+ * What any array of spherical caps needs, whichever way the artwork under a cap
+ * is divided up. The lens itself is the same object in every case — see
+ * {@link renderCapDepthMap} — so only the interlace differs between the square
+ * grid of views below and the ring of them further down.
+ */
+export interface CapArraySettings extends LenticularSettings {
   /** How the lenslets tile the sheet. */
   packing: LensPacking;
   /** 0–1 phase down the second axis, the rows of lenslets. */
   phaseY: number;
+}
+
+export interface LensGridSettings extends CapArraySettings {
+  /** Lenslets per side of one view grid: 2 = 2×2 (4 views), 3 = 3×3 (9). */
+  grid: number;
   /**
    * Place each view opposite the direction it is named for. A lens inverts, so
    * the view you see from the left has to sit on the *right* of its cell; with
@@ -821,6 +830,19 @@ export function renderGridDepthMap(
   options: RenderOptions = {},
 ): DepthMapResult {
   requireGridViews(views, settings.grid);
+  return renderCapDepthMap(views, settings, options);
+}
+
+/**
+ * The cap array itself, independent of how the artwork beneath it is divided.
+ * A square grid of view tiles and a ring of wedges print the *same lens*; only
+ * their interlaces differ.
+ */
+export function renderCapDepthMap(
+  views: RasterImage[],
+  settings: CapArraySettings,
+  options: RenderOptions = {},
+): DepthMapResult {
   const size = outputSize(settings, views[0]);
   const { width, height } = size;
   checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI');
@@ -900,6 +922,252 @@ export function gridSwitchViews(grid: number): RasterImage[] {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Radial array: the same lens, the same caps, but the artwork under each cap is
+// cut into angular wedges instead of a square grid of tiles.
+//
+// The whole behaviour follows from where the wedges meet. Under a cap, the
+// position within the cell *is* the direction you are looking from: offset from
+// the centre picks the view, and the centre itself is head-on. Cut the cell into
+// N wedges and every one of them touches that centre point, so:
+//
+//   • Head-on, the eye sits on the meeting point of all N wedges and the lens
+//     blur averages across them — every view at once, superimposed. The images
+//     merge, which is the effect being bought.
+//   • Tilt in any direction and the sample slides into one wedge, so the view
+//     that owns that azimuth takes over the whole sheet. Turning around the
+//     print walks through the views in order.
+//   • A wedge runs from the centre to the rim, so a view has no "distance": it
+//     is whatever you see at that bearing, at any tilt from a whisker off
+//     head-on to the edge of the cone.
+//
+// A view therefore occupies a *bearing*, not a cell — which is why this exists
+// alongside the grid rather than as a setting on it.
+// ---------------------------------------------------------------------------
+
+export interface RadialSettings extends CapArraySettings {
+  /** How many views are spread around the circle. */
+  views: number;
+  /**
+   * Turn the whole wedge pattern, 0–1 of a full view step. Moves where the
+   * seams between views fall without renaming any of them.
+   */
+  spin: number;
+  /**
+   * Place each view opposite the bearing it is named for. A lens inverts, so
+   * the view you see from the right has to sit on the *left* of its cell; with
+   * this off the print runs backwards as you walk around it.
+   */
+  mirrorViews: boolean;
+}
+
+export const MIN_RADIAL_VIEWS = 2;
+export const MAX_RADIAL_VIEWS = 12;
+/** Six around the circle — every 60°, and still ~1 pixel of wedge to print. */
+export const DEFAULT_RADIAL_VIEWS = 6;
+
+export const clampRadialViews = (views: number): number =>
+  Math.min(MAX_RADIAL_VIEWS, Math.max(MIN_RADIAL_VIEWS, Math.round(views) || MIN_RADIAL_VIEWS));
+
+/** The eight bearings that have a name; anything else is quoted in degrees. */
+const BEARINGS = ['Right', 'Up-right', 'Up', 'Up-left', 'Left', 'Down-left', 'Down', 'Down-right'];
+
+/** The bearing a view is seen from, degrees anticlockwise from "to the right". */
+export const radialViewAngleDeg = (index: number, count: number): number =>
+  (index * 360) / Math.max(1, clampRadialViews(count));
+
+/**
+ * Human name of one view: its bearing in degrees, plus a direction word when it
+ * lands exactly on one of the eight compass points. Five views around a circle
+ * simply have no word for 72°, and inventing one would misdirect.
+ */
+export function radialViewLabel(index: number, count: number): string {
+  const deg = radialViewAngleDeg(index, count);
+  const eighth = deg / 45;
+  const rounded = Math.round(deg * 10) / 10;
+  return Number.isInteger(eighth) ? `${rounded}° · ${BEARINGS[eighth % 8]}` : `${rounded}°`;
+}
+
+/** Stable port id for a view — independent of the label wording. */
+export const radialViewId = (index: number): string => `a${index}`;
+
+/** Views in port order: bearing 0° (to the right) and anticlockwise from there. */
+export function radialViews(count: number): { index: number; id: string; label: string; angleDeg: number }[] {
+  const n = clampRadialViews(count);
+  return Array.from({ length: n }, (_, index) => ({
+    index,
+    id: radialViewId(index),
+    label: radialViewLabel(index, n),
+    angleDeg: radialViewAngleDeg(index, n),
+  }));
+}
+
+function requireRadialViews(views: RasterImage[], count: number): number {
+  const n = clampRadialViews(count);
+  if (views.length !== n) {
+    throw new Error(`A ${n}-view radial array needs ${n} images (got ${views.length}).`);
+  }
+  return n;
+}
+
+/**
+ * {@link gridInterlacedSize} for a ring of wedges.
+ *
+ * Always the printer's own raster, and not as a fallback: a wedge boundary is a
+ * *radial line*, so unlike a grid's tile edges there is no orientation at which
+ * they run along the pixels. They also converge — near the centre of a cell the
+ * wedges are finer than any raster can hold, which is exactly why the views
+ * merge there — so the sensible target is the finest raster the print has.
+ */
+export function radialInterlacedSize(settings: RadialSettings, views: RasterImage[]): OutputSize {
+  const first = views[0];
+  const cells = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
+  const samples = Math.max(1, settings.stripSamples);
+  // Enough pixels that a wedge is `stripSamples` wide where it is widest — at
+  // the rim, where it subtends (π/N) of a cell diameter.
+  const forWedges = Math.ceil((cells * clampRadialViews(settings.views) * samples) / Math.PI);
+  const forArtwork = Math.max(...views.map((v) => v.width));
+  const width = Math.max(1, forWedges, forArtwork, outputSize(settings, first).width);
+  return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
+}
+
+/**
+ * Which view owns a point inside a cell: the bearing of its offset from the
+ * cell centre, in sheet coordinates, cut into `n` equal wedges.
+ *
+ * Each wedge is *centred* on the bearing its view is named for, so the view
+ * called 0° is the one you see from dead level with the right-hand edge, and
+ * the seams fall halfway between two names. Starting the wedge at its own
+ * bearing instead would make every label off by half a step.
+ *
+ * `du`/`dv` are the offset in the array's own axes; the array's orientation is
+ * undone here so that a view named 0° is seen from the right of the *print*
+ * however the lenslets are turned. Sheet y runs down the raster, so it is
+ * negated to make "up" mean up.
+ */
+export function radialViewAt(
+  du: number,
+  dv: number,
+  n: number,
+  settings: { orientationDeg: number; spin: number; mirrorViews: boolean },
+): number {
+  const theta = (settings.orientationDeg * Math.PI) / 180;
+  const dx = du * Math.cos(theta) - dv * Math.sin(theta);
+  const dy = du * Math.sin(theta) + dv * Math.cos(theta);
+  // Bearing of the *tile*; the eye that sees it is opposite, because the lens
+  // inverts — so a mirrored array adds half a turn.
+  let turns = Math.atan2(-dy, dx) / (2 * Math.PI);
+  if (settings.mirrorViews) turns += 0.5;
+  // Half a step, so each wedge straddles its own bearing rather than starting
+  // at it; then the spin, which slides every seam together.
+  turns += (0.5 + settings.spin) / n;
+  turns -= Math.floor(turns);
+  return Math.min(n - 1, Math.floor(turns * n));
+}
+
+/**
+ * Interlace a ring of views under the cap array: the bearing within a cell
+ * picks the view, so every view meets every other at the cell centre.
+ *
+ * Views arrive in {@link radialViews} order — bearing 0° first, anticlockwise.
+ */
+export function renderRadialInterlaced(
+  views: RasterImage[],
+  settings: RadialSettings,
+  options: RenderOptions = {},
+): RasterImage {
+  const n = requireRadialViews(views, settings.views);
+  const size = options.interlacedSize ?? radialInterlacedSize(settings, views);
+  const width = Math.max(1, Math.round(size.width));
+  const height = Math.max(1, Math.round(size.height));
+  checkBudget(width, height, 'Interlaced artwork', 'Reduce Width (mm), PPI, LPI or the source size');
+
+  const s = sheet(views, settings, options);
+  const packing = clampPacking(settings.packing);
+  const rowScale = packing === 'hex' ? HEX_ROW_SPACING : 1;
+  const phaseY = settings.phaseY - Math.floor(settings.phaseY);
+  const mmPerPx = s.widthMm / width;
+  const out = createImage(width, height, [255, 255, 255, 255]);
+
+  for (let y = 0; y < height; y++) {
+    const yMm = (y + 0.5) * mmPerPx;
+    for (let x = 0; x < width; x++) {
+      const xMm = (x + 0.5) * mmPerPx;
+      const band = bandAt(s, xMm, yMm);
+      if (!band) continue;
+
+      const pitchMm = band.geometry.pitchMm;
+      const u = xMm * s.cos + yMm * s.sin;
+      const v = -xMm * s.sin + yMm * s.cos;
+      const su = u / pitchMm + s.phase;
+      const sv = v / (pitchMm * rowScale) + phaseY;
+      const cell = latticeAt(su, sv, packing);
+      const view = radialViewAt(cell.du, cell.dv, n, settings);
+
+      // Sample at the cell centre, as the grid does: every wedge of a cell
+      // shows the same spot of the picture, from its own view.
+      const uc = (cell.cu - s.phase) * pitchMm;
+      const vc = (cell.cv - phaseY) * pitchMm * rowScale;
+      sampleNormalized(
+        views[view],
+        (uc * s.cos - vc * s.sin) / s.widthMm,
+        (uc * s.sin + vc * s.cos) / s.heightMm,
+        out.data,
+        (y * width + x) * 4,
+      );
+    }
+  }
+  return out;
+}
+
+/** The lens array for a radial print — the same caps the grid prints. */
+export function renderRadialDepthMap(
+  views: RasterImage[],
+  settings: RadialSettings,
+  options: RenderOptions = {},
+): DepthMapResult {
+  requireRadialViews(views, settings.views);
+  return renderCapDepthMap(views, settings, options);
+}
+
+/** Both halves of a radial print. See {@link renderLenticular}. */
+export function renderRadial(
+  views: RasterImage[],
+  settings: RadialSettings,
+  options: RenderOptions = {},
+): LenticularRender {
+  requireRadialViews(views, settings.views);
+  const art = options.interlacedSize ?? radialInterlacedSize(settings, views);
+  const map = outputSize(settings, views[0]);
+  checkBudget(art.width, art.height, 'Interlaced artwork', 'Reduce Width (mm), PPI, LPI or the source size');
+  checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI');
+
+  const interlaced = renderRadialInterlaced(views, settings, options);
+  const depth = renderRadialDepthMap(views, settings, options);
+  return {
+    interlaced,
+    depth: depth.depth,
+    depthScaleMm: depth.scaleMm,
+    depthWidth: depth.width,
+    depthHeight: depth.height,
+    bands: depth.bands,
+  };
+}
+
+/**
+ * Switch target for a radial print: the views alternate white and black around
+ * the circle, so walking around the sheet flashes it. An odd view count has to
+ * put two of one colour next to each other somewhere — that seam is the one
+ * place the flip does not happen, and it is where 0° meets the last view.
+ */
+export function radialSwitchViews(count: number): RasterImage[] {
+  const n = clampRadialViews(count);
+  return Array.from({ length: n }, (_, i) => {
+    const v = i % 2 === 0 ? 255 : 0;
+    return createImage(1, 1, [v, v, v, 255]);
+  });
+}
+
 /** Fewer pixels than this across a lenticule and the lens profile is terraced. */
 const MIN_LENS_PX = 8;
 
@@ -950,6 +1218,62 @@ export function gridCellCounts(settings: LensGridSettings, first: RasterImage): 
     width: Math.max(1, Math.round(across)),
     height: Math.max(1, Math.round((across * first.height) / (first.width * rowScale))),
   };
+}
+
+/** {@link describeGeometry} for the radial node. */
+export function describeRadialGeometry(
+  settings: RadialSettings,
+  geometry: LensGeometry,
+  depthSize: OutputSize,
+  artSize: OutputSize,
+  cells: OutputSize,
+): string {
+  const mm = (v: number) => v.toFixed(3);
+  const n = clampRadialViews(settings.views);
+  const packing = clampPacking(settings.packing);
+  const stepDeg = 360 / n;
+  // Half the cone is as far off-axis as you can get before the next view; the
+  // wedge owns a bearing, so what it spans is an angle *around* the print.
+  const lines = [
+    `${n} views around the circle, one every ${stepDeg.toFixed(1)}° of bearing · ${settings.widthMm} mm wide`,
+    `Head-on all ${n} merge: every wedge meets at the centre of its lenslet, so the eye averages the ` +
+      `whole set. Tilt in any direction and the view owning that bearing takes the sheet`,
+    `${packing === 'hex' ? 'Hexagonal' : 'Square'} lenslet packing — ` +
+      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
+    `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
+      `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
+    `Artwork on the full ${settings.ppi} PPI raster: wedge edges are radial lines, so no orientation ` +
+      `makes them run along the pixels, and they converge to a point at every lenslet centre`,
+    `Lenslet pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
+      `${((artSize.width / ((settings.widthMm * settings.lpi) / 25.4)) * (Math.PI / n)).toFixed(2)} px ` +
+      `across a wedge at the rim`,
+    `Each view resolves to ${cells.width}×${cells.height} px (one per lenslet)`,
+    `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
+    `Radius ${mm(geometry.radiusMm)} mm · focus ${mm(geometry.focusMm)} mm below apex · ` +
+      `viewing cone ${geometry.viewAngleDeg.toFixed(1)}° — a view holds from just off head-on to the edge ` +
+      `of that cone, at its own bearing`,
+  ];
+  if (!geometry.feasible) {
+    lines.push(
+      `⚠ At ${settings.lpi} LPI / RI ${settings.ri} the lens cannot focus in ${mm(settings.heightMm)} mm — ` +
+        `it focuses ${mm(geometry.focusMm)} mm down. Raise Height to ${mm(geometry.minHeightMm)} mm or raise LPI.`,
+    );
+  }
+  if (geometry.pitchPx < MIN_LENS_PX) {
+    lines.push(
+      `⚠ Only ${geometry.pitchPx.toFixed(2)} px across a lenslet — the printed lens will be terraced. ` +
+        `Raise PPI or lower LPI.`,
+    );
+  }
+  // A wedge narrower than a printed dot at the rim cannot be printed at all.
+  const wedgeRimPx = (geometry.pitchPx * Math.PI) / n;
+  if (wedgeRimPx < 2) {
+    lines.push(
+      `⚠ A wedge is only ${wedgeRimPx.toFixed(2)} px across even at the rim of a lenslet — the views will ` +
+        `blur into each other everywhere, not just head-on. Use fewer views, lower LPI, or raise PPI.`,
+    );
+  }
+  return lines.join('\n');
 }
 
 /** {@link describeGeometry} for the 2D grid node. */

@@ -15,12 +15,18 @@ import {
   lensGeometry,
   outputSize,
   packingFill,
+  radialInterlacedSize,
+  radialSwitchViews,
+  radialViews,
   renderDepthMap,
   renderGridDepthMap,
   renderGridInterlaced,
   renderInterlaced,
+  renderRadialDepthMap,
+  renderRadialInterlaced,
   stripsOffPixelGrid,
   switchFrames,
+  clampRadialViews,
   type CalibrationParam,
   type CalibrationSpec,
   type DepthMapResult,
@@ -28,9 +34,10 @@ import {
   type OutputSize,
   type RenderOptions,
 } from '../lib/lenticular';
-import { lensGridCellInputs } from '../engine/ports';
+import { lensGridCellInputs, radialViewInputs } from '../engine/ports';
 import { settingsFromConfig } from '../nodes/lenticular';
 import { gridSettingsFromConfig } from '../nodes/lensGrid';
+import { radialSettingsFromConfig } from '../nodes/radialGrid';
 import { bool, num } from '../nodes/helpers';
 import type { NodeConfig, RasterImage } from '../types';
 
@@ -296,6 +303,82 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
         renderArt: (v, options) => renderInterlaced(v, settings, options),
         renderDepth: (options) => renderDepthMap(frames, settings, options),
         switchViews: () => switchFrames(frames.length),
+      }}
+    />
+  );
+}
+
+/** Editor for the Radial Lens Print node. */
+export function RadialGridEditor({ nodeId }: { nodeId: string }) {
+  const node = useStore((s) => s.nodes.find((n) => n.id === nodeId));
+  const views = useStore(
+    useShallow((s) => {
+      const nd = s.nodes.find((n) => n.id === nodeId);
+      if (!nd) return [];
+      // A Sequence on `all` carries the whole ring; a bearing wired
+      // individually overrides it. Same precedence as the node's own gather.
+      const bundle = s.edges.find((e) => e.target === nodeId && e.targetHandle === 'all');
+      const bundled = bundle ? s.runtime[bundle.source]?.outputs?.[bundle.sourceHandle] : undefined;
+      const frames = bundled?.kind === 'sequence' ? bundled.frames : [];
+      return radialViewInputs(nd.config).map(
+        (port, i) => imageOn(s.edges, s.runtime, nodeId, port.id) ?? frames[i],
+      );
+    }),
+  );
+
+  if (!node) return null;
+  const settings = radialSettingsFromConfig(node.config);
+  const n = clampRadialViews(settings.views);
+  const present = views.filter((v): v is RasterImage => !!v);
+  const ready = present.length === n;
+  const missingLabels = radialViewInputs(node.config)
+    .filter((_, i) => !views[i])
+    .map((p) => p.label);
+  const cells = ready ? gridCellCounts({ ...settings, grid: 2, mirrorViews: true }, present[0]) : null;
+
+  return (
+    <PrintEditor
+      config={node.config}
+      kind={{
+        slug: 'radial',
+        settings,
+        views: present,
+        ready,
+        missing: `Connect all ${n} views. Missing: ${missingLabels.join(', ')}.`,
+        // One whole cell of gutter, as the grid uses: a band edge would
+        // otherwise leave a row of half-printed lenslets.
+        bandGapMm: Math.max(BAND_GAP_MM, 25.4 / Math.max(1, settings.lpi)),
+        artSize: ready ? radialInterlacedSize(settings, present) : null,
+        rows: (
+          <>
+            <dt>Views</dt>
+            <dd>
+              {n} around the circle, one every {(360 / n).toFixed(1)}°
+            </dd>
+            <dt>Bearings</dt>
+            <dd>
+              {radialViews(n)
+                .map((v) => v.label)
+                .join(' · ')}
+            </dd>
+            <dt>Wedge at the rim</dt>
+            <dd>{((lensGeometry(settings).pitchPx * Math.PI) / n).toFixed(2)} px</dd>
+            <dt>Per-view resolution</dt>
+            <dd>{cells ? `${cells.width} × ${cells.height} px (one per lenslet)` : '—'}</dd>
+          </>
+        ),
+        artNote: (
+          <p className="lenticular-note">
+            The wedge edges are radial lines, so no orientation makes them run along the pixels and they
+            converge to a point at the centre of every lenslet. The artwork therefore always ships on the
+            printer&apos;s own {settings.ppi} PPI raster — the finest the print can resolve, spent where the
+            views separate. That convergence is the effect, not a defect: it is what makes all {n} views merge
+            when you look at the sheet square on.
+          </p>
+        ),
+        renderArt: (v, options) => renderRadialInterlaced(v, settings, options),
+        renderDepth: (options) => renderRadialDepthMap(present, settings, options),
+        switchViews: () => radialSwitchViews(n),
       }}
     />
   );

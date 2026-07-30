@@ -10,6 +10,7 @@ import type { SavedGraph } from '../types';
 import { lenticularNode } from '../nodes/lenticular';
 import { lensGridNode } from '../nodes/lensGrid';
 import { modelInputNode, modelViewsNode } from '../nodes/model3d';
+import { modelStereoNode } from '../nodes/modelStereo';
 import { animationInputNode } from '../nodes/animation';
 
 /**
@@ -618,6 +619,58 @@ export const EXAMPLES: Example[] = [
       ],
       // One wire carries all nine views, in the order the grid names its cells.
       edges: [wire('cube', 'views', 'out', 'model'), wire('views', 'grid', 'views', 'views')],
+    },
+  },
+  {
+    name: 'Stereo window → 3D cube',
+    description:
+      'The same cube, but standing *behind* the sheet instead of straddling it: the print becomes a ' +
+      'window you look into, and the paper’s own edges cover and uncover the cube as you move past — ' +
+      'which is where most of the depth you actually see comes from. Twelve views across the lens cone ' +
+      'go down one wire into Lenticular Print, so the cube turns as you walk rather than flipping. ' +
+      'Depth behind the glass is cheaper than depth in front of it, which is why this carries 6 mm of ' +
+      'subject where the 3×3 grid manages 2. Press Run ▶ on both manual nodes.',
+    graph: {
+      version: 1,
+      nodes: [
+        {
+          id: 'cube',
+          type: 'modelInput',
+          position: { x: 60, y: 200 },
+          config: { ...modelInputNode.defaultConfig(), src: CUBE_OBJ_URL, srcRef: '', name: 'cube.obj' },
+        },
+        {
+          id: 'stereo',
+          type: 'modelStereo',
+          position: { x: 420, y: 200 },
+          config: {
+            ...modelStereoNode.defaultConfig(),
+            // Square-on a cube is a square, and a square has no silhouette to
+            // move against the window frame. Turned into a three-quarter view
+            // it has corners at three depths — the same reason the grid example
+            // turns it, and it matters more here, because the frame occluding a
+            // corner is the cue the window is built on.
+            rotX: -25,
+            rotY: 30,
+            // 6 mm of cube behind the glass. A 1D print spends resolution on
+            // one axis only, so twelve views fit where a 3×3 grid has nine
+            // eye positions in total — the step between eyes is a third of the
+            // grid's, and the depth budget grows with it.
+            depthMm: 6,
+            // Nothing between the glass and the cube: its nearest corner just
+            // touches the window, which is as far forward as a window goes.
+            setbackMm: 0,
+          },
+        },
+        {
+          id: 'print',
+          type: 'lenticular',
+          position: { x: 800, y: 200 },
+          config: lenticularNode.defaultConfig(),
+        },
+      ],
+      // One wire carries all twelve views, already ordered for the lens.
+      edges: [wire('cube', 'stereo', 'out', 'model'), wire('stereo', 'print', 'views', 'frames')],
     },
   },
 ];
