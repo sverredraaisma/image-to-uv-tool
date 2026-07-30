@@ -343,11 +343,31 @@ describe('the loading-spinner example', () => {
     expect(new Set(views.map((v) => v.data.join(','))).size).toBe(4);
   });
 
-  it('renders to a small, printable pair of sheets', async () => {
+  it('prints at the node’s default optics, on a 2×2 grid', () => {
+    const node = graph.nodes.find((n) => n.id === 'grid')!;
+    const defaults = getNodeDef('lensGrid').defaultConfig();
+    // Only the grid size is the example's own choice — it supplies four views.
+    expect(node.config).toEqual({ ...defaults, grid: 2 });
+  });
+
+  it('renders a printable pair of sheets', async () => {
     const out = await runSources();
     const node = graph.nodes.find((n) => n.id === 'grid')!;
     const result = await getNodeDef('lensGrid').compute(
-      ctx({ c0r0: out.s0, c1r0: out.r90, c1r1: out.r180, c0r1: out.r270 }, node.config),
+      // Rendered on a smaller, coarser sheet than the example ships: at the
+      // default 100 mm and 1440 PPI the lens map is 32 MP, too slow to sit in a
+      // unit test. Only those two settings change — the lens itself (45 LPI
+      // pitch, 0.9 mm of varnish at RI 1.5, 2×2, mirrored) is the example's, so
+      // fewer pixels land under each lenslet but the optics being solved are the
+      // shipped ones. That the example ships the defaults is asserted above.
+      ctx(
+        { c0r0: out.s0, c1r0: out.r90, c1r1: out.r180, c0r1: out.r270 },
+        {
+          ...node.config,
+          widthMm: 50,
+          ppi: 600,
+        },
+      ),
     );
     const interlaced = result.interlaced as RasterImage;
     expect((result.depth as RasterImage).width).toBe(1181); // 50 mm at 600 PPI
