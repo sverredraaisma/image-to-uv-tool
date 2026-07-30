@@ -10,9 +10,15 @@ import type { SavedGraph } from '../types';
 import { lenticularNode } from '../nodes/lenticular';
 import { lensGridNode } from '../nodes/lensGrid';
 import { animationInputNode } from '../nodes/animation';
-// Inlined as a base64 data URL rather than fetched from public/: the app is
-// served from a subpath on GitHub Pages, where an absolute path 404s.
-import fireplaceGif from '../assets/fireplace-fire.gif?inline';
+
+/**
+ * A file in public/, addressed the way it will actually be served. BASE_URL is
+ * '/' in dev and '/<repo>/' on a GitHub Pages project site, so a root-absolute
+ * path would 404 there — the same reason main.tsx registers the service worker
+ * through it. Kept as a URL rather than inlined bytes: the fetch happens once,
+ * only if someone loads the example, instead of every visitor downloading it.
+ */
+const publicAsset = (file: string): string => `${import.meta.env.BASE_URL}${file}`;
 
 export interface Example {
   name: string;
@@ -388,10 +394,8 @@ export const EXAMPLES: Example[] = [
           position: { x: 60, y: 200 },
           config: {
             ...animationInputNode.defaultConfig(),
-            // The GIF travels inside the bundle as a data URL, so the example
-            // works wherever the app is hosted — a GitHub Pages project site
-            // serves from /<repo>/, where an absolute /file.gif is a 404.
-            src: fireplaceGif,
+            // Shipped in public/, resolved against the deploy base path.
+            src: publicAsset('fireplace-fire.gif'),
             srcRef: '',
             name: 'fireplace-fire.gif',
           },

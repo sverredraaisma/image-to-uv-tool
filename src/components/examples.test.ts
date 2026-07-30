@@ -51,10 +51,20 @@ describe('empty-state examples', () => {
     expect(problems).toEqual([]);
   });
 
-  it('carry the animation inline, so they load from any base path', () => {
-    const gif = EXAMPLES.flatMap((ex) => ex.graph.nodes).find((n) => n.type === 'animationInput');
-    // A path like /fireplace-fire.gif 404s on a GitHub Pages project site.
-    expect(String(gif?.config.src)).toMatch(/^data:image\/gif;base64,/);
+  it('address the animation through the deploy base path, not the bundle', async () => {
+    // A hardcoded /fireplace-fire.gif 404s on a GitHub Pages project site, and
+    // inlining it as a data URL would put ~272 KB in every visitor's download.
+    // Re-imported under a subpath base, so a root-absolute path fails here.
+    vi.stubEnv('BASE_URL', '/image-to-uv-tool/');
+    vi.resetModules();
+    try {
+      const { EXAMPLES: deployed } = await import('./examples');
+      const gif = deployed.flatMap((ex) => ex.graph.nodes).find((n) => n.type === 'animationInput');
+      expect(gif?.config.src).toBe('/image-to-uv-tool/fireplace-fire.gif');
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 
   it('survive sanitisation intact (valid edges, no cycles, correct handles/types)', () => {
