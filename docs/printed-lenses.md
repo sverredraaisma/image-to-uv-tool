@@ -588,6 +588,41 @@ the aperture. At the default setback of zero the factor is exactly 1 — the nea
 subject touches the glass and fills the frame, and everything deeper falls away inside it, which is
 what a box seen through a window looks like.
 
+#### Doing it in Blender instead
+
+The tool's own renderer is deliberately small — one pixel per lenticule is not
+much to ask of a rasteriser — but a window print of a properly lit, properly
+shaded scene wants a real renderer. **[`blender_stereo_views.py`](blender_stereo_views.py)**
+is this same camera, rebuilt in Blender:
+
+```bash
+blender scene.blend --background --python docs/blender_stereo_views.py -- \
+    --out ./views --views 12 --depth-mm 6 --lpi 45
+```
+
+It creates a `StereoWindow` empty — the window itself, which you move, rotate
+and scale to frame your subject — parents a camera to it solved so the window
+rectangle exactly fills the frame, and renders one image per eye position in the
+order Lenticular Print interlaces them, with a JSON manifest of every solved
+number beside them.
+
+Two things in it are worth knowing about even if you never run it. The first is
+that it **measures your scene against the window** and says, in the print's own
+terms, what is wrong with the arrangement: anything sticking out in front of the
+glass is reported as the window violation it is, and a subject deeper than the
+budget is reported in lenticules per view step. The second is that it does not
+trust anyone's memory of Blender's `shift_x` sign convention — it **probes the
+projection twice and solves the line**, then asserts that a point on the window
+plane lands in the same place in every view. That property is the one the whole
+print depends on, so it is checked rather than assumed.
+
+The optics half runs without Blender, against the same figures this document
+quotes:
+
+```bash
+python docs/blender_stereo_views.py --selftest
+```
+
 #### Ordering the views for the lens
 
 The renderer hands back the run **left eye first**, which is honestly what an eye in each position

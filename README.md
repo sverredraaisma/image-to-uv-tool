@@ -114,7 +114,11 @@ of artwork under each lenslet meet at the point the eye samples when it is squar
 
 **Model → Stereo Views** feeds the 1D case from a mesh: it renders the model standing behind the
 sheet, so the print reads as a window you look into rather than something floating in front of the
-paper, and hands the whole run of views to **Lenticular Print** on one wire.
+paper, and hands the whole run of views to **Lenticular Print** on one wire. For a scene you would rather
+render properly, **[docs/blender_stereo_views.py](docs/blender_stereo_views.py)** is the same camera
+rebuilt in Blender — it rigs the window, renders the run in the order the print wants, and measures
+your scene against the window (anything in front of the glass, or deeper than the parallax budget,
+is reported before you print it).
 
 ## Node catalog
 

@@ -7,3 +7,7 @@ coverage
 .idea
 *.log
 *.tsbuildinfo
+
+# Python bytecode from the docs scripts
+__pycache__/
+*.pyc
