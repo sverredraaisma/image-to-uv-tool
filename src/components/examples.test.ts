@@ -23,6 +23,40 @@ describe('empty-state examples', () => {
     }
   });
 
+  it('print at the nodes own default settings, not demo-tuned ones', () => {
+    // The defaults are the common UV-flatbed numbers (1440 PPI, 45 LPI, 0.9 mm
+    // of varnish at RI 1.5). An example that quietly halved them would teach
+    // people the wrong settings. Grid size is the artwork's choice, not the
+    // printer's, so a 2×2 spinner may override it; the asset keys carry the
+    // upload and have no default.
+    const allowedOverrides: Record<string, string[]> = {
+      lensGrid: ['grid'],
+      animationInput: ['src', 'srcRef', 'name'],
+    };
+    const problems: string[] = [];
+    for (const ex of EXAMPLES) {
+      for (const n of ex.graph.nodes) {
+        const def = getNodeDefSafe(n.type);
+        if (!def || !['lenticular', 'lensGrid', 'animationInput'].includes(n.type)) continue;
+        const defaults = def.defaultConfig();
+        const allowed = allowedOverrides[n.type] ?? [];
+        for (const [key, value] of Object.entries(defaults)) {
+          if (allowed.includes(key)) continue;
+          if (n.config[key] !== value) {
+            problems.push(`${ex.name} · ${n.type}.${key}: ${String(n.config[key])} ≠ ${String(value)}`);
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('carry the animation inline, so they load from any base path', () => {
+    const gif = EXAMPLES.flatMap((ex) => ex.graph.nodes).find((n) => n.type === 'animationInput');
+    // A path like /fireplace-fire.gif 404s on a GitHub Pages project site.
+    expect(String(gif?.config.src)).toMatch(/^data:image\/gif;base64,/);
+  });
+
   it('survive sanitisation intact (valid edges, no cycles, correct handles/types)', () => {
     for (const ex of EXAMPLES) {
       const { nodes, edges } = sanitizeGraph(ex.graph, opts);

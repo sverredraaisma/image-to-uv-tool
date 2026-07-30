@@ -4,6 +4,15 @@
 // gloss recipe includes one manual Replicate (AI) segmentation step.
 
 import type { SavedGraph } from '../types';
+// The print nodes supply their own settings, so an example can never drift from
+// the defaults — which are the ordinary UV-flatbed numbers (1440 PPI, 45 LPI,
+// 0.9 mm of varnish at RI 1.5) rather than something tuned for a fast demo.
+import { lenticularNode } from '../nodes/lenticular';
+import { lensGridNode } from '../nodes/lensGrid';
+import { animationInputNode } from '../nodes/animation';
+// Inlined as a base64 data URL rather than fetched from public/: the app is
+// served from a subpath on GitHub Pages, where an absolute path 404s.
+import fireplaceGif from '../assets/fireplace-fire.gif?inline';
 
 export interface Example {
   name: string;
@@ -355,26 +364,10 @@ export const EXAMPLES: Example[] = [
           id: 'print',
           type: 'lenticular',
           position: { x: 420, y: 200 },
-          // Small and coarse so Run stays quick: a 1181 px lens map, not 32 MP.
-          // 50 LPI needs at least 0.762 mm of gloss to focus, so 0.9 is fine.
-          config: {
-            widthMm: 50,
-            ppi: 600,
-            lpi: 50,
-            phase: 0,
-            heightMm: 0.9,
-            ri: 1.5,
-            orientationDeg: 0,
-            stripSamples: 2,
-            calibBands: 9,
-            heightMin: 0.6,
-            heightMax: 1.4,
-            riMin: 1.4,
-            riMax: 1.6,
-            lpiMin: 40,
-            lpiMax: 60,
-            lpiAutoHeight: true,
-          },
+          // Straight off the node's defaults: 100 mm at 1440 PPI / 45 LPI on a
+          // 0.9 mm varnish stack at RI 1.5 — the ordinary UV flatbed job. It is
+          // a 32 MP render, which is exactly why the node is manual.
+          config: lenticularNode.defaultConfig(),
         },
       ],
       // Frames interlace in connection order: dot first, ring second.
@@ -384,8 +377,8 @@ export const EXAMPLES: Example[] = [
   {
     name: 'Lenticular → animated fireplace',
     description:
-      'A whole GIF printed as one lenticular: the fire loop is resampled to 6 frames, and tilting the ' +
-      'sheet plays the animation and repeats it. Press Run ▶ on the print node.',
+      'A whole GIF printed as one lenticular: the fire loop is resampled to the node’s 8 frames, and ' +
+      'tilting the sheet plays the animation and repeats it. Press Run ▶ on the print node.',
     graph: {
       version: 1,
       nodes: [
@@ -394,43 +387,20 @@ export const EXAMPLES: Example[] = [
           type: 'animationInput',
           position: { x: 60, y: 200 },
           config: {
-            // Shipped in public/, so the example runs with no upload.
-            src: '/fireplace-fire.gif',
+            ...animationInputNode.defaultConfig(),
+            // The GIF travels inside the bundle as a data URL, so the example
+            // works wherever the app is hosted — a GitHub Pages project site
+            // serves from /<repo>/, where an absolute /file.gif is a 404.
+            src: fireplaceGif,
             srcRef: '',
             name: 'fireplace-fire.gif',
-            // 6 frames fit comfortably under a 50 LPI lens at 600 PPI with two
-            // artwork pixels per strip (600 ÷ 50 ÷ 2 = 6).
-            frameCount: 6,
-            loop: 'forward',
-            maxSize: 512,
-            cycles: 1,
-            reverse: false,
-            ppi: 600,
-            lpi: 50,
           },
         },
         {
           id: 'print',
           type: 'lenticular',
           position: { x: 420, y: 200 },
-          config: {
-            widthMm: 50,
-            ppi: 600,
-            lpi: 50,
-            phase: 0,
-            heightMm: 0.9,
-            ri: 1.5,
-            orientationDeg: 0,
-            stripSamples: 2,
-            calibBands: 9,
-            heightMin: 0.6,
-            heightMax: 1.4,
-            riMin: 1.4,
-            riMax: 1.6,
-            lpiMin: 40,
-            lpiMax: 60,
-            lpiAutoHeight: true,
-          },
+          config: lenticularNode.defaultConfig(),
         },
       ],
       // One wire carries every frame: the Sequence expands inside the print.
@@ -441,7 +411,8 @@ export const EXAMPLES: Example[] = [
     name: 'Lens Grid → loading spinner',
     description:
       'The web loading spinner, printed: a ring of 12 graduated ticks on a 2×2 lens grid, so the bright ' +
-      'tail chases you round as you turn the sheet.',
+      'tail chases you round as you turn the sheet. Press Run ▶ — it prints at the node’s default ' +
+      '1440 PPI, so it is a full-resolution render.',
     graph: {
       version: 1,
       nodes: [
@@ -480,7 +451,7 @@ export const EXAMPLES: Example[] = [
           },
         },
         // 12 discrete steps instead of a smooth tail: ticks stay legible at the
-        // ~98 px each view actually resolves to.
+        // ~177 px each view actually resolves to (100 mm of 45 LPI lenslets).
         { id: 'ticks', type: 'posterize', position: { x: 300, y: 300 }, config: { levels: 12 } },
         // Ring × ticks = the spinner, its bright tail at 12 o'clock.
         { id: 's0', type: 'combine', position: { x: 520, y: 190 }, config: { mode: 'multiply' } },
@@ -492,28 +463,13 @@ export const EXAMPLES: Example[] = [
           id: 'grid',
           type: 'lensGrid',
           position: { x: 990, y: 190 },
-          // Small and coarse so Run stays quick: a 1181 px lens map, not 32 MP.
-          // 50 LPI needs at least 0.762 mm of gloss to focus, so 0.9 is fine.
+          // The node's own optics — 100 mm at 1440 PPI / 45 LPI, 0.9 mm of
+          // varnish at RI 1.5 — with the grid dropped to 2 because this example
+          // supplies exactly four views. Grid size is the artwork's decision;
+          // everything else is the printer's.
           config: {
+            ...lensGridNode.defaultConfig(),
             grid: 2,
-            widthMm: 50,
-            ppi: 600,
-            lpi: 50,
-            phase: 0,
-            phaseY: 0,
-            heightMm: 0.9,
-            ri: 1.5,
-            orientationDeg: 0,
-            mirrorViews: true,
-            stripSamples: 2,
-            calibBands: 9,
-            heightMin: 0.6,
-            heightMax: 1.4,
-            riMin: 1.4,
-            riMax: 1.6,
-            lpiMin: 40,
-            lpiMax: 60,
-            lpiAutoHeight: true,
           },
         },
       ],

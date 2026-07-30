@@ -343,11 +343,29 @@ describe('the loading-spinner example', () => {
     expect(new Set(views.map((v) => v.data.join(','))).size).toBe(4);
   });
 
-  it('renders to a small, printable pair of sheets', async () => {
+  it('prints at the node’s default optics, on a 2×2 grid', () => {
+    const node = graph.nodes.find((n) => n.id === 'grid')!;
+    const defaults = getNodeDef('lensGrid').defaultConfig();
+    // Only the grid size is the example's own choice — it supplies four views.
+    expect(node.config).toEqual({ ...defaults, grid: 2 });
+  });
+
+  it('renders a printable pair of sheets', async () => {
     const out = await runSources();
     const node = graph.nodes.find((n) => n.id === 'grid')!;
     const result = await getNodeDef('lensGrid').compute(
-      ctx({ c0r0: out.s0, c1r0: out.r90, c1r1: out.r180, c0r1: out.r270 }, node.config),
+      // Rendered at a coarser raster than the example ships: the default
+      // 100 mm at 1440 PPI is a 32 MP lens map, too slow to sit in a unit test.
+      // The optics are identical — only the sheet size differs.
+      ctx(
+        { c0r0: out.s0, c1r0: out.r90, c1r1: out.r180, c0r1: out.r270 },
+        {
+          ...node.config,
+          widthMm: 50,
+          ppi: 600,
+          lpi: 50,
+        },
+      ),
     );
     const interlaced = result.interlaced as RasterImage;
     expect((result.depth as RasterImage).width).toBe(1181); // 50 mm at 600 PPI

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 // Imported through Vite as a base64 data URL, so the test needs no filesystem
 // access (the app tsconfig deliberately has no Node types).
-import fireplaceGif from '../../public/fireplace-fire.gif?inline';
+import fireplaceGif from '../assets/fireplace-fire.gif?inline';
 import { decodeGif, interlacedRows, isGif, lzwDecode } from './gif';
 
 // --- A minimal GIF writer, so tests can state exactly what bytes to decode ---
