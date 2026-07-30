@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import '../nodes'; // register built-ins
 import { lensGridNode, gridSettingsFromConfig } from './lensGrid';
-import { lensGridInputs, nodePorts } from '../engine/ports';
+import { lensGridCellInputs, lensGridInputs, nodePorts } from '../engine/ports';
 import { getNodeDef } from '../engine/registry';
 import { EXAMPLES } from '../components/examples';
 import { createImage } from '../lib/image';
@@ -111,19 +111,21 @@ describe('grid cell naming', () => {
 });
 
 describe('Lens Grid node ports', () => {
-  it('derives one required input per cell from the config', () => {
+  it('derives one input per cell from the config, after the sequence port', () => {
     const ports = nodePorts({ type: 'lensGrid', config: { grid: 3 } }, getNodeDef('lensGrid'));
-    expect(ports.inputs).toHaveLength(9);
-    expect(ports.inputs.every((p) => p.required && p.type === 'image')).toBe(true);
-    expect(ports.inputs[4].label).toBe('Centre (neutral)');
+    expect(ports.inputs).toHaveLength(10); // 9 cells + the whole grid on one wire
+    expect(ports.inputs[0]).toMatchObject({ id: 'views', type: 'sequence' });
+    expect(ports.inputs.slice(1).every((p) => p.type === 'image')).toBe(true);
+    expect(ports.inputs[5].label).toBe('Centre (neutral)');
     expect(ports.outputs.map((p) => p.id)).toEqual(['interlaced', 'depth', 'info']);
   });
 
   it('follows the grid setting', () => {
-    expect(lensGridInputs({ grid: 2 })).toHaveLength(4);
-    expect(lensGridInputs({ grid: 4 })).toHaveLength(16);
-    expect(lensGridInputs({})).toHaveLength(9); // default 3×3
-    expect(lensGridInputs({ grid: '2' })).toHaveLength(4); // config values can be strings
+    expect(lensGridCellInputs({ grid: 2 })).toHaveLength(4);
+    expect(lensGridCellInputs({ grid: 4 })).toHaveLength(16);
+    expect(lensGridCellInputs({})).toHaveLength(9); // default 3×3
+    expect(lensGridCellInputs({ grid: '2' })).toHaveLength(4); // config values can be strings
+    expect(lensGridInputs({ grid: 2 })).toHaveLength(5);
   });
 });
 

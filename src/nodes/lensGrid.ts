@@ -16,9 +16,9 @@ import {
   renderLensGrid,
   type LensGridSettings,
 } from '../lib/lenticular';
-import { lensGridInputs } from '../engine/ports';
+import { lensGridCellInputs, lensGridInputs } from '../engine/ports';
 import { settingsFromConfig } from './lenticular';
-import { asImage, bool, num } from './helpers';
+import { asImage, asImages, bool, num } from './helpers';
 
 /** Read the print settings, plus the grid-only ones, out of a node's config. */
 export function gridSettingsFromConfig(config: NodeConfig): LensGridSettings {
@@ -31,18 +31,26 @@ export function gridSettingsFromConfig(config: NodeConfig): LensGridSettings {
   };
 }
 
-/** Views in port order, or the labels of the cells still unconnected. */
-function gatherViews(
+/**
+ * Views in port order, or the labels of the cells still unconnected.
+ *
+ * A Sequence on the `views` port supplies the whole grid at once — that is how
+ * Model → Grid Views feeds this node, and dragging 36 edges for a 6×6 by hand
+ * would be absurd. Individual cell ports win where both are present, so you can
+ * wire the sequence and then override one view with a retouched image.
+ */
+export function gatherViews(
   inputs: ComputeContext['inputs'],
   config: NodeConfig,
 ): RasterImage[] | { missing: string[] } {
+  const bundled = asImages(inputs.views);
   const missing: string[] = [];
   const views: RasterImage[] = [];
-  for (const port of lensGridInputs(config)) {
-    const img = asImage(inputs[port.id]);
+  lensGridCellInputs(config).forEach((port, i) => {
+    const img = asImage(inputs[port.id]) ?? bundled[i];
     if (img) views.push(img);
     else missing.push(port.label);
-  }
+  });
   return missing.length ? { missing } : views;
 }
 
@@ -53,7 +61,8 @@ export const lensGridNode: NodeDefinition = {
   description:
     'Interlace a grid of views under a 2D lens array (rows and columns of lenslets), so the print ' +
     'moves both left/right and up/down. Every input is named for where it is viewed from relative to ' +
-    'head-on — Left · Up, Centre, Right · Down. Same optics and calibration sheets as Lenticular Print; ' +
+    'head-on — Left · Up, Centre, Right · Down; or feed all of them down one wire from Model → Grid ' +
+    'Views. Same optics and calibration sheets as Lenticular Print; ' +
     'a grid of N gives N² views, each resolving to one pixel per lenslet. Lenslets pack hexagonally by ' +
     'default (the densest arrangement, ~15% more lenses and less flat sheet than a square grid) — switch ' +
     'to Square grid to line them up in rows and columns instead. Manual: click Run.',

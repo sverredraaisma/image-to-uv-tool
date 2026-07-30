@@ -28,7 +28,7 @@ import {
   type OutputSize,
   type RenderOptions,
 } from '../lib/lenticular';
-import { lensGridInputs } from '../engine/ports';
+import { lensGridCellInputs } from '../engine/ports';
 import { settingsFromConfig } from '../nodes/lenticular';
 import { gridSettingsFromConfig } from '../nodes/lensGrid';
 import { bool, num } from '../nodes/helpers';
@@ -308,7 +308,14 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
     useShallow((s) => {
       const nd = s.nodes.find((n) => n.id === nodeId);
       if (!nd) return [];
-      return lensGridInputs(nd.config).map((port) => imageOn(s.edges, s.runtime, nodeId, port.id));
+      // A Sequence wired to `views` carries the whole grid; a cell port wired
+      // individually overrides it. Same precedence as the node's own gather.
+      const bundle = s.edges.find((e) => e.target === nodeId && e.targetHandle === 'views');
+      const bundled = bundle ? s.runtime[bundle.source]?.outputs?.[bundle.sourceHandle] : undefined;
+      const frames = bundled?.kind === 'sequence' ? bundled.frames : [];
+      return lensGridCellInputs(nd.config).map(
+        (port, i) => imageOn(s.edges, s.runtime, nodeId, port.id) ?? frames[i],
+      );
     }),
   );
 
@@ -317,7 +324,7 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
   const grid = clampGrid(settings.grid);
   const present = views.filter((v): v is RasterImage => !!v);
   const ready = present.length === grid * grid;
-  const missingLabels = lensGridInputs(node.config)
+  const missingLabels = lensGridCellInputs(node.config)
     .filter((_, i) => !views[i])
     .map((p) => p.label);
   const cells = ready ? gridCellCounts(settings, present[0]) : null;

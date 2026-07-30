@@ -5,6 +5,7 @@ import { aiNodes } from './ai';
 import { llmNodes } from './llm';
 import { lenticularNodes } from './lenticular';
 import { lensGridNodes } from './lensGrid';
+import { model3dNodes } from './model3d';
 import { pipelineNodes } from './pipeline';
 
 let registered = false;
@@ -19,6 +20,7 @@ export function registerBuiltinNodes(): void {
     ...llmNodes,
     ...lenticularNodes,
     ...lensGridNodes,
+    ...model3dNodes,
     ...pipelineNodes,
   ];
   for (const def of all) {

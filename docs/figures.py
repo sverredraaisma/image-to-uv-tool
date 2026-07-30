@@ -980,6 +980,91 @@ def fig_mirroring():
 
 
 # ---------------------------------------------------------------------------
+# 14b — where the depth budget comes from, and what it costs
+# ---------------------------------------------------------------------------
+
+
+def fig_model_depth():
+    """Parallax on the sheet, and the depth that buys at the default lens.
+
+    Left: why the sheet plane is common to every view and depth is not. Right:
+    the printable depth from p·(N−1)/tan(cone/2) — the closed form the guide
+    quotes, which the viewing distance drops out of entirely.
+    """
+    L = DEFAULT
+    cone = L.view_angle
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(11.4, 4.6))
+
+    # ---- left: two eyes, one sheet, one near point --------------------------
+    clean(ax)
+    D = 3.0
+    eyes = [-1.15, 1.15]
+    sheet_y = 0.0
+    ax.plot([-2.6, 2.6], [sheet_y, sheet_y], color=INK, lw=2.0, zorder=3)
+    ax.text(-2.55, -0.22, "the sheet — every view agrees here", fontsize=9, color=INK)
+    near_y = 0.62
+    ax.add_patch(Circle((0, near_y), 0.075, facecolor=WARN, edgecolor="none", zorder=4))
+    ax.text(0.30, near_y - 0.16, "a point in front", fontsize=9, color=WARN)
+
+    hits = []
+    for ex, name in zip(eyes, ("left eye", "right eye")):
+        ax.add_patch(Circle((ex, D), 0.085, facecolor=ART, edgecolor="none", zorder=4))
+        ax.text(ex, D + 0.16, name, fontsize=9, color=ART, ha="center")
+        # Ray to the sheet through the near point: X = ex + t(x-ex), t = D/(D-z).
+        t = D / (D - near_y)
+        hit = ex + t * (0 - ex)
+        hits.append(hit)
+        ax.plot([ex, hit], [D, sheet_y], color=RAY, lw=1.4, zorder=2)
+        # …and the ray to the sheet-plane point straight below the subject.
+        ax.plot([ex, 0], [D, sheet_y], color=FAINT, lw=1.0, ls=(0, (4, 3)), zorder=1)
+    ax.add_patch(Circle((0, sheet_y), 0.06, facecolor=INK, edgecolor="none", zorder=5))
+    for hit in hits:
+        ax.plot([hit], [sheet_y], marker="o", ms=6, color=RAY, zorder=5)
+    arrow(ax, (hits[0], -0.45), (hits[1], -0.45), style="<|-|>", ms=8, color=RAY)
+    ax.text(
+        0,
+        -0.62,
+        "the near point lands here, and here:\nthat gap is the parallax, and it must\nstay inside one lenslet per view step",
+        ha="center",
+        va="top",
+        fontsize=9.2,
+        color=SUB,
+    )
+    ax.set_xlim(-2.7, 2.7)
+    ax.set_ylim(-1.45, 3.5)
+    ax.set_title(
+        "the eye shifts; the sheet plane does not move", fontsize=11, weight="bold", loc="left"
+    )
+
+    # ---- right: printable depth against grid size ---------------------------
+    grids = [2, 3, 4, 6]
+    depths = [L.pitch * (n - 1) / math.tan(math.radians(cone / 2)) for n in grids]
+    bx.bar([str(n) + "×" + str(n) for n in grids], depths, color=GLOSS_FILL, edgecolor=GLOSS, lw=1.6)
+    for label, d in zip(grids, depths):
+        bx.text(str(label) + "×" + str(label), d + 0.08, f"{d:.2f} mm", ha="center", fontsize=9.5)
+    bx.set_ylabel("printable subject depth (mm)")
+    bx.set_ylim(0, max(depths) * 1.22)
+    bx.grid(color=FAINT, lw=0.5, axis="y")
+    bx.set_axisbelow(True)
+    for s in ("top", "right"):
+        bx.spines[s].set_visible(False)
+    bx.set_title(
+        f"at {L.lpi:.0f} LPI and a {cone:.1f}° cone — depth = p(N−1)/tan(cone/2)",
+        fontsize=11,
+        weight="bold",
+        loc="left",
+    )
+    bx.set_xlabel(
+        "The viewing distance cancels out, and per-view resolution does not change with N:\n"
+        "a bigger grid is how you buy depth. Beyond these, features ghost instead of gliding.",
+        fontsize=9.2,
+        color=SUB,
+        labelpad=10,
+    )
+    save(fig, "14b-model-depth.png")
+
+
+# ---------------------------------------------------------------------------
 # 15 — a calibration sheet
 # ---------------------------------------------------------------------------
 
@@ -1051,6 +1136,7 @@ if __name__ == "__main__":
     fig_packing()
     fig_naming()
     fig_mirroring()
+    fig_model_depth()
     fig_calibration()
     L = DEFAULT
     print(

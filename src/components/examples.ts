@@ -9,7 +9,9 @@ import type { SavedGraph } from '../types';
 // 0.9 mm of varnish at RI 1.5) rather than something tuned for a fast demo.
 import { lenticularNode } from '../nodes/lenticular';
 import { lensGridNode } from '../nodes/lensGrid';
+import { modelInputNode, modelViewsNode } from '../nodes/model3d';
 import { animationInputNode } from '../nodes/animation';
+import { stlToBinary } from '../lib/stl';
 
 /**
  * A file in public/, addressed the way it will actually be served. BASE_URL is
@@ -47,6 +49,37 @@ const wire = (
   target,
   targetHandle,
 });
+
+/**
+ * A cube as a real binary STL, in a data URL — generated here rather than
+ * shipped in public/, because the whole file is 684 bytes and the writer that
+ * makes it is already in the repository. Model units are arbitrary: the render
+ * node centres and fits whatever it is given to the sheet.
+ */
+const CUBE_STL_URL = (() => {
+  const [n, p] = [-10, 10];
+  const face = (
+    a: [number, number, number],
+    b: [number, number, number],
+    c: [number, number, number],
+    d: [number, number, number],
+  ) => [...a, ...b, ...c, ...a, ...c, ...d];
+  // Six faces, each wound counter-clockwise seen from outside the cube.
+  const tris = [
+    ...face([n, n, p], [p, n, p], [p, p, p], [n, p, p]), // front  (+z)
+    ...face([p, n, n], [n, n, n], [n, p, n], [p, p, n]), // back   (−z)
+    ...face([p, n, p], [p, n, n], [p, p, n], [p, p, p]), // right  (+x)
+    ...face([n, n, n], [n, n, p], [n, p, p], [n, p, n]), // left   (−x)
+    ...face([n, p, p], [p, p, p], [p, p, n], [n, p, n]), // top    (+y)
+    ...face([n, n, n], [p, n, n], [p, n, p], [n, n, p]), // bottom (−y)
+  ];
+  const bytes = stlToBinary({
+    kind: 'stl',
+    triangleCount: tris.length / 9,
+    triangles: new Float32Array(tris),
+  });
+  return `data:model/stl;base64,${btoa(String.fromCharCode(...bytes))}`;
+})();
 
 export const EXAMPLES: Example[] = [
   {
@@ -492,6 +525,46 @@ export const EXAMPLES: Example[] = [
         wire('r180', 'grid', 'out', 'c1r1'), // Right · Down ← tail down
         wire('r270', 'grid', 'out', 'c0r1'), // Left · Down  ← tail left
       ],
+    },
+  },
+  {
+    name: 'Lens Grid → 3D cube',
+    description:
+      'A cube rendered from all nine eye positions of a 3×3 lens grid and printed as one sheet, so it ' +
+      'turns as you move. Everything is at the nodes’ defaults — including the 2 mm subject depth, ' +
+      'which sounds absurd until you read the Info: that is already one whole lenslet of parallax per ' +
+      'view step, and it is all a 57° cone at 45 LPI can carry. Press Run ▶ on both manual nodes.',
+    graph: {
+      version: 1,
+      nodes: [
+        {
+          id: 'cube',
+          type: 'modelInput',
+          position: { x: 60, y: 200 },
+          config: { ...modelInputNode.defaultConfig(), src: CUBE_STL_URL, srcRef: '', name: 'cube.stl' },
+        },
+        {
+          id: 'views',
+          type: 'modelViews',
+          position: { x: 420, y: 200 },
+          config: {
+            ...modelViewsNode.defaultConfig(),
+            // The one thing the artwork decides: square-on, a cube is a square,
+            // and a square has no silhouette to move. Turned into a three-quarter
+            // view it has corners at three depths, which is what reads as solid.
+            rotX: -25,
+            rotY: 30,
+          },
+        },
+        {
+          id: 'grid',
+          type: 'lensGrid',
+          position: { x: 800, y: 200 },
+          config: lensGridNode.defaultConfig(),
+        },
+      ],
+      // One wire carries all nine views, in the order the grid names its cells.
+      edges: [wire('cube', 'views', 'out', 'model'), wire('views', 'grid', 'views', 'views')],
     },
   },
 ];

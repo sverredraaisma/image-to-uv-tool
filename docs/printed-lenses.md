@@ -30,6 +30,7 @@ licensing [at the end](#prior-art-and-licence).
 - [Why the relief needs 16 bits](#why-the-relief-needs-16-bits)
 - [Angle and phase](#angle-and-phase)
 - [The two-dimensional version](#the-two-dimensional-version)
+- [Rendering the views from a model](#rendering-the-views-from-a-model)
 - [Calibrating](#calibrating)
 - [The numbers, at the defaults](#the-numbers-at-the-defaults)
 - [Doing it yourself](#doing-it-yourself)
@@ -416,6 +417,100 @@ you — and it's why detail that survives a lenticular can vanish in a grid. In 
 **higher** LPI for a grid — and conveniently, finer pitch also needs less ink height, so the two
 constraints pull the same way for once.
 
+Note what does _not_ change with N: **each view still resolves to one pixel per lenslet whatever the
+grid size**, so 177 × 153 is the answer for a 2 × 2 and for a 6 × 6 alike. More views cost you artwork
+raster and light per view, not sharpness. Hold on to that — it is what makes the depth budget below
+affordable.
+
+---
+
+## Rendering the views from a model
+
+If the subject is a 3D model rather than nine photographs, the views can be rendered — and the
+rendering has to be done in a particular way, which is why the tool has its own renderer (**3D Model
+Input** → **Model → Grid Views**) instead of leaving you to a 3D package.
+
+### Shift the eye; never rotate it
+
+The obvious approach is to point a camera at the subject from each of the N² positions. Don't. Aiming
+the camera ("toe-in") gives every view a different keystone, and it introduces _vertical_ parallax
+between views that should differ only horizontally. Under a lens grid that reads as a wobble as your
+head moves, and no amount of care in the print will fix it.
+
+Instead keep one view direction for every view and move only the eye position, across a plane
+parallel to the sheet. Each view is then a shear of one projection. Concretely, with the eye at
+(`eₓ`, `e_y`, `D`) and the sheet at z = 0, the ray to a point (`x`, `y`, `z`) crosses the sheet at
+
+```
+t = D / (D − z)
+X = eₓ + t(x − eₓ)        Y = e_y + t(y − e_y)
+```
+
+![Parallax on the sheet, and the depth it buys](images/14b-model-depth.png)
+
+Set `z = 0` in that and `t` is 1, so `X = x`: **the eye cancels out.** Every view puts a point on the
+sheet plane in exactly the same place, which is why that plane is the one that prints sharp no matter
+how far you tilt. Off the plane `t ≠ 1`, the eye term survives, and that difference _is_ the parallax
+— opposite in sign either side of the sheet, which is the near-things-move-the-other-way you can
+verify by holding a finger up against a wall.
+
+`t` earns its keep twice: it is `1/w` for this projection, so it interpolates linearly across a
+triangle in screen space and doubles as the z-buffer key.
+
+### The depth budget, which is smaller than you think
+
+Under a lens grid each view is sampled **once per lenslet**. So a feature that moves more than about
+one lenslet between adjacent views is never recorded in between: instead of gliding it jumps, and the
+lens blur turns the jump into a double image. That gives a hard ceiling on usable depth.
+
+Take it from the projection. The eye step between adjacent views is `s = 2D·tan(cone/2)/(N−1)`, and
+∂X/∂eₓ = 1 − t, so a point `z` off the sheet moves `s·z/(D − z)` per step. Set that to one pitch and
+solve, and for the usual case of `D ≫ z` the whole thing collapses:
+
+```
+usable depth (front to back)  ≈  p · (N − 1) / tan(cone/2)
+```
+
+**The viewing distance cancels out.** Depth is set by the pitch, the cone and the grid — nothing else.
+At the defaults (45 LPI, 0.9 mm, RI 1.5, so a 53.3° cone) that is:
+
+| Grid  | Printable subject depth |
+| ----- | ----------------------- |
+| 2 × 2 | 1.1 mm                  |
+| 3 × 3 | 2.2 mm                  |
+| 4 × 4 | 3.4 mm                  |
+| 6 × 6 | 5.6 mm                  |
+
+Two millimetres, for a 100 mm print. That is the single most surprising number in this document, and
+it is not a limitation of the implementation — it is what one sample per lenslet per view means. Three
+ways to buy more, in order of how much they cost you:
+
+1. **A bigger grid.** Depth grows with `N − 1` and per-view resolution doesn't change at all, so this
+   is nearly free — you pay in artwork raster and in light split more ways.
+2. **A coarser pitch.** Depth grows with `p`, but coarse lenses need
+   [thick ink](#when-it-cant-work) and you lose resolution one-for-one.
+3. **A narrower cone.** Fewer degrees to look around in, but every degree carries more depth.
+
+The render node reports the parallax per view step in lenslets and warns past 1.5 of them, with the
+depth it suggests instead. Treat that line as the one to satisfy before printing anything.
+
+### Compress the projection, not the model
+
+Fitting a solid to 2 mm of depth by squashing its geometry ruins it: squashed geometry has squashed
+_normals_, so a cube flattened to 2 mm shades exactly like the 2 mm slab it has become — three faces
+at one flat grey, no solidity at all.
+
+So the renderer fits the model to the sheet with its proportions intact, computes shading from that
+true shape, and compresses z **only when projecting**. Shading cues stay at full strength while the
+parallax stays printable. This is not a trick invented for lens prints: it is what a bas-relief does,
+and sculptors have been doing it since Donatello.
+
+### Nothing needs to be rendered large
+
+One pixel per lenslet per view means 177 × 133 at the defaults. The node renders 512 wide out of the
+box, which is already generous, and warns if you go below what the print resolves. A 3D package
+rendering nine 4K views for this is wasting nine tenths of the pixels.
+
 ---
 
 ## Calibrating
@@ -652,7 +747,9 @@ Worth being straight about:
 | The 2D grid              | `renderGridInterlaced()`, `renderGridDepthMap()`, `gridCellLabel()`                    |
 | Square vs hex packing    | `latticeAt()`, `HEX_ROW_SPACING`, `packingFill()`                                      |
 | Calibration              | `calibrationValues()`, `withCalibrationValue()`, `switchFrames()`, `gridSwitchViews()` |
-| The nodes                | `src/nodes/lenticular.ts`, `src/nodes/lensGrid.ts`                                     |
+| Rendering from a model   | `src/lib/render3d.ts` — `projectToSheet()`, `eyeOffsetsMm()`, `disparityPerStep()`     |
+| Reading a mesh in        | `parseStl()`, `meshBounds()` in `src/lib/stl.ts`                                       |
+| The nodes                | `src/nodes/lenticular.ts`, `src/nodes/lensGrid.ts`, `src/nodes/model3d.ts`             |
 | The numbers on this page | `src/lib/lenticular.test.ts`                                                           |
 | The figures              | `docs/figures.py` — run `python docs/figures.py` to redraw them                        |
 

@@ -43,20 +43,35 @@ const named = (config: NodeConfig, fallback: string): string => {
   return typeof n === 'string' && n.trim() ? n : fallback;
 };
 
+/** The grid size a node instance is configured for. */
+function gridOf(config: NodeConfig): number {
+  // Absent or unparseable falls back to the node's own default, not to the
+  // minimum — a graph that lost the key must not silently shed ports.
+  const raw = typeof config.grid === 'number' ? config.grid : parseFloat(String(config.grid));
+  return clampGrid(Number.isFinite(raw) ? raw : DEFAULT_GRID);
+}
+
 /**
- * One required image input per cell of a Lens Grid's view grid, in row-major
- * order, each named for where it is viewed from relative to head-on.
+ * The Lens Grid's inputs: one image per cell of the view grid, in row-major
+ * order, each named for where it is viewed from relative to head-on — plus a
+ * `views` port that takes the whole grid on one wire, the way the lenticular
+ * node takes a whole animation. Neither is marked required on its own, because
+ * either route alone is enough; the node checks that at compute time.
  */
 export function lensGridInputs(config: NodeConfig): PortSpec[] {
-  // Absent or unparseable falls back to the node's own default, not to the
-  // minimum — a graph that lost the key must not silently shed inputs.
-  const raw = typeof config.grid === 'number' ? config.grid : parseFloat(String(config.grid));
-  return gridCells(clampGrid(Number.isFinite(raw) ? raw : DEFAULT_GRID)).map((cell) => ({
-    id: cell.id,
-    label: cell.label,
-    type: 'image' as const,
-    required: true,
-  }));
+  return [
+    { id: 'views', label: 'All views (sequence)', type: 'sequence' as const },
+    ...gridCells(gridOf(config)).map((cell) => ({
+      id: cell.id,
+      label: cell.label,
+      type: 'image' as const,
+    })),
+  ];
+}
+
+/** Just the per-cell image ports, in port order. */
+export function lensGridCellInputs(config: NodeConfig): PortSpec[] {
+  return lensGridInputs(config).filter((p) => p.id !== 'views');
 }
 
 export interface ResolvedPorts {

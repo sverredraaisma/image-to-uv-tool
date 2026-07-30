@@ -422,6 +422,130 @@ export function heightmapToMesh(img: RasterImage, opts: HeightmapOptions): Mesh 
   return { tris };
 }
 
+// ---------------------------------------------------------------------------
+// Reading a mesh back in — the mirror of the writers below, for the 3D Model
+// Input node. Both STL flavours, because which one you get depends on whatever
+// exported the file and nothing in the format announces it.
+// ---------------------------------------------------------------------------
+
+/** Ceiling on an uploaded mesh, so a bad file can't exhaust memory. */
+export const MAX_IMPORT_TRIANGLES = 4_000_000;
+
+/** Axis-aligned bounds of a mesh, plus its centre and extent. */
+export interface MeshBounds {
+  min: [number, number, number];
+  max: [number, number, number];
+  centre: [number, number, number];
+  size: [number, number, number];
+}
+
+/** Bounding box of a triangle soup. An empty mesh bounds to a point at origin. */
+export function meshBounds(stl: StlValue): MeshBounds {
+  const t = stl.triangles;
+  const n = stl.triangleCount * 9;
+  if (n === 0) {
+    return { min: [0, 0, 0], max: [0, 0, 0], centre: [0, 0, 0], size: [0, 0, 0] };
+  }
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < n; i += 3) {
+    for (let a = 0; a < 3; a++) {
+      const v = t[i + a];
+      if (v < min[a]) min[a] = v;
+      if (v > max[a]) max[a] = v;
+    }
+  }
+  return {
+    min,
+    max,
+    centre: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+    size: [max[0] - min[0], max[1] - min[1], max[2] - min[2]],
+  };
+}
+
+/**
+ * Is this binary STL, or ASCII?
+ *
+ * The header is 80 free-form bytes, and plenty of exporters write "solid <name>"
+ * into a *binary* file's header, so the leading keyword proves nothing. What is
+ * reliable is the length: a binary file is exactly 84 + 50·count bytes, and the
+ * count is right there at offset 80. Check that arithmetic first and only fall
+ * back to sniffing text.
+ */
+function looksBinary(bytes: Uint8Array): boolean {
+  if (bytes.length < 84) return false;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const count = view.getUint32(80, true);
+  if (84 + count * 50 === bytes.length) return true;
+  // Length is off (a truncated or padded file). Trailing junk is common enough
+  // that a plausible count with no ASCII "facet" in the first block still reads
+  // as binary — an ASCII file always has one within a few hundred bytes.
+  const head = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(512, bytes.length)));
+  return !/facet\s+normal/i.test(head);
+}
+
+function parseBinaryStl(bytes: Uint8Array): StlValue {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const declared = view.getUint32(80, true);
+  // Trust whichever is smaller: a truncated file must not read past its end.
+  const fits = Math.max(0, Math.floor((bytes.length - 84) / 50));
+  const count = Math.min(declared, fits);
+  if (count > MAX_IMPORT_TRIANGLES) {
+    throw new Error(
+      `Mesh too large: ${count.toLocaleString()} triangles (limit ${MAX_IMPORT_TRIANGLES.toLocaleString()}). Decimate it first.`,
+    );
+  }
+  const triangles = new Float32Array(count * 9);
+  for (let i = 0; i < count; i++) {
+    // 12 bytes of face normal, then the 9 vertex floats, then 2 attribute bytes.
+    // The stored normal is discarded: it is often absent, zeroed or simply wrong,
+    // and the winding gives us the true one for free at shading time.
+    let off = 84 + i * 50 + 12;
+    for (let v = 0; v < 9; v++, off += 4) triangles[i * 9 + v] = view.getFloat32(off, true);
+  }
+  return { kind: 'stl', triangleCount: count, triangles };
+}
+
+function parseAsciiStl(text: string): StlValue {
+  // Pull every number in order and take them nine at a time, which makes the
+  // parse indifferent to whitespace and line endings. Two things would poison
+  // that stream and both go first: the face normals, and the solid's *name* —
+  // "solid Part2" is perfectly legal and that 2 is not a coordinate.
+  const body = text
+    .replace(/^[ \t]*(?:end)?solid[^\n]*/gim, ' ')
+    .replace(/facet\s+normal[^\n]*/gi, ' ')
+    .replace(/\bvertex\b/gi, ' ');
+  const coords: number[] = [];
+  for (const m of body.matchAll(/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g)) {
+    coords.push(parseFloat(m[0]));
+  }
+  const count = Math.floor(coords.length / 9);
+  if (count > MAX_IMPORT_TRIANGLES) {
+    throw new Error(
+      `Mesh too large: ${count.toLocaleString()} triangles (limit ${MAX_IMPORT_TRIANGLES.toLocaleString()}). Decimate it first.`,
+    );
+  }
+  const triangles = new Float32Array(count * 9);
+  for (let i = 0; i < count * 9; i++) triangles[i] = coords[i];
+  return { kind: 'stl', triangleCount: count, triangles };
+}
+
+/**
+ * Parse an uploaded STL, binary or ASCII, into the same {@link StlValue} the
+ * export side produces. Throws with a readable message on anything unusable.
+ */
+export function parseStl(input: ArrayBuffer | Uint8Array): StlValue {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  if (bytes.length === 0) throw new Error('That file is empty.');
+  const stl = looksBinary(bytes)
+    ? parseBinaryStl(bytes)
+    : parseAsciiStl(new TextDecoder('utf-8').decode(bytes));
+  if (stl.triangleCount === 0) {
+    throw new Error('No triangles found — is that really an STL file?');
+  }
+  return stl;
+}
+
 /** ASCII STL text (mainly for previews / debugging). */
 export function stlToAscii(stl: StlValue, name = 'heightmap', maxTriangles = Infinity): string {
   const t = stl.triangles;

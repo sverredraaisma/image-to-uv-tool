@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { createImage } from './image';
-import { heightmapToMesh, heightmapToStl, stlToAscii, stlToBinary, stlToObj } from './stl';
+import {
+  heightmapToMesh,
+  heightmapToStl,
+  meshBounds,
+  parseStl,
+  stlToAscii,
+  stlToBinary,
+  stlToObj,
+} from './stl';
+import type { StlValue } from '../types';
 
 describe('heightmapToStl', () => {
   it('produces a watertight box for a single included pixel', () => {
@@ -324,5 +333,77 @@ describe('heightmapToStl optimize (greedy meshing)', () => {
     expect(() => heightmapToStl(img, opts)).toThrow(/too large/i); // smooth rejects
     const merged = heightmapToStl(img, { ...opts, optimize: true });
     expect(merged.triangleCount).toBe(12); // optimize accepts and collapses it
+  });
+});
+
+describe('parseStl', () => {
+  /** A two-triangle wedge with awkward coordinates, exactly representable in f32. */
+  const wedge: StlValue = {
+    kind: 'stl',
+    triangleCount: 2,
+    triangles: new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0.5, -1, -1, 0, 0, 1, 0.5, 0, 0, -2.25]),
+  };
+
+  it('round-trips binary bytes exactly', () => {
+    const back = parseStl(stlToBinary(wedge));
+    expect(back.triangleCount).toBe(2);
+    expect(back.triangles).toEqual(wedge.triangles);
+  });
+
+  it('round-trips ASCII text exactly', () => {
+    const back = parseStl(new TextEncoder().encode(stlToAscii(wedge, 'wedge')));
+    expect(back.triangleCount).toBe(2);
+    expect(back.triangles).toEqual(wedge.triangles);
+  });
+
+  it('is not fooled by a binary file whose header says "solid"', () => {
+    const bytes = stlToBinary(wedge);
+    bytes.set(new TextEncoder().encode('solid exported by something'), 0);
+    // Plenty of exporters do exactly this, so the length arithmetic decides.
+    expect(parseStl(bytes).triangles).toEqual(wedge.triangles);
+  });
+
+  it('is not fooled by digits in an ASCII solid name', () => {
+    const text = stlToAscii(wedge, 'Part2').replace('endsolid Part2', 'endsolid Part2');
+    const back = parseStl(new TextEncoder().encode(text));
+    // The 2 in "Part2" must not become a coordinate.
+    expect(back.triangleCount).toBe(2);
+    expect(back.triangles).toEqual(wedge.triangles);
+  });
+
+  it('reads a truncated binary file up to where it stops', () => {
+    const bytes = stlToBinary(wedge);
+    const cut = bytes.subarray(0, 84 + 50); // one triangle survives
+    const back = parseStl(cut);
+    expect(back.triangleCount).toBe(1);
+    expect(back.triangles).toEqual(wedge.triangles.slice(0, 9));
+  });
+
+  it('refuses a file with nothing in it', () => {
+    expect(() => parseStl(new Uint8Array(0))).toThrow(/empty/i);
+    expect(() => parseStl(new TextEncoder().encode('solid nothing\nendsolid nothing\n'))).toThrow(
+      /no triangles/i,
+    );
+  });
+});
+
+describe('meshBounds', () => {
+  it('measures the box, its centre and its size', () => {
+    const stl: StlValue = {
+      kind: 'stl',
+      triangleCount: 1,
+      triangles: new Float32Array([0, 0, 0, 4, 0, 0, 0, 2, -6]),
+    };
+    const b = meshBounds(stl);
+    expect(b.min).toEqual([0, 0, -6]);
+    expect(b.max).toEqual([4, 2, 0]);
+    expect(b.centre).toEqual([2, 1, -3]);
+    expect(b.size).toEqual([4, 2, 6]);
+  });
+
+  it('bounds an empty mesh to a point rather than to infinity', () => {
+    const b = meshBounds({ kind: 'stl', triangleCount: 0, triangles: new Float32Array(0) });
+    expect(b.size).toEqual([0, 0, 0]);
+    expect(b.centre).toEqual([0, 0, 0]);
   });
 });
