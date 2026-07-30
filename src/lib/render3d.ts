@@ -39,7 +39,11 @@ export interface Shading {
   lightElevationDeg: number;
   /** Floor on the diffuse term, 0–1, so a face turned away is not pure black. */
   ambient: number;
-  /** Object colour, 0–255 per channel. */
+  /**
+   * Object colour, 0–255 per channel. The fallback: a texture or the mesh's own
+   * vertex colours replace it rather than tinting it, so a photographic texture
+   * is not quietly dyed by whatever this happens to be set to.
+   */
   colour: [number, number, number];
   /** Sheet colour where nothing is hit. */
   background: [number, number, number];
@@ -66,6 +70,11 @@ export interface ViewGridOptions {
   /** Render this many times oversampled on each axis, then box-filter down. */
   supersample: number;
   shading: Shading;
+  /**
+   * Texture map, sampled through the mesh's uvs. Ignored by a mesh that has no
+   * uvs — an STL never does, and an OBJ only if it was exported unmapped.
+   */
+  texture?: RasterImage;
 }
 
 /** A vertex ready to project: world millimetres, sheet plane at z = 0. */
@@ -89,6 +98,9 @@ export interface PreparedMesh {
    * and it has been the trick since Donatello.
    */
   zScale: number;
+  /** Carried straight through from the mesh — the fit never reorders triangles. */
+  uvs?: Float32Array;
+  colours?: Uint8Array;
 }
 
 export const MIN_VIEW_PX = 16;
@@ -195,7 +207,7 @@ export function prepareVertices(stl: StlValue, o: ViewGridOptions): PreparedMesh
   // dividing by zero and flinging it at the viewer.
   const trueDepth = b.size[2] * planar;
   const zScale = trueDepth > 1e-6 ? Math.max(0, o.depthMm) / trueDepth : 0;
-  return { verts: out, zScale };
+  return { verts: out, zScale, uvs: stl.uvs, colours: stl.colours };
 }
 
 /** Unit normal of a triangle, from its winding. */
@@ -219,6 +231,31 @@ function lightVector(s: Shading): [number, number, number] {
   return [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
 }
 
+/** Bilinear sample of a texture at OBJ-convention uv (0–1, origin bottom-left). */
+function sampleTexture(img: RasterImage, u: number, v: number, out: [number, number, number]): void {
+  // Wrap, so uv outside 0–1 tiles rather than smearing the edge pixel.
+  const fu = u - Math.floor(u);
+  // OBJ counts v up from the bottom; raster rows count down from the top.
+  const fv = 1 - (v - Math.floor(v));
+  const x = fu * img.width - 0.5;
+  const y = fv * img.height - 0.5;
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const tx = x - x0;
+  const ty = y - y0;
+  const wrapX = (i: number) => ((i % img.width) + img.width) % img.width;
+  const wrapY = (i: number) => ((i % img.height) + img.height) % img.height;
+  const i00 = (wrapY(y0) * img.width + wrapX(x0)) * 4;
+  const i10 = (wrapY(y0) * img.width + wrapX(x0 + 1)) * 4;
+  const i01 = (wrapY(y0 + 1) * img.width + wrapX(x0)) * 4;
+  const i11 = (wrapY(y0 + 1) * img.width + wrapX(x0 + 1)) * 4;
+  for (let c = 0; c < 3; c++) {
+    const top = img.data[i00 + c] * (1 - tx) + img.data[i10 + c] * tx;
+    const bottom = img.data[i01 + c] * (1 - tx) + img.data[i11 + c] * tx;
+    out[c] = top * (1 - ty) + bottom * ty;
+  }
+}
+
 /**
  * Render one view: eye offset (ex, ey), everything else from `o`.
  *
@@ -227,9 +264,20 @@ function lightVector(s: Shading): [number, number, number] {
  * are notorious for inconsistent winding, and a hole or a black patch in one
  * view of nine is far worse than a slightly flat-looking backface: a missing
  * patch in one view means one whole view of the print is wrong there.
+ *
+ * Surface colour comes from the first of these the mesh actually has: the
+ * texture wired to the node (needs uvs), the mesh's own vertex colours, or the
+ * flat material colour. Both of the first two vary per pixel, so they are
+ * interpolated *perspective-correctly*: `t` is 1/w for this projection, so an
+ * attribute times `t` is what varies linearly across the triangle in screen
+ * space, and dividing the interpolated product by the interpolated `t` puts it
+ * back. Interpolating uv directly would swim visibly across a tilted face.
  */
 function renderOne(mesh: PreparedMesh, triangleCount: number, o: ViewGridOptions, ex: number, ey: number) {
   const v = mesh.verts;
+  const uvs = o.texture ? mesh.uvs : undefined;
+  const colours = uvs ? undefined : mesh.colours;
+  const texel: [number, number, number] = [0, 0, 0];
   const ss = Math.min(4, Math.max(1, Math.round(o.supersample)));
   const w = Math.max(1, Math.round(o.widthPx)) * ss;
   const h = Math.max(1, Math.round((o.widthPx * o.heightMm) / Math.max(0.01, o.widthMm))) * ss;
@@ -286,6 +334,9 @@ function renderOne(mesh: PreparedMesh, triangleCount: number, o: ViewGridOptions
     const g = colour[1] * diffuse;
     const bl = colour[2] * diffuse;
 
+    // Attribute × t is what interpolates linearly in screen space.
+    const uvBase = tri * 6;
+    const cBase = tri * 9;
     for (let y = y0; y <= y1; y++) {
       const py = y + 0.5;
       for (let x = x0; x <= x1; x++) {
@@ -299,9 +350,34 @@ function renderOne(mesh: PreparedMesh, triangleCount: number, o: ViewGridOptions
         const at = y * w + x;
         if (t <= key[at]) continue;
         key[at] = t;
-        rgb[at * 3] = r;
-        rgb[at * 3 + 1] = g;
-        rgb[at * 3 + 2] = bl;
+
+        if (uvs && o.texture) {
+          const q0 = w0 * st[0];
+          const q1 = w1 * st[1];
+          const q2 = w2 * st[2];
+          sampleTexture(
+            o.texture,
+            (q0 * uvs[uvBase] + q1 * uvs[uvBase + 2] + q2 * uvs[uvBase + 4]) / t,
+            (q0 * uvs[uvBase + 1] + q1 * uvs[uvBase + 3] + q2 * uvs[uvBase + 5]) / t,
+            texel,
+          );
+          rgb[at * 3] = texel[0] * diffuse;
+          rgb[at * 3 + 1] = texel[1] * diffuse;
+          rgb[at * 3 + 2] = texel[2] * diffuse;
+        } else if (colours) {
+          const q0 = w0 * st[0];
+          const q1 = w1 * st[1];
+          const q2 = w2 * st[2];
+          for (let c = 0; c < 3; c++) {
+            const mixed =
+              (q0 * colours[cBase + c] + q1 * colours[cBase + 3 + c] + q2 * colours[cBase + 6 + c]) / t;
+            rgb[at * 3 + c] = mixed * diffuse;
+          }
+        } else {
+          rgb[at * 3] = r;
+          rgb[at * 3 + 1] = g;
+          rgb[at * 3 + 2] = bl;
+        }
       }
     }
   }

@@ -950,7 +950,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
 
   modelInput: {
     summary:
-      'Uploads an STL — binary or ASCII — and puts the mesh on a wire. Units, origin and scale are ignored: whatever renders it fits it to the print. Pair it with Model → Grid Views.',
+      'Uploads a mesh — STL (binary or ASCII) or OBJ — and puts it on a wire. Units, origin and scale are ignored: whatever renders it fits it to the print. Pair it with Model → Grid Views.',
     uses: [
       {
         title: 'A 3D print you can’t print',
@@ -960,7 +960,8 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       },
     ],
     tips: [
-      'STL carries no colour, so views come out shaded in one material. Set the colour and light under Advanced in the render node.',
+      'STL carries no colour at all, so its views come out in one material colour — set that and the light under Advanced in the render node. Export as OBJ instead and the mesh can bring texture coordinates or vertex colours with it.',
+      'A textured OBJ needs its image on a wire, not a .mtl file: connect any image node to the render node’s Texture input. Nothing can fetch the sibling files a .mtl names from inside a browser tab.',
       'A dense scan can be millions of triangles; decimate it first. Nothing here needs more detail than the print resolves — about 177×153 per view at 100 mm and 45 LPI.',
     ],
   },
@@ -987,6 +988,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       'Leave View cone on “From the lens” so the views span exactly what the lens can show — the same LPI, gloss height and RI you set on the print node.',
       'The sheet plane is where the print is sharp, and the model straddles it. Anything you want pin-sharp should sit at mid-depth.',
       'Rotate to frame the subject; the fit is recomputed from the rotated silhouette, so nothing falls off the sheet.',
+      'Colour comes from the Texture input if the mesh has UVs, else the mesh’s own vertex colours, else the flat material colour. A texture replaces that colour rather than tinting it. Info says which one a render actually used.',
     ],
   },
 

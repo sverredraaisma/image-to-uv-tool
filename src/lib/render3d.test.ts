@@ -8,6 +8,7 @@ import {
   type ViewGridOptions,
 } from './render3d';
 import { meshBounds } from './stl';
+import { createImage } from './image';
 import type { RasterImage, StlValue } from '../types';
 
 const options = (over: Partial<ViewGridOptions> = {}): ViewGridOptions => ({
@@ -245,5 +246,103 @@ describe('disparityPerStep', () => {
     expect(disparityPerStep(options({ coneDeg: 20 }), 45).lenslets).toBeLessThan(base);
     // A bigger grid divides the same cone into smaller steps.
     expect(disparityPerStep(options({ grid: 6 }), 45).lenslets).toBeLessThan(base);
+  });
+});
+
+describe('surface colour', () => {
+  /** A quad on the sheet plane, uv-mapped across the whole 0–1 square. */
+  const mapped = (): StlValue => ({
+    kind: 'stl',
+    triangleCount: 2,
+    triangles: new Float32Array(quad(-1, 1, -1, 1, 0)),
+    // Matching the quad() winding: (x0,y0) (x1,y0) (x1,y1) then (x0,y0) (x1,y1) (x0,y1).
+    uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]),
+  });
+
+  /** A 2×2 texture: red, green on the top row; blue, white on the bottom. */
+  const swatch = (): RasterImage => {
+    const img = createImage(2, 2, [0, 0, 0, 255]);
+    img.data.set([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]);
+    return img;
+  };
+
+  const flatLight = { lightAzimuthDeg: 0, lightElevationDeg: 0, ambient: 1 };
+
+  it('samples the texture through the mesh’s uvs, right way up', () => {
+    const o = options({
+      widthPx: 32,
+      texture: swatch(),
+      shading: { ...flatLight, colour: [1, 2, 3], background: [0, 0, 0] },
+    });
+    const view = renderViewGrid(mapped(), o).views[4];
+    /** Which swatch is this pixel nearest? Sampling is bilinear, so on a 2×2
+     *  texture every pixel is some blend — the question is which one wins. */
+    const swatchAt = (x: number, y: number) => {
+      const at = (y * view.width + x) * 4;
+      const [r, g, b] = [view.data[at], view.data[at + 1], view.data[at + 2]];
+      if (r > 200 && g < 80 && b < 80) return 'red';
+      if (g > 200 && r < 80 && b < 80) return 'green';
+      if (b > 200 && r < 80 && g < 80) return 'blue';
+      if (r > 200 && g > 200 && b > 200) return 'white';
+      return `mixed(${r},${g},${b})`;
+    };
+    // uv origin is bottom-left in OBJ, so the texture's top row lands at the
+    // top of the sheet: red top-left, green top-right, blue bottom-left.
+    expect(swatchAt(8, 8)).toBe('red');
+    expect(swatchAt(24, 8)).toBe('green');
+    expect(swatchAt(8, 24)).toBe('blue');
+    expect(swatchAt(24, 24)).toBe('white');
+  });
+
+  it('replaces the material colour rather than tinting it', () => {
+    // A photographic texture must not be dyed by whatever colour is set.
+    const o = (colour: [number, number, number]) =>
+      options({
+        widthPx: 16,
+        texture: swatch(),
+        shading: { ...flatLight, colour, background: [0, 0, 0] },
+      });
+    const a = renderViewGrid(mapped(), o([255, 0, 0])).views[4];
+    const b = renderViewGrid(mapped(), o([0, 0, 255])).views[4];
+    expect(a.data).toEqual(b.data);
+  });
+
+  it('uses vertex colours when there is no texture, and keeps a face flat', () => {
+    const stl: StlValue = {
+      ...mapped(),
+      colours: new Uint8Array([200, 0, 0, 200, 0, 0, 200, 0, 0, 200, 0, 0, 200, 0, 0, 200, 0, 0]),
+    };
+    const o = options({
+      widthPx: 16,
+      shading: { ...flatLight, colour: [0, 0, 255], background: [0, 0, 0] },
+    });
+    const view = renderViewGrid(stl, o).views[4];
+    const mid = (Math.floor(view.height / 2) * view.width + Math.floor(view.width / 2)) * 4;
+    expect([...view.data.slice(mid, mid + 3)]).toEqual([200, 0, 0]);
+  });
+
+  it('ignores a texture the mesh has no uvs for', () => {
+    const bare = mesh(quad(-1, 1, -1, 1, 0));
+    const o = options({
+      widthPx: 16,
+      shading: { ...flatLight, colour: [10, 20, 30], background: [0, 0, 0] },
+    });
+    const withTex = renderViewGrid(bare, { ...o, texture: swatch() }).views[4];
+    const without = renderViewGrid(bare, o).views[4];
+    expect(withTex.data).toEqual(without.data);
+  });
+
+  it('still shades: the same texel is darker on a face turned from the light', () => {
+    const lit = { lightAzimuthDeg: 0, lightElevationDeg: 0, ambient: 0 };
+    const o = options({
+      widthPx: 16,
+      texture: swatch(),
+      shading: { ...lit, colour: [0, 0, 0], background: [0, 0, 0] },
+      rotationDeg: [0, 60, 0], // turn the quad away from the light
+    });
+    const face = renderViewGrid(mapped(), { ...o, rotationDeg: [0, 0, 0] }).views[4];
+    const turned = renderViewGrid(mapped(), o).views[4];
+    const brightest = (img: RasterImage) => Math.max(...img.data.filter((_, i) => i % 4 === 0));
+    expect(brightest(turned)).toBeLessThan(brightest(face));
   });
 });

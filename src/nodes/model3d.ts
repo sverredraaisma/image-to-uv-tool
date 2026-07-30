@@ -6,7 +6,8 @@
 
 import type { ComputeContext, NodeConfig, NodeDefinition, RasterImage, StlValue } from '../types';
 import { DEFAULT_GRID, clampGrid, lensGeometry } from '../lib/lenticular';
-import { MAX_IMPORT_TRIANGLES, meshBounds, parseStl } from '../lib/stl';
+import { MAX_IMPORT_TRIANGLES, meshBounds } from '../lib/stl';
+import { parseMesh } from '../lib/mesh';
 import {
   MAX_VIEW_PX,
   MIN_VIEW_PX,
@@ -17,7 +18,7 @@ import {
 } from '../lib/render3d';
 import { isBlobRef } from '../lib/blobStore';
 import { platform } from '../lib/platform';
-import { bool, num, str } from './helpers';
+import { asImage, bool, num, str } from './helpers';
 
 /** Bytes behind an uploaded file's data URL. */
 function dataUrlToBytes(src: string): Uint8Array {
@@ -32,6 +33,17 @@ function dataUrlToBytes(src: string): Uint8Array {
   return out;
 }
 
+/** What surface detail a mesh brought with it, in the order the renderer uses it. */
+function surfaceOf(stl: StlValue): string {
+  if (stl.uvs) {
+    return stl.colours
+      ? 'Carries texture coordinates and vertex colours — wire an image into the render node’s Texture input, or leave it empty to use the colours'
+      : 'Carries texture coordinates — wire an image into the render node’s Texture input to use them';
+  }
+  if (stl.colours) return 'Carries vertex colours, which the render node uses as-is';
+  return 'No colour of its own (an STL never has any) — it renders in the material colour';
+}
+
 /** Human-readable summary of a loaded mesh. */
 export function describeMesh(stl: StlValue, name: string): string {
   const b = meshBounds(stl);
@@ -40,6 +52,7 @@ export function describeMesh(stl: StlValue, name: string): string {
     `${name || 'Mesh'} · ${stl.triangleCount.toLocaleString()} triangles`,
     `Bounds ${n(b.size[0])} × ${n(b.size[1])} × ${n(b.size[2])} (model units)`,
     `Centre ${n(b.centre[0])}, ${n(b.centre[1])}, ${n(b.centre[2])}`,
+    surfaceOf(stl),
     // Units are whatever the exporter meant; the render fits to the sheet, so
     // only the *proportions* here matter.
     'Scale is fitted to the print at render time — only the shape matters.',
@@ -51,9 +64,10 @@ export const modelInputNode: NodeDefinition = {
   label: '3D Model Input',
   category: 'Input',
   description:
-    'Upload an STL (binary or ASCII) and output it as a mesh. Feed it to Model → Grid Views to ' +
+    'Upload a mesh — STL (binary or ASCII) or OBJ — and output it. Feed it to Model → Grid Views to ' +
     'render the views a Lens Grid Print needs. The file’s units and origin do not matter: the ' +
-    'renderer centres and fits the model to the sheet.',
+    'renderer centres and fits the model to the sheet. OBJ also carries texture coordinates and ' +
+    'vertex colours; STL carries shape alone. A texture image is a separate wire, not a .mtl file.',
   autoRun: true,
   inputs: [],
   outputs: [
@@ -70,7 +84,7 @@ export const modelInputNode: NodeDefinition = {
     if (!src) return { out: undefined, info: undefined };
 
     onProgress?.('Parsing mesh…');
-    const stl = parseStl(dataUrlToBytes(src));
+    const stl = parseMesh(dataUrlToBytes(src), str(config.name));
     return { out: stl, info: { kind: 'text', text: describeMesh(stl, str(config.name)) } };
   },
 };
@@ -144,6 +158,19 @@ function lensletCounts(config: NodeConfig): { across: number; down: number } {
 /** More than this much movement per view step and the print ghosts. */
 export const MAX_STEP_LENSLETS = 1.5;
 
+/** Which of texture / vertex colour / material colour this render will use. */
+function surfaceUsed(stl: StlValue, o: ViewGridOptions): string {
+  if (o.texture) {
+    return stl.uvs
+      ? `texture, ${o.texture.width}×${o.texture.height} px, through the mesh’s own UVs`
+      : '⚠ a texture is wired in but the mesh has no texture coordinates — an STL never does. Export as OBJ with UVs, or unplug it';
+  }
+  if (stl.uvs && stl.colours) return 'vertex colours (the mesh has UVs too — wire a Texture to use them)';
+  if (stl.uvs) return 'material colour — the mesh has UVs, so wiring a Texture would use them';
+  if (stl.colours) return 'the mesh’s own vertex colours';
+  return 'flat material colour, lit by the light settings';
+}
+
 /** Geometry report for the node's Info output. */
 export function describeViewGrid(
   config: NodeConfig,
@@ -168,6 +195,7 @@ export function describeViewGrid(
     `Cone ${o.coneDeg.toFixed(1)}°${fromLens ? ` (solved from ${lpi} LPI / ${num(config.lensHeightMm, 0.9)} mm / RI ${num(config.ri, 1.5)})` : ' (set by hand)'} — ` +
       `outer eye ${outer.toFixed(0)} mm off-axis`,
     `Subject depth ${o.depthMm} mm about the sheet plane · covers ${(coverage * 100).toFixed(0)}% of the frame`,
+    `Surface: ${surfaceUsed(stl, o)}`,
     `Parallax ${step.lenslets.toFixed(2)} lenslets per view step ` +
       `(${step.mm.toFixed(3)} mm at ${lpi} LPI), ${(step.lenslets * (grid - 1)).toFixed(2)} across the whole cone`,
     `Each view will print at ${cells.across}×${cells.down} px — one pixel per lenslet`,
@@ -217,7 +245,10 @@ export const modelViewsNode: NodeDefinition = {
     'viewing cone. Watch the parallax figure in Info: more than ~1.5 lenslets per view step ghosts ' +
     'instead of reading as depth. Manual: click Run.',
   autoRun: false,
-  inputs: [{ id: 'model', label: 'Mesh', type: 'stl', required: true }],
+  inputs: [
+    { id: 'model', label: 'Mesh', type: 'stl', required: true },
+    { id: 'texture', label: 'Texture', type: 'image' },
+  ],
   // One wire carries the whole grid, in gridCells order, straight into the print
   // node's `views` input — grid² separate ports would be grid² edges to drag.
   outputs: [
@@ -320,7 +351,7 @@ export const modelViewsNode: NodeDefinition = {
     if (stl.triangleCount > MAX_IMPORT_TRIANGLES) {
       throw new Error(`Mesh has ${stl.triangleCount.toLocaleString()} triangles — decimate it first.`);
     }
-    const o = viewGridOptionsFromConfig(config);
+    const o = { ...viewGridOptionsFromConfig(config), texture: asImage(inputs.texture) };
     onProgress?.(`Rendering ${o.grid * o.grid} views at ${o.widthPx} px…`);
     // Let the spinner paint before the render locks the main thread.
     await new Promise((resolve) => setTimeout(resolve, 0));

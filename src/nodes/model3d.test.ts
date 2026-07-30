@@ -211,6 +211,83 @@ describe('feeding Lens Grid Print from one wire', () => {
   });
 });
 
+describe('OBJ and textures', () => {
+  /** A uv-mapped quad OBJ: colour comes from a texture, not the mesh. */
+  const MAPPED_OBJ = `v -1 -1 0
+v 1 -1 0
+v 1 1 0
+v -1 1 0
+vt 0 0
+vt 1 0
+vt 1 1
+vt 0 1
+f 1/1 2/2 3/3 4/4
+`;
+
+  const upload = (text: string, name: string) => ({
+    ...modelInputNode.defaultConfig(),
+    src: `data:model/obj;base64,${btoa(text)}`,
+    name,
+  });
+
+  it('loads an OBJ through the same input node as an STL', async () => {
+    const out = await modelInputNode.compute(ctx({}, upload(MAPPED_OBJ, 'quad.obj')));
+    const mesh = out.out as StlValue;
+    expect(mesh.triangleCount).toBe(2); // the quad, fanned
+    expect(mesh.uvs).toBeDefined();
+    if (out.info?.kind === 'text') expect(out.info.text).toContain('texture coordinates');
+    else throw new Error('expected a text info output');
+  });
+
+  it('paints the texture wired into the render node', async () => {
+    const mesh = (await modelInputNode.compute(ctx({}, upload(MAPPED_OBJ, 'quad.obj')))).out;
+    const texture: RasterImage = {
+      kind: 'image',
+      width: 1,
+      height: 1,
+      data: new Uint8ClampedArray([20, 200, 40, 255]),
+    };
+    const out = await modelViewsNode.compute(
+      ctx({ model: mesh, texture }, config({ ambient: 1, margin: 0 })),
+    );
+    const view = (out.views as SequenceValue).frames[4];
+    const mid = (Math.floor(view.height / 2) * view.width + Math.floor(view.width / 2)) * 4;
+    expect([...view.data.slice(mid, mid + 3)]).toEqual([20, 200, 40]);
+    if (out.info?.kind === 'text') expect(out.info.text).toContain('Surface: texture, 1×1 px');
+    else throw new Error('expected a text info output');
+  });
+
+  it('says so when a texture is wired to a mesh that cannot use it', async () => {
+    const texture: RasterImage = {
+      kind: 'image',
+      width: 1,
+      height: 1,
+      data: new Uint8ClampedArray([1, 2, 3, 255]),
+    };
+    // TETRA is an STL-style mesh: no uvs, so the texture has nowhere to land.
+    const out = await modelViewsNode.compute(ctx({ model: TETRA, texture }, config()));
+    if (out.info?.kind === 'text') {
+      expect(out.info.text).toMatch(/⚠ a texture is wired in but the mesh has no texture coordinates/);
+    } else throw new Error('expected a text info output');
+  });
+
+  it('renders a vertex-coloured mesh without any texture at all', async () => {
+    const coloured = `v -1 -1 0 1 0 0
+v 1 -1 0 1 0 0
+v 1 1 0 1 0 0
+v -1 1 0 1 0 0
+f 1 2 3 4
+`;
+    const mesh = (await modelInputNode.compute(ctx({}, upload(coloured, 'flat.obj')))).out;
+    const out = await modelViewsNode.compute(ctx({ model: mesh }, config({ ambient: 1, margin: 0 })));
+    const view = (out.views as SequenceValue).frames[4];
+    const mid = (Math.floor(view.height / 2) * view.width + Math.floor(view.width / 2)) * 4;
+    expect([...view.data.slice(mid, mid + 3)]).toEqual([255, 0, 0]);
+    if (out.info?.kind === 'text') expect(out.info.text).toContain('the mesh’s own vertex colours');
+    else throw new Error('expected a text info output');
+  });
+});
+
 describe('the cube example', () => {
   const example = EXAMPLES.find((e) => e.name.includes('cube'))!;
   const graph = example.graph as SavedGraph;
@@ -227,13 +304,24 @@ describe('the cube example', () => {
     ]);
   });
 
-  it('ships the cube as a real binary STL, not a stub', async () => {
+  it('ships the cube as a real OBJ, with a colour per face', async () => {
     const node = graph.nodes.find((n) => n.id === 'cube')!;
     const out = await getNodeDef('modelInput').compute(ctx({}, node.config));
     const stl = out.out as StlValue;
-    expect(stl.triangleCount).toBe(12); // six faces, two triangles each
+    expect(stl.triangleCount).toBe(12); // six quads, fanned into two each
     // 20 units on a side, centred on the origin.
     expect([...stl.triangles].every((v) => Math.abs(v) === 10)).toBe(true);
+    // Six distinct face colours, flat across each face — which is the whole
+    // reason the cube is an OBJ and not the STL it started as.
+    expect(stl.colours).toBeDefined();
+    const perTriangle = Array.from({ length: 12 }, (_, t) => stl.colours!.slice(t * 9, t * 9 + 9));
+    for (const tri of perTriangle) {
+      expect([...tri.slice(0, 3)]).toEqual([...tri.slice(3, 6)]); // flat across…
+      expect([...tri.slice(0, 3)]).toEqual([...tri.slice(6, 9)]); // …all three corners
+    }
+    expect(new Set(perTriangle.map((t) => t.slice(0, 3).join(','))).size).toBe(6);
+    if (out.info?.kind === 'text') expect(out.info.text).toContain('vertex colours');
+    else throw new Error('expected a text info output');
   });
 
   it('prints at the nodes’ defaults, turned only to give the cube a silhouette', () => {
@@ -266,6 +354,16 @@ describe('the cube example', () => {
     } else throw new Error('expected a text info output');
     // …and the views differ, or there would be nothing to look around.
     expect(new Set(frames.map((f) => f.data.join(','))).size).toBeGreaterThan(1);
+    // The faces really do come out in different colours: at a three-quarter
+    // view, three faces are visible and each is a different hue.
+    const centre = frames[4];
+    const hues = new Set<string>();
+    for (let i = 0; i < centre.data.length; i += 4) {
+      const [r, g, b] = [centre.data[i], centre.data[i + 1], centre.data[i + 2]];
+      if (r > 250 && g > 250 && b > 250) continue; // the white sheet behind
+      hues.add(`${Math.round(r / 32)},${Math.round(g / 32)},${Math.round(b / 32)}`);
+    }
+    expect(hues.size).toBeGreaterThanOrEqual(3);
 
     const printed = await getNodeDef('lensGrid').compute(
       ctx(

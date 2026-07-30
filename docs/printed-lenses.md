@@ -505,6 +505,23 @@ true shape, and compresses z **only when projecting**. Shading cues stay at full
 parallax stays printable. This is not a trick invented for lens prints: it is what a bas-relief does,
 and sculptors have been doing it since Donatello.
 
+### Where the colour comes from
+
+STL carries shape and nothing else, so an STL prints in one flat material colour. **OBJ** carries two
+more things, and the tool reads both:
+
+- **Texture coordinates** (`vt`, referenced from the face lines). The texture image itself arrives on
+  a **wire**, not from the file. That is deliberate: a `.mtl` names a third file for the image, and a
+  browser handed one uploaded file can fetch neither — while in a node graph the map wants to be a
+  wire anyway, so anything that makes an image can feed it.
+- **Vertex colours** (`v x y z r g b`). Used when no texture is wired, which is how the
+  six-coloured-faces cube in the examples works: each face gets its own four corners, so its colour
+  stays flat rather than blending into its neighbours.
+
+Whichever applies replaces the material colour rather than tinting it — a photographic texture must
+not be quietly dyed by whatever the colour swatch happens to be set to — and both are interpolated
+perspective-correctly, so a texture doesn't swim across a face tilted away from you.
+
 ### Nothing needs to be rendered large
 
 One pixel per lenslet per view means 177 × 133 at the defaults. The node renders 512 wide out of the
@@ -748,7 +765,7 @@ Worth being straight about:
 | Square vs hex packing    | `latticeAt()`, `HEX_ROW_SPACING`, `packingFill()`                                      |
 | Calibration              | `calibrationValues()`, `withCalibrationValue()`, `switchFrames()`, `gridSwitchViews()` |
 | Rendering from a model   | `src/lib/render3d.ts` — `projectToSheet()`, `eyeOffsetsMm()`, `disparityPerStep()`     |
-| Reading a mesh in        | `parseStl()`, `meshBounds()` in `src/lib/stl.ts`                                       |
+| Reading a mesh in        | `parseMesh()` in `mesh.ts` → `parseStl()` / `parseObj()`                               |
 | The nodes                | `src/nodes/lenticular.ts`, `src/nodes/lensGrid.ts`, `src/nodes/model3d.ts`             |
 | The numbers on this page | `src/lib/lenticular.test.ts`                                                           |
 | The figures              | `docs/figures.py` — run `python docs/figures.py` to redraw them                        |

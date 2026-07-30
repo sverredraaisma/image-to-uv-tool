@@ -21,11 +21,27 @@ export interface TextValue {
   text: string;
 }
 
+/**
+ * A triangle-soup mesh. The kind is `stl` for historical reasons — it was the
+ * only format the tool knew — but it carries OBJ meshes too, which is what the
+ * optional surface attributes below are for. Anything that only wants geometry
+ * (the STL exporter, the previews) can keep ignoring them.
+ */
 export interface StlValue {
   kind: 'stl';
   triangleCount: number;
   /** Flat triangle vertices [ax,ay,az, bx,by,bz, cx,cy,cz, …] (length = count*9). */
   triangles: Float32Array;
+  /**
+   * Per-vertex texture coordinates [au,av, bu,bv, cu,cv, …] (length = count*6),
+   * in OBJ convention: 0–1, origin bottom-left. Absent if the mesh is unmapped.
+   */
+  uvs?: Float32Array;
+  /**
+   * Per-vertex colours [ar,ag,ab, br,bg,bb, …] (length = count*9), 0–255. From
+   * OBJ's `v x y z r g b` extension. Absent if the mesh carries no colour.
+   */
+  colours?: Uint8Array;
 }
 
 /**
