@@ -33,6 +33,24 @@ describe('evaluateSubgraph', () => {
     expect(out.pout).toBe(img);
   });
 
+  it('runs an inner image node over a whole sequence, frame by frame', async () => {
+    // The nodes inside a pipeline map over an animation exactly as they would
+    // in the main graph — which is why the pipeline node itself must not map.
+    const graph: Subgraph = {
+      nodes: [
+        node('pin', 'pipelineInput', { name: 'A', type: 'image' }),
+        node('inv', 'invert', { r: true, g: true, b: true, a: false }),
+        node('pout', 'pipelineOutput'),
+      ],
+      edges: [edge('pin', 'out', 'inv', 'in'), edge('inv', 'out', 'pout', 'in')],
+    };
+    const frames = [createImage(1, 1, [10, 10, 10, 255]), createImage(1, 1, [200, 200, 200, 255])];
+    const out = await evaluateSubgraph(graph, { pin: { kind: 'sequence', frames } }, ctx({}));
+    const result = out.pout as { kind: string; frames: RasterImage[] };
+    expect(result.kind).toBe('sequence');
+    expect(result.frames.map((f) => f.data[0])).toEqual([245, 55]);
+  });
+
   it('runs inner nodes between the markers (invert)', async () => {
     const graph: Subgraph = {
       nodes: [

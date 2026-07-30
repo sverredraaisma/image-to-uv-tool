@@ -6,7 +6,14 @@
 // previews and the scheduler are resolved.
 
 import type { NodeConfig, NodeDefinition, PortSpec, PortType } from '../types';
-import { DEFAULT_GRID, clampGrid, gridCells } from '../lib/lenticular';
+import {
+  DEFAULT_GRID,
+  DEFAULT_RADIAL_VIEWS,
+  clampGrid,
+  clampRadialViews,
+  gridCells,
+  radialViews,
+} from '../lib/lenticular';
 
 const PORT_TYPES: readonly PortType[] = ['image', 'mask', 'text', 'stl', 'sequence'];
 
@@ -74,6 +81,33 @@ export function lensGridCellInputs(config: NodeConfig): PortSpec[] {
   return lensGridInputs(config).filter((p) => p.id !== 'views');
 }
 
+/** The view count a radial node instance is configured for. */
+function radialCountOf(config: NodeConfig): number {
+  const raw = typeof config.views === 'number' ? config.views : parseFloat(String(config.views));
+  return clampRadialViews(Number.isFinite(raw) ? raw : DEFAULT_RADIAL_VIEWS);
+}
+
+/**
+ * The Radial Lens Print's inputs: one image per bearing around the circle, each
+ * named for the angle it is seen from, plus an `all` port that takes the whole
+ * ring on one wire. Same arrangement as the lens grid, and for the same reason.
+ */
+export function radialInputs(config: NodeConfig): PortSpec[] {
+  return [
+    { id: 'all', label: 'All views (sequence)', type: 'sequence' as const },
+    ...radialViews(radialCountOf(config)).map((view) => ({
+      id: view.id,
+      label: view.label,
+      type: 'image' as const,
+    })),
+  ];
+}
+
+/** Just the per-bearing image ports, in port order. */
+export function radialViewInputs(config: NodeConfig): PortSpec[] {
+  return radialInputs(config).filter((p) => p.id !== 'all');
+}
+
 export interface ResolvedPorts {
   inputs: PortSpec[];
   outputs: PortSpec[];
@@ -100,6 +134,10 @@ export function nodePorts(node: { type: string; config: NodeConfig }, def?: Node
     // One input per cell of the view grid, named for where it is viewed from.
     case 'lensGrid':
       return { inputs: lensGridInputs(node.config), outputs: def?.outputs ?? [] };
+    // One input per bearing around the circle, named for the angle it is seen
+    // from.
+    case 'radialGrid':
+      return { inputs: radialInputs(node.config), outputs: def?.outputs ?? [] };
     default:
       return { inputs: def?.inputs ?? [], outputs: def?.outputs ?? [] };
   }

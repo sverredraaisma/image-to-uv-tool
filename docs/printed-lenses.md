@@ -427,8 +427,14 @@ affordable.
 ## Rendering the views from a model
 
 If the subject is a 3D model rather than nine photographs, the views can be rendered — and the
-rendering has to be done in a particular way, which is why the tool has its own renderer (**3D Model
-Input** → **Model → Grid Views**) instead of leaving you to a 3D package.
+rendering has to be done in a particular way, which is why the tool has its own renderer instead of
+leaving you to a 3D package. Two nodes render views, and they share every rule below:
+
+- **Model → Grid Views** fills the N² eye positions of a **lens grid**, with the subject straddling
+  the sheet plane — half in front, half behind.
+- **Model → Stereo Views** renders a horizontal run of views for a **1D lenticular**, with the
+  subject standing entirely _behind_ the sheet. That makes the print a window, which is worth a
+  section of its own — see [The window](#the-window-a-subject-behind-the-sheet) below.
 
 ### Shift the eye; never rotate it
 
@@ -527,6 +533,70 @@ perspective-correctly, so a texture doesn't swim across a face tilted away from 
 One pixel per lenslet per view means 177 × 133 at the defaults. The node renders 512 wide out of the
 box, which is already generous, and warns if you go below what the print resolves. A 3D package
 rendering nine 4K views for this is wasting nine tenths of the pixels.
+
+### The window: a subject behind the sheet
+
+Everything above lets the subject straddle the sheet plane: half of it in front, half behind. That is
+the arrangement that squeezes the most depth out of a given parallax budget, and for a lens grid it
+is the right default. For a 1D print there is a better one, and **Model → Stereo Views** builds it:
+put the subject **entirely behind the plane**, so the sheet is a window you look into rather than a
+surface things float in front of.
+
+That is not a stylistic preference. Three things follow from it, and the third is the one that costs
+something.
+
+**Nothing can be cut off while appearing to float in front of the paper.** An object that reads as
+nearer than the sheet but is clipped by the sheet's edge asks the eye to believe two contradictory
+things at once — the edge is in front of it (it cuts it off) and behind it (it looks nearer). This is
+the classic _window violation_, and it is the single most uncomfortable thing a stereo print can do.
+A subject that never crosses the plane cannot commit it.
+
+**The frame occludes, exactly as a real window does.** Off-axis, the subject shifts behind a fixed
+aperture, so the edges of the sheet cover and uncover it as you move. That is a strong depth cue —
+arguably the strongest in the picture — and it costs nothing to have: it is what the paper's own
+edges do once the geometry is right.
+
+**Disparity is gentler for the same depth.** Reuse ∂X/∂eₓ = 1 − t with `t = D/(D − z)`. A point in
+front of the sheet at `z = +Z` moves `s·Z/(D − Z)` per eye step; a point behind at `z = −Z` moves
+
+```
+s·Z / (D + Z)
+```
+
+`D − Z` shrinking against `D + Z` growing. At the tool's 400 mm viewing distance a subject 10 mm
+deep moves about 5% less per step behind the glass than in front of it, and the gap widens fast as
+the subject deepens. Depth behind the plane is simply cheaper than depth in front of it, which is
+why a window carries a bigger subject at the same LPI — 6 mm in the stereo example against the 2 mm
+the 3×3 grid manages, most of that difference coming from the extra views but some of it from this.
+
+#### What it costs: the subject gets smaller
+
+Perspective does not stop applying because the arrangement is convenient. Seen from the eye, a
+subject `Z` behind the window subtends `D/(D + Z)` of what it would at the glass. Fit the model to
+the sheet and _then_ push it back, and it no longer fills the frame — the window has a border round
+it that nobody asked for.
+
+So the fit is scaled by the reciprocal:
+
+```
+scale = (D + Z) / D
+```
+
+and `Z` is taken at the **near face** of the subject, not its middle. The near face is the plane that
+projects largest, so fitting there is the one choice that guarantees nothing spills past the edge of
+the aperture. At the default setback of zero the factor is exactly 1 — the nearest point of the
+subject touches the glass and fills the frame, and everything deeper falls away inside it, which is
+what a box seen through a window looks like.
+
+#### Ordering the views for the lens
+
+The renderer hands back the run **left eye first**, which is honestly what an eye in each position
+sees. That is not what gets printed. A lenticule shows its leftmost strip to an eye on the _right_,
+and **Lenticular Print** interlaces frames in the order they arrive — so the node reverses the run
+before sending it. Get this backwards and the print is _pseudoscopic_: the parallax runs the wrong
+way, near things move like far ones, and the whole picture turns inside out. The switch is under
+Advanced (_Order for the lens_) precisely because the only way to be certain which way your own
+press ends up is to print one and look at it.
 
 ---
 
@@ -754,21 +824,22 @@ Worth being straight about:
 
 ## Where the code is
 
-| Topic                    | Implementation                                                                         |
-| ------------------------ | -------------------------------------------------------------------------------------- |
-| The lens solve           | `lensGeometry()`, `heightForViewAngle()` in `src/lib/lenticular.ts`                    |
-| Interlacing              | `renderInterlaced()`                                                                   |
-| The two rasters          | `interlacedSize()`, `outputSize()`                                                     |
-| The relief map           | `renderDepthMap()`                                                                     |
-| 16-bit PNG               | `encodeGray16Png()` in `src/lib/png16.ts`                                              |
-| The 2D grid              | `renderGridInterlaced()`, `renderGridDepthMap()`, `gridCellLabel()`                    |
-| Square vs hex packing    | `latticeAt()`, `HEX_ROW_SPACING`, `packingFill()`                                      |
-| Calibration              | `calibrationValues()`, `withCalibrationValue()`, `switchFrames()`, `gridSwitchViews()` |
-| Rendering from a model   | `src/lib/render3d.ts` — `projectToSheet()`, `eyeOffsetsMm()`, `disparityPerStep()`     |
-| Reading a mesh in        | `parseMesh()` in `mesh.ts` → `parseStl()` / `parseObj()`                               |
-| The nodes                | `src/nodes/lenticular.ts`, `src/nodes/lensGrid.ts`, `src/nodes/model3d.ts`             |
-| The numbers on this page | `src/lib/lenticular.test.ts`                                                           |
-| The figures              | `docs/figures.py` — run `python docs/figures.py` to redraw them                        |
+| Topic                    | Implementation                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| The lens solve           | `lensGeometry()`, `heightForViewAngle()` in `src/lib/lenticular.ts`                       |
+| Interlacing              | `renderInterlaced()`                                                                      |
+| The two rasters          | `interlacedSize()`, `outputSize()`                                                        |
+| The relief map           | `renderDepthMap()`                                                                        |
+| 16-bit PNG               | `encodeGray16Png()` in `src/lib/png16.ts`                                                 |
+| The 2D grid              | `renderGridInterlaced()`, `renderGridDepthMap()`, `gridCellLabel()`                       |
+| Square vs hex packing    | `latticeAt()`, `HEX_ROW_SPACING`, `packingFill()`                                         |
+| Calibration              | `calibrationValues()`, `withCalibrationValue()`, `switchFrames()`, `gridSwitchViews()`    |
+| Rendering from a model   | `src/lib/render3d.ts` — `projectToSheet()`, `eyeOffsetsMm()`, `disparityPerStep()`        |
+| The window               | `renderViewSequence()`, `disparityAtDepth()`, `prepareVertices()`'s `fitAtZMm`            |
+| Reading a mesh in        | `parseMesh()` in `mesh.ts` → `parseStl()` / `parseObj()`                                  |
+| The nodes                | `src/nodes/lenticular.ts`, `lensGrid.ts`, `radialGrid.ts`, `model3d.ts`, `modelStereo.ts` |
+| The numbers on this page | `src/lib/lenticular.test.ts`                                                              |
+| The figures              | `docs/figures.py` — run `python docs/figures.py` to redraw them                           |
 
 ---
 

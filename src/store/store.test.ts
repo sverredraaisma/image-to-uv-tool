@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from './store';
 import { registerNode } from '../engine/registry';
 import { asText } from '../nodes/helpers';
-import type { NodeDefinition } from '../types';
+import { createImage } from '../lib/image';
+import type { NodeDefinition, RasterImage, SequenceValue } from '../types';
 
 // --- Synthetic test nodes (unique "test.*" types so they don't clash) -------
 const runCounts: Record<string, number> = {};
@@ -100,7 +101,55 @@ const throwingNode: NodeDefinition = {
     throw new Error('kaboom');
   },
 };
-[constNode, passNode, manualNode, imageInNode, asyncNode, abortableNode, throwingNode].forEach(registerNode);
+/**
+ * A three-frame animation out of nowhere, so a store-level test can prove that
+ * an ordinary image node maps over a Sequence without decoding a real GIF.
+ */
+const sequenceSourceNode: NodeDefinition = {
+  type: 'test.sequence',
+  label: 'Sequence source',
+  category: 'test',
+  autoRun: true,
+  inputs: [],
+  outputs: [{ id: 'out', label: 'out', type: 'sequence' }],
+  defaultConfig: () => ({}),
+  compute: () => ({
+    out: {
+      kind: 'sequence',
+      frames: [10, 20, 30].map((v) => createImage(1, 1, [v, v, v, 255])),
+      delaysMs: [40, 40, 40],
+    },
+  }),
+};
+/** Image in, image out — the shape every pixel op has. */
+const shiftNode: NodeDefinition = {
+  type: 'test.shift',
+  label: 'Shift',
+  category: 'test',
+  autoRun: true,
+  inputs: [{ id: 'in', label: 'in', type: 'image' }],
+  outputs: [{ id: 'out', label: 'out', type: 'image' }],
+  defaultConfig: () => ({}),
+  compute: ({ inputs }) => {
+    bump('shift');
+    const img = inputs.in as RasterImage | undefined;
+    if (!img) return { out: undefined };
+    const v = img.data[0] + 1;
+    return { out: createImage(1, 1, [v, v, v, 255]) };
+  },
+};
+
+[
+  constNode,
+  passNode,
+  manualNode,
+  imageInNode,
+  asyncNode,
+  abortableNode,
+  throwingNode,
+  sequenceSourceNode,
+  shiftNode,
+].forEach(registerNode);
 
 const store = () => useStore.getState();
 
@@ -692,5 +741,20 @@ describe('robustness (§2.3)', () => {
     const saved = store().exportGraph();
     (saved.nodes.find((n) => n.id === a)!.config as { v: string }).v = 'mutated';
     expect(store().nodes.find((n) => n.id === a)!.config.v).toBe('orig');
+  });
+
+  it('runs an ordinary image node over every frame of a sequence', async () => {
+    // The capability is the scheduler's, not the node's: test.shift knows
+    // nothing about animations, and still turns three frames into three.
+    const src = store().addNode('test.sequence');
+    const op = store().addNode('test.shift');
+    store().addConnection({ source: src, sourceHandle: 'out', target: op, targetHandle: 'in' });
+    await store().processAutoRun();
+
+    const out = store().runtime[op].outputs.out as SequenceValue;
+    expect(out.kind).toBe('sequence');
+    expect(out.frames.map((f) => f.data[0])).toEqual([11, 21, 31]);
+    expect(out.delaysMs).toEqual([40, 40, 40]);
+    expect(runCounts.shift).toBe(3); // once per frame, not once for the first
   });
 });

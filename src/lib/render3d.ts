@@ -49,9 +49,8 @@ export interface Shading {
   background: [number, number, number];
 }
 
-export interface ViewGridOptions {
-  /** Views per side: 3 renders a 3×3 = 9 view grid. */
-  grid: number;
+/** Everything both renderers need; the view layout is what differs. */
+export interface ViewRenderOptions {
   /** Printed sheet size in mm — also the aspect of every view rendered. */
   widthMm: number;
   heightMm: number;
@@ -75,6 +74,26 @@ export interface ViewGridOptions {
    * uvs — an STL never does, and an OBJ only if it was exported unmapped.
    */
   texture?: RasterImage;
+  /**
+   * Slide the whole subject along z at projection time, mm. 0 straddles the
+   * sheet plane (half in front, half behind); negative puts it behind the
+   * sheet, which is what makes the print a window rather than a hologram.
+   * Applied after `zScale`, so it is a distance in printed millimetres.
+   */
+  zOffsetMm?: number;
+  /**
+   * The z plane, mm, at which the subject is fitted to the sheet — negative
+   * for behind it. A subject behind the window projects smaller by
+   * D/(D − z), so fitting it *at the sheet* and then pushing it back leaves it
+   * short of the frame. Setting this scales the fit by (D − z)/D so the
+   * subject fills the window at that plane instead. 0 is the old behaviour.
+   */
+  fitAtZMm?: number;
+}
+
+export interface ViewGridOptions extends ViewRenderOptions {
+  /** Views per side: 3 renders a 3×3 = 9 view grid. */
+  grid: number;
 }
 
 /** A vertex ready to project: world millimetres, sheet plane at z = 0. */
@@ -159,7 +178,7 @@ export function projectToSheet(
  * spare, keeping its proportions — and work out how much its depth has to be
  * compressed at projection time to fit `depthMm` (see {@link PreparedMesh}).
  */
-export function prepareVertices(stl: StlValue, o: ViewGridOptions): PreparedMesh {
+export function prepareVertices(stl: StlValue, o: ViewRenderOptions): PreparedMesh {
   const [rx, ry, rz] = o.rotationDeg.map((d) => (d * Math.PI) / 180);
   const [cx, sx] = [Math.cos(rx), Math.sin(rx)];
   const [cy, sy] = [Math.cos(ry), Math.sin(ry)];
@@ -193,7 +212,14 @@ export function prepareVertices(stl: StlValue, o: ViewGridOptions): PreparedMesh
   const margin = Math.min(0.4, Math.max(0, o.margin));
   const fitW = Math.max(0.01, o.widthMm) * (1 - margin);
   const fitH = Math.max(0.01, o.heightMm) * (1 - margin);
-  const planar = Math.min(fitW / (b.size[0] || 1e-6), fitH / (b.size[1] || 1e-6));
+  // Perspective compensation for a subject that will sit off the sheet plane:
+  // seen from the centre eye a point at z projects to x·D/(D − z), so a subject
+  // pushed behind the window comes out smaller than the fit intended. Scaling
+  // by the reciprocal makes it fill the window at that plane. See fitAtZMm.
+  const fitAtZ = o.fitAtZMm ?? 0;
+  const D = Math.max(1e-6, o.viewDistanceMm);
+  const perspective = Math.max(1e-6, (D - fitAtZ) / D);
+  const planar = Math.min(fitW / (b.size[0] || 1e-6), fitH / (b.size[1] || 1e-6)) * perspective;
 
   // One scale for all three axes: the model keeps its shape.
   for (let i = 0; i < n; i += 3) {
@@ -273,7 +299,7 @@ function sampleTexture(img: RasterImage, u: number, v: number, out: [number, num
  * space, and dividing the interpolated product by the interpolated `t` puts it
  * back. Interpolating uv directly would swim visibly across a tilted face.
  */
-function renderOne(mesh: PreparedMesh, triangleCount: number, o: ViewGridOptions, ex: number, ey: number) {
+function renderOne(mesh: PreparedMesh, triangleCount: number, o: ViewRenderOptions, ex: number, ey: number) {
   const v = mesh.verts;
   const uvs = o.texture ? mesh.uvs : undefined;
   const colours = uvs ? undefined : mesh.colours;
@@ -298,6 +324,7 @@ function renderOne(mesh: PreparedMesh, triangleCount: number, o: ViewGridOptions
   const pxPerMmX = w / Math.max(0.01, o.widthMm);
   const pxPerMmY = h / Math.max(0.01, o.heightMm);
 
+  const zOffset = o.zOffsetMm ?? 0;
   const sx = [0, 0, 0];
   const sy = [0, 0, 0];
   const st = [0, 0, 0];
@@ -306,8 +333,17 @@ function renderOne(mesh: PreparedMesh, triangleCount: number, o: ViewGridOptions
     let behind = false;
     for (let c = 0; c < 3; c++) {
       // z compressed here and only here — the normal below still comes off the
-      // model's true shape. See PreparedMesh.
-      const p = projectToSheet(v[b + c * 3], v[b + c * 3 + 1], v[b + c * 3 + 2] * mesh.zScale, ex, ey, D);
+      // model's true shape. See PreparedMesh. The offset puts the subject
+      // behind the window when there is one; it is a printed-mm distance, so it
+      // rides after the compression rather than before it.
+      const p = projectToSheet(
+        v[b + c * 3],
+        v[b + c * 3 + 1],
+        v[b + c * 3 + 2] * mesh.zScale + zOffset,
+        ex,
+        ey,
+        D,
+      );
       // Level with the eye or beyond it, the projection is meaningless. The
       // subject depth is clamped well inside D, so this is a corrupt-mesh guard.
       if (p.t <= 0 || !Number.isFinite(p.t)) behind = true;
@@ -428,11 +464,25 @@ function downsample(rgb: Uint8ClampedArray, w: number, h: number, ss: number): R
 export function disparityPerStep(o: ViewGridOptions, lpi: number): { mm: number; lenslets: number } {
   const offsets = eyeOffsetsMm(o.grid, o.coneDeg, o.viewDistanceMm);
   const step = offsets.length > 1 ? Math.abs(offsets[1] - offsets[0]) : 0;
-  const z = Math.max(0, o.depthMm) / 2;
-  const D = Math.max(1e-6, o.viewDistanceMm);
-  const mm = z >= D ? Infinity : (step * z) / (D - z);
-  const pitchMm = 25.4 / Math.max(1e-6, lpi);
-  return { mm, lenslets: mm / pitchMm };
+  return disparityAtDepth(step, Math.max(0, o.depthMm) / 2, o.viewDistanceMm, lpi);
+}
+
+/**
+ * How far a point at depth `zMm` slides across the sheet when the eye moves
+ * `stepMm`, in mm and in lenslets. Positive z is in front of the sheet,
+ * negative behind it — behind is the gentler side, because D − z grows instead
+ * of shrinking, which is one reason a window is easier to print than a
+ * pop-out.
+ */
+export function disparityAtDepth(
+  stepMm: number,
+  zMm: number,
+  viewDistanceMm: number,
+  lpi: number,
+): { mm: number; lenslets: number } {
+  const D = Math.max(1e-6, viewDistanceMm);
+  const mm = zMm >= D ? Infinity : Math.abs((stepMm * zMm) / (D - zMm));
+  return { mm, lenslets: mm / (25.4 / Math.max(1e-6, lpi)) };
 }
 
 export interface ViewGridRender {
@@ -469,9 +519,16 @@ export function renderViewGrid(stl: StlValue, o: ViewGridOptions): ViewGridRende
     }
   }
 
-  // Depth of that view, normalised over the range actually hit so it always uses
-  // the full 0–255 whatever the subject depth is.
-  const src = centre ?? renderOne(mesh, stl.triangleCount, o, 0, 0);
+  const { depth, coverage } = depthOf(centre ?? renderOne(mesh, stl.triangleCount, o, 0, 0));
+  return { views, depth, coverage };
+}
+
+/**
+ * Depth map of one rendered view, normalised over the range actually hit so it
+ * always uses the full 0–255 whatever the subject depth is, plus the fraction
+ * of the frame the subject covers.
+ */
+function depthOf(src: ReturnType<typeof renderOne>): { depth: RasterImage; coverage: number } {
   let lo = Infinity;
   let hi = -Infinity;
   let hits = 0;
@@ -495,5 +552,100 @@ export function renderViewGrid(stl: StlValue, o: ViewGridOptions): ViewGridRende
       depth.data[o4 + 2] = g;
     }
   }
-  return { views, depth, coverage: hits / (src.w * src.h) };
+  return { depth, coverage: hits / (src.w * src.h) };
+}
+
+// ---------------------------------------------------------------------------
+// The window: a horizontal run of views of a subject standing *behind* the
+// sheet, for a 1D lenticular print.
+//
+// Same camera as the grid — the eye translates along one axis and never rotates
+// — but the subject is pushed back so that none of it crosses the sheet plane.
+// That makes the print a window rather than a hologram, and it is not a stylistic
+// choice; three things follow from it:
+//
+//   • Nothing pops out, so nothing can be cut off by the edge of the sheet while
+//     appearing to float in front of it. That contradiction ("window violation")
+//     is the single most uncomfortable thing a stereo print can do.
+//   • The frame occludes, exactly as a real window does. Off-axis views see the
+//     subject shifted behind a fixed aperture, so the edges of the sheet cover
+//     and uncover it as you move — the strongest depth cue in the whole picture,
+//     and free.
+//   • Disparity is gentler for the same depth: a point behind moves by
+//     s·Z/(D + Z), against s·Z/(D − Z) in front. See `disparityAtDepth`.
+//
+// The one thing it costs is size. Seen from the eye, a subject Z behind the
+// window subtends D/(D + Z) of what it would at the glass, so it has to be
+// scaled up by the reciprocal to fill the frame — `fitAtZMm` in
+// {@link prepareVertices}, applied at the near face so nothing spills out of the
+// aperture.
+// ---------------------------------------------------------------------------
+
+export interface ViewSequenceOptions extends ViewRenderOptions {
+  /** How many views to render across the cone, left to right. */
+  views: number;
+  /**
+   * Gap between the sheet and the nearest point of the subject, mm. 0 stands
+   * the subject right against the glass — the classic window — and anything
+   * more sinks it further into the box.
+   */
+  setbackMm: number;
+}
+
+export interface ViewSequenceRender {
+  /** The views, left eye first. */
+  views: RasterImage[];
+  /** Eye position of each view, mm off-axis; negative is left. */
+  offsetsMm: number[];
+  /** Depth of the middle view, white = nearest. */
+  depth: RasterImage;
+  /** Fraction of the middle view the subject covers, 0–1. */
+  coverage: number;
+  /** Where the subject sits behind the sheet, mm: near face and far face. */
+  nearMm: number;
+  farMm: number;
+}
+
+/**
+ * Render a horizontal run of views of a subject standing behind the sheet.
+ *
+ * Views come back in eye order, leftmost first — honestly what an eye in that
+ * position sees through the window, with no mirroring. A lens inverts, so
+ * whatever prints them has to account for that (the node does).
+ */
+export function renderViewSequence(stl: StlValue, o: ViewSequenceOptions): ViewSequenceRender {
+  const count = Math.max(1, Math.round(o.views));
+  const depthMm = Math.max(0, o.depthMm);
+  const setbackMm = Math.max(0, o.setbackMm);
+  // The subject occupies [-(setback + depth), -setback]: entirely behind the
+  // sheet, near face `setback` back. prepareVertices centres it on z = 0 and
+  // the compression maps it to `depthMm`, so the offset is to its mid-plane.
+  const placed: ViewSequenceOptions = {
+    ...o,
+    zOffsetMm: -(setbackMm + depthMm / 2),
+    // Fit at the near face: that is the plane that projects largest, so
+    // nothing of the subject can spill past the window's edge.
+    fitAtZMm: -setbackMm,
+  };
+
+  const mesh = prepareVertices(stl, placed);
+  const offsetsMm = eyeOffsetsMm(count, o.coneDeg, o.viewDistanceMm);
+  const views: RasterImage[] = [];
+  const mid = count >> 1;
+  let centre: ReturnType<typeof renderOne> | undefined;
+  for (let i = 0; i < count; i++) {
+    const rendered = renderOne(mesh, stl.triangleCount, placed, offsetsMm[i], 0);
+    views.push(downsample(rendered.rgb, rendered.w, rendered.h, rendered.ss));
+    if (i === mid) centre = rendered;
+  }
+
+  const { depth, coverage } = depthOf(centre ?? renderOne(mesh, stl.triangleCount, placed, 0, 0));
+  return {
+    views,
+    offsetsMm,
+    depth,
+    coverage,
+    nearMm: setbackMm,
+    farMm: setbackMm + depthMm,
+  };
 }

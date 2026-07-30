@@ -129,6 +129,12 @@ export const NODE_HELP: Record<string, NodeHelp> = {
           'A 47-frame GIF cannot fit under a lenticule. Set Frames to 8 and the node resamples the motion evenly across the loop.',
       },
       {
+        title: 'Grade the whole animation at once',
+        detail:
+          'Wire the Sequence straight into any image node — Curves, Blur, Combine — and it runs once per frame, handing back the whole animation with its timings intact.',
+        chain: ['Animation Input', 'Curves', 'Gloss Preview'],
+      },
+      {
         title: 'Grab a single frame to work on',
         detail:
           'Send the Sequence into Sequence Frame to pull out frame 0 and treat it like any other image.',
@@ -136,6 +142,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       },
     ],
     tips: [
+      'A still wired alongside the animation is reused for every frame, which is how one overlay composites onto a whole GIF through Combine or Apply Mask.',
       'Frames must fit one lenticule: PPI ÷ LPI ÷ strip samples (32 at 1440 PPI / 45 LPI). The Info output does the arithmetic and warns you.',
       'Ping-pong makes tilting back play the motion in reverse, so the print never snaps — use it unless the source loops seamlessly.',
       'GIF decodes in every browser; WebP/APNG need a browser with WebCodecs, otherwise you get the first frame only.',
@@ -143,7 +150,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
   },
   frameSelect: {
     summary:
-      'Takes one frame out of a Sequence as an ordinary image. The bridge between the animation nodes and the ~90 nodes that only understand a single image.',
+      'Takes one frame out of a Sequence as an ordinary image, for when you want a still rather than the whole run — an image node fed the Sequence itself maps over every frame instead.',
     uses: [
       {
         title: 'Colour-grade a GIF frame',
@@ -948,6 +955,35 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     ],
   },
 
+  radialGrid: {
+    summary:
+      'Spreads N images around a circle under a lens array. Each one is visible from the bearing it occupies, and head-on they all merge into a single blended image — because every wedge of artwork meets its neighbours at the centre of its lenslet, which is exactly where the eye sits when it is square to the sheet.',
+    uses: [
+      {
+        title: 'Walk-around reveal',
+        detail:
+          'Six variants of a design around the circle: the print looks like an average of all of them from in front, and resolves into one as you step to the side.',
+      },
+      {
+        title: 'A face that follows the room',
+        detail:
+          'Different expressions at different bearings gives a portrait that changes depending on where in the room you stand, in both axes rather than only left-right.',
+      },
+      {
+        title: 'Merge as the message',
+        detail:
+          'The head-on blend is a real image you can design for — overlay N colour separations, or N words that only add up to something legible from straight in front.',
+      },
+    ],
+    tips: [
+      'Ports are named for the bearing the view is seen from: 0° · Right, 90° · Up, and so on anticlockwise. Angles that are not one of the eight compass points are quoted in degrees alone.',
+      'A view owns a bearing, not a distance: its wedge runs from the lenslet centre to the rim, so it holds from just off head-on all the way to the edge of the lens cone.',
+      'Wedges get thinner towards the centre of every lenslet, which is what makes the merge happen — but it also means the print blurs between views near head-on rather than switching cleanly. That is the effect, not a fault.',
+      'Info reports how wide a wedge is at the rim of a lenslet. Under about 2 printed pixels and the views bleed into each other everywhere, not just head-on: use fewer views, lower LPI, or raise PPI.',
+      'The artwork always ships on the full PPI raster, because a wedge edge is a radial line and no orientation makes those run along the pixels.',
+    ],
+  },
+
   modelInput: {
     summary:
       'Uploads a mesh — STL (binary or ASCII) or OBJ — and puts it on a wire. Units, origin and scale are ignored: whatever renders it fits it to the print. Pair it with Model → Grid Views.',
@@ -963,6 +999,37 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       'STL carries no colour at all, so its views come out in one material colour — set that and the light under Advanced in the render node. Export as OBJ instead and the mesh can bring texture coordinates or vertex colours with it.',
       'A textured OBJ needs its image on a wire, not a .mtl file: connect any image node to the render node’s Texture input. Nothing can fetch the sibling files a .mtl names from inside a browser tab.',
       'A dense scan can be millions of triangles; decimate it first. Nothing here needs more detail than the print resolves — about 177×153 per view at 100 mm and 45 LPI.',
+    ],
+  },
+
+  modelStereo: {
+    summary:
+      'Renders a mesh standing behind the print and puts the whole run of views on one wire, ready for Lenticular Print’s Frames input. The sheet is a window: the subject sits entirely behind it and recedes into the paper, with the edges of the sheet occluding it as you move.',
+    uses: [
+      {
+        title: 'An object in a box',
+        detail:
+          'A model, a setback of nothing, and 12 views: the print reads as a window with the object standing just inside it, turning as you walk past.',
+        chain: ['3D Model Input', 'Model → Stereo Views', 'Lenticular Print'],
+      },
+      {
+        title: 'Deeper scene, gentler print',
+        detail:
+          'Depth behind the plane is cheaper than depth in front of it — a point Z back moves by s·Z/(D+Z) rather than s·Z/(D−Z) — so a window carries a bigger subject than a pop-out at the same LPI.',
+      },
+      {
+        title: 'Check the placement before printing',
+        detail:
+          'The Depth output is the centre view’s depth map, so Gloss Preview or a Normal Map will show the shape the parallax is being spent on.',
+        chain: ['Model → Stereo Views', 'Gloss Preview'],
+      },
+    ],
+    tips: [
+      'Everything behind the plate is the point. Nothing floats in front of the paper, so nothing can be cut off by the sheet edge while appearing to be nearer than it — the contradiction that makes a stereo print uncomfortable to look at.',
+      'Because the subject is behind the window it projects smaller by D/(D+Z), so the node scales the fit up by the reciprocal — measured at the near face, so the subject fills the frame without any of it spilling past the aperture.',
+      'Views cost nothing but render time here: a 1D print spends resolution on one axis only, so 12–24 views is normal, and every extra view buys depth by shrinking the step between eyes.',
+      'Watch the parallax figure in Info. More than ~1.5 lenticules per step and the far face ghosts instead of gliding; under 0.15 and the print is flat.',
+      'The views go out right-eye-first, because a lenticule shows its leftmost strip to an eye on the right and Lenticular Print interlaces in the order frames arrive. Turn off *Order for the lens* under Advanced if you ever need the raw left-to-right run.',
     ],
   },
 

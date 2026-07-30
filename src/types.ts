@@ -50,8 +50,10 @@ export interface StlValue {
  *
  * It exists so one wire can carry a whole animation: the lenticular node takes
  * N frames, and dragging N edges out of an animation by hand would be absurd.
- * Nodes that only understand one image take the first frame (see `asImage`),
- * which keeps every existing image node usable with a sequence plugged in.
+ * Nodes are run once per frame when one of these reaches an image input (see
+ * `engine/sequenceMap.ts`), so an ordinary pixel op works on a whole animation.
+ * `asImage` still collapses one to its first frame, for the nodes that opt out
+ * of that and for anything reading a sequence as a single picture.
  */
 export interface SequenceValue {
   kind: 'sequence';
@@ -149,6 +151,17 @@ export interface NodeDefinition {
   compute: (ctx: ComputeContext) => Promise<ComputeResult> | ComputeResult;
   /** Node exposes a large custom editor popup (e.g. the area picker). */
   customEditor?: string;
+  /**
+   * Whether the node runs once per frame when a Sequence lands on an image
+   * input, its image outputs coming back as a Sequence.
+   *
+   * Left undefined this is derived — image in and image out, and not already
+   * handling sequences itself (see `engine/sequenceMap.ts`), which covers
+   * every ordinary pixel op. Set it to opt out, or pass a predicate to leave
+   * the choice to the node's own config, which is how the paid AI nodes make a
+   * frame-by-frame run something you ask for rather than something you get.
+   */
+  mapsSequences?: boolean | ((config: NodeConfig) => boolean);
   /**
    * Uses generative AI to synthesise new imagery/text (as opposed to analysing
    * or enhancing an existing image). Drives the header "Gen AI" toggle (hides
