@@ -354,16 +354,18 @@ describe('the loading-spinner example', () => {
     const out = await runSources();
     const node = graph.nodes.find((n) => n.id === 'grid')!;
     const result = await getNodeDef('lensGrid').compute(
-      // Rendered at a coarser raster than the example ships: the default
-      // 100 mm at 1440 PPI is a 32 MP lens map, too slow to sit in a unit test.
-      // The optics are identical — only the sheet size differs.
+      // Rendered on a smaller, coarser sheet than the example ships: at the
+      // default 100 mm and 1440 PPI the lens map is 32 MP, too slow to sit in a
+      // unit test. Only those two settings change — the lens itself (45 LPI
+      // pitch, 0.9 mm of varnish at RI 1.5, 2×2, mirrored) is the example's, so
+      // fewer pixels land under each lenslet but the optics being solved are the
+      // shipped ones. That the example ships the defaults is asserted above.
       ctx(
         { c0r0: out.s0, c1r0: out.r90, c1r1: out.r180, c0r1: out.r270 },
         {
           ...node.config,
           widthMm: 50,
           ppi: 600,
-          lpi: 50,
         },
       ),
     );

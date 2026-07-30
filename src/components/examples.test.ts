@@ -23,7 +23,7 @@ describe('empty-state examples', () => {
     }
   });
 
-  it('print at the nodes own default settings, not demo-tuned ones', () => {
+  it("print at the nodes' own default settings, not demo-tuned ones", () => {
     // The defaults are the common UV-flatbed numbers (1440 PPI, 45 LPI, 0.9 mm
     // of varnish at RI 1.5). An example that quietly halved them would teach
     // people the wrong settings. Grid size is the artwork's choice, not the
