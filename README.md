@@ -76,6 +76,14 @@ settling with a stale result.
 > Local storage is ~5 MB. Very large uploaded images may exceed the quota; the
 > app keeps working in-memory but may not persist that graph.
 
+## Printed lenses
+
+The **Lenticular Print** and **Lens Grid Print** nodes print the lens array itself, as a clear-ink
+relief on top of the artwork it focuses on. **[docs/printed-lenses.md](docs/printed-lenses.md)** is a
+full illustrated guide to how that works — the optics and the algebra that falls out of them, the
+interlacing, the 2D grid, calibrating against your own printer, and everything you need to
+reimplement it from scratch. Published freely: MIT-licensed, no patent sought.
+
 ## Node catalog
 
 | Node                           | Category        | Runs   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |

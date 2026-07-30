@@ -1,0 +1,574 @@
+# Printing your own lenses
+
+**How the Lenticular Print and Lens Grid Print nodes work, and how to do it yourself.**
+
+A UV flatbed printer lays down ink and cures it on the spot, so it can build a stack of clear
+varnish — a physical relief — usually up to somewhere between half a millimetre and two, at 600 to
+1440 dots per inch. A machine that can build a transparent relief that finely can build **lenses**.
+And if it prints the lenses onto the picture it just printed, in the same job, the two line up
+perfectly by construction.
+
+That's the whole idea. This guide explains what has to be true for it to work, why the maths comes
+out the way it does, and what to do on your own printer.
+
+![Overview of the process](images/01-overview.png)
+
+Everything here is MIT-licensed, like the rest of the repository. There's a note on prior art and
+licensing [at the end](#prior-art-and-licence).
+
+---
+
+## Contents
+
+- [What comes out](#what-comes-out)
+- [Why printing the lens changes the problem](#why-printing-the-lens-changes-the-problem)
+- [Solving the lens](#solving-the-lens)
+- [When it can't work](#when-it-cant-work)
+- [How wide the view is](#how-wide-the-view-is)
+- [Interlacing](#interlacing)
+- [Two rasters, two jobs](#two-rasters-two-jobs)
+- [Why the relief needs 16 bits](#why-the-relief-needs-16-bits)
+- [Angle and phase](#angle-and-phase)
+- [The two-dimensional version](#the-two-dimensional-version)
+- [Calibrating](#calibrating)
+- [The numbers, at the defaults](#the-numbers-at-the-defaults)
+- [Doing it yourself](#doing-it-yourself)
+- [When it goes wrong](#when-it-goes-wrong)
+- [What this doesn't do](#what-this-doesnt-do)
+- [Where the code is](#where-the-code-is)
+
+---
+
+## What comes out
+
+You give the tool N images — the **views** — and some print settings. It gives you two files:
+
+- the **interlaced artwork**, which you print in colour ink;
+- the **relief height map**, a 16-bit greyscale image, which you print on top in clear ink.
+
+Here's what that makes, in cross-section. This is drawn at true scale from the real solution at the
+tool's defaults, so the proportions are honest — the lens really is that shallow relative to the
+stack it sits on.
+
+![Cross-section of the finished print](images/02-cross-section.png)
+
+Three things to notice, because everything else follows from them:
+
+1. The clear ink is the **only** thing between the lens and the picture. There's no substrate in
+   between, the way there is when you laminate a lens sheet on top of a print.
+2. The lens doesn't fill the whole height. Most of it — 0.702 mm of the 0.9 mm here — is a flat
+   base layer, and the actual curve is only the top 0.198 mm.
+3. Under each lens the artwork is chopped into strips, one per view.
+
+---
+
+## Why printing the lens changes the problem
+
+With a laminated lenticular sheet you pick a lens and the substrate thickness comes with it: the
+manufacturer has already arranged for the focal plane to land on the back face, where you stick your
+print. Your job is alignment — matching your interlace to their pitch, which is why the trade has
+such elaborate pitch-test rituals.
+
+Printing the lens removes the alignment problem entirely. The pitch is whatever your file says,
+because the same machine makes both halves in one pass.
+
+But it introduces a different constraint. The distance from the lens apex down to the image is now
+the **ink stack itself**, and the ink stack is limited by what your printer and your varnish can
+build. You don't get to choose it to suit the lens; the lens has to suit it.
+
+That single substitution is what makes the rest of this document. It turns "pick a lens sheet" into
+a small piece of algebra with a real, binding constraint attached.
+
+---
+
+## Solving the lens
+
+Start with the focus. A curved surface between air and a material of refractive index `n` bends
+incoming parallel light to a point. For a single refracting surface of radius `R`, that point sits at
+`n·R / (n − 1)` past the surface, measured inside the material. The flat back of the stack is in
+contact with the artwork, so it adds no power — the focus stays where the curve put it.
+
+![The focus condition](images/03-focus.png)
+
+We want that focus to land exactly on the artwork, which is `H` below the apex. Setting the focal
+distance equal to `H` gives you the radius immediately:
+
+```
+R = H (n − 1) / n
+```
+
+That's worth pausing on. **The radius depends only on the stack height and the refractive index.**
+Not on the pitch, not on how many views you have. Given 0.9 mm of varnish at index 1.5, the surface
+is a piece of a sphere of radius 0.3 mm, and that's that.
+
+The pitch decides how much of that sphere you use. A circular arc across a chord of width `p`, rising
+to a height `s` in the middle (the **sag**), has radius:
+
+![Sag, chord and radius](images/04-chord.png)
+
+```
+R = (s² + (p/2)²) / 2s
+```
+
+Two expressions for `R`, one unknown left. Eliminating it gives a quadratic in the sag:
+
+```
+n·s² − 2H(n−1)·s + n·p²/4 = 0
+
+        H(n−1) − √( H²(n−1)² − n²p²/4 )
+  s  =  ───────────────────────────────
+                      n
+```
+
+and the flat base underneath is just `b = H − s`.
+
+### Why the minus sign
+
+The quadratic has two roots and both are real solutions — they're the minor and major arc of the
+_same_ circle, since both share the radius fixed above. The larger root has a sag bigger than the
+radius, which means a surface more than hemispherical: a sphere on a stalk. Not printable, not
+useful. Always take the minus root.
+
+---
+
+## When it can't work
+
+Look at the square root. If `H²(n−1)² < n²p²/4` there's no real answer, and rearranging tells you
+exactly when:
+
+```
+H  ≥  n·p / (2(n − 1))
+```
+
+This isn't a numerical quirk, it's physics. As `H` drops toward that bound the sag grows to `p/2` — a
+hemisphere, the strongest lens you can make across that chord. Below it, no surface of any shape
+spanning that pitch focuses that shallow.
+
+![The feasibility floor](images/05-feasibility.png)
+
+The floor is **linear in the pitch**, so it's inversely proportional to LPI. Read that off the chart
+and it says something that surprises people coming from laminated lenticular: **coarse lenses need
+thick ink.** A 20 LPI lens needs 1.9 mm of varnish. At a realistic 0.9 mm budget you can't go
+coarser than about 42 LPI, and the tool's 45 LPI default sits just 6% above the floor.
+
+If you ask for something impossible, the tool doesn't refuse — it prints the strongest lens it can (a
+hemisphere), tells you where that actually focuses, and tells you the height you'd need. A print
+that focuses at the wrong depth is blurry, not ruined, and seeing it is more useful than an error.
+
+---
+
+## How wide the view is
+
+The cone you can move through before the image stops flipping is set by the marginal ray: the one
+from the focus out through the edge of the lens, refracted back into air.
+
+![The viewing cone](images/06-viewing-cone.png)
+
+```
+sin(θ/2) = n · sin( arctan( (p/2) / H ) )
+```
+
+Both this and the feasibility floor depend on the pitch and the height **only through their ratio**.
+Halve both and nothing changes — same lens shape, same margin, same cone. That has two consequences
+worth knowing:
+
+**The refractive index sets a ceiling nobody can beat.** At the feasibility floor the sag is `p/2`
+and the cone is as wide as it gets: 45° at n = 1.4, **57° at n = 1.5**, 68° at n = 1.6, 81° at
+n = 1.7. No choice of pitch or height gets you past those.
+
+**Any cone you can reach at one pitch, you can reach at every pitch**, by scaling the height in
+proportion. That sounds academic; it turns out to matter a lot for [calibration](#calibrating).
+
+---
+
+## Interlacing
+
+Now the artwork. Each lens covers a strip of it, and that strip is divided into N tiles, one per
+view. Where your eye is decides which tile the lens shows you.
+
+![How one lens is divided](images/07-interlace.png)
+
+Walking across the sheet at position `u` (measured across the lenses), the arithmetic is:
+
+```
+σ = u / p + phase     j = ⌊σ⌋          which lens
+                      t = σ − j        where you are inside it, 0…1
+                      k = ⌊t · N⌋      which view's tile
+```
+
+### The part that's easy to get wrong
+
+Each tile does **not** sample its view at the tile's own position. Every tile of a given lens samples
+its view at **that lens's centre**:
+
+```
+u_centre = (j + 0.5 − phase) · p
+```
+
+It's worth being concrete about why, because the naive version looks perfectly reasonable and
+produces a print that's subtly, annoyingly wrong.
+
+![Lens-centre sampling versus per-pixel sampling](images/08-lens-centre-sampling.png)
+
+Sample at the lens centre and all N views agree on which point of the picture that lens represents —
+one lens is one pixel of the final image, seen N ways. Sample where each pixel happens to sit and the
+views are staggered by `p/N`, so as the print flips, the whole image slides sideways by 423 µm. You'll
+see it, and you'll spend a while blaming your printer.
+
+This also tells you the resolution you're going to get. **The number of lenses is the width of each
+view.** A 100 mm print at 45 LPI is 177 lenses across, so each view is 177 pixels wide, and no amount
+of source resolution changes that. (Vertically, a lenticular keeps everything — a cylinder doesn't
+resolve anything along its own length. The [2D version](#the-two-dimensional-version) is not so
+generous.)
+
+---
+
+## Two rasters, two jobs
+
+The two output files are deliberately different sizes.
+
+![Two rasters](images/09-dual-raster.png)
+
+The **relief** has to sit on the printer's own raster, because it _is_ a physical surface. The pixels
+across one lens — `PPI / LPI`, which is 32 at the defaults — are the steps you have to shape the
+curve with. Fewer than about 8 and the lens visibly terraces.
+
+The **artwork** carries no geometry at all. It's flat ink that the RIP will scale onto the sheet, so
+it only needs to be big enough that (a) no view tile gets skipped, which means at least 2 pixels per
+tile, and (b) you never resample your sharpest source view downward. At the defaults that's 1063
+pixels where the relief needs 5669 — about a twenty-eighth of the data for exactly the same print.
+
+---
+
+## Why the relief needs 16 bits
+
+A browser canvas is 8-bit, so this repository carries its own small 16-bit PNG writer. Here's why
+that was worth the trouble:
+
+![8-bit versus 16-bit quantisation](images/10-quantisation.png)
+
+The whole lens arc is 198 µm tall on a 0.9 mm stack. Eight bits gives you 256 levels over that
+0.9 mm, so the arc gets 56 of them — steps of 3.53 µm, on a surface whose job is to focus light.
+Sixteen bits gives you steps of 0.0137 µm, which is far below anything the ink can hold.
+
+Two practical notes:
+
+- Ask your RIP what bit depth it reads for the varnish channel, and what height full white
+  corresponds to, before you print anything.
+- The tool writes the height that 65535 means into the filename, because on a calibration sheet it
+  varies.
+
+---
+
+## Angle and phase
+
+**Orientation** rotates the whole array. Because the maths is all done in millimetres in a rotated
+frame, this is one parameter with no special cases — set it to 90° and you get a horizontally-ruled
+array with vertical parallax, at no extra cost.
+
+**Phase** shifts where view 1 starts inside each lens. On a laminated print this is a survival
+mechanism; here, where the lens and the artwork come from the same machine, it's a fine adjustment
+for aligning the flip to a preferred head position.
+
+---
+
+## The two-dimensional version
+
+Swap the ruling of cylinders for a square grid of spherical caps and the print moves in both axes —
+left-right _and_ up-down — carrying N² views instead of N.
+
+**The optics don't change.** A sphere and a cylinder refract identically at a surface of radius `R`,
+so everything above applies unaltered: same radius, same sag, same base, same feasibility floor, same
+cone. Only the footprint is different.
+
+![The 2D lens grid](images/11-grid-plan.png)
+
+Each cap is **inscribed** in its square cell, so its diameter is the pitch. That leaves the four
+corners — about 21.5% of the area, since a circle fills π/4 of its square — flat at base height,
+where they don't focus and contribute a little haze.
+
+![Cap profile through the diagonal](images/12-grid-profile.png)
+
+The alternative would be stretching the cap out to the cell corners so nothing is wasted. It's
+tempting, and it's a trap: the sag would then be measured across the diagonal `p√2` instead of the
+pitch, which raises the feasibility floor by √2 — from 0.847 mm to 1.20 mm at 45 LPI. For realistic
+ink heights that's often the difference between working and not.
+
+### Naming the views
+
+Every input is named for **where you stand to see it**:
+
+![The nine view names](images/13-view-names.png)
+
+### The bit that will catch you out
+
+A lens inverts. The ray arriving from your eye on the right crosses the axis and lands on the
+**left** of the cell. So the view named "Right" has to be printed on the left tile.
+
+![Lens inversion](images/14-mirroring.png)
+
+Get this wrong and the print is _pseudoscopic_: parallax runs backwards, depth turns inside out,
+things that should come toward you recede instead. It isn't subtle and it isn't pleasant. The tool
+mirrors both axes by default and only lets you switch it off for source material that's already
+flipped.
+
+### What the second axis costs
+
+A lenticular quantises one axis and leaves the other alone. A grid quantises both, so each view is
+cut down to one sample per lens in each direction:
+
+| Arrangement | Views | Artwork raster (100 mm, 45 LPI, 4:3) | Each view resolves to |
+| ----------- | ----- | ------------------------------------ | --------------------- |
+| 1D, N = 2   | 2     | 709 × 532 px                         | 177 × 532             |
+| 1D, N = 3   | 3     | 1063 × 797 px                        | 177 × 797             |
+| 2D, 2 × 2   | 4     | 709 × 532 px                         | 177 × 133             |
+| 2D, 3 × 3   | 9     | 1063 × 797 px                        | 177 × 133             |
+
+That's about a 6× loss vertically at a 3×3 grid, which is why detail that survives a lenticular can
+vanish in a grid. In practice you want a **higher** LPI for a grid — and conveniently, finer pitch
+also needs less ink height, so the two constraints pull the same way for once.
+
+---
+
+## Calibrating
+
+Three things are known imprecisely in real life: your varnish's actual refractive index, the height
+your printer really lays down versus what you asked for, and (for a laminated hybrid) the real lens
+pitch. Each gets a swept test sheet.
+
+![A calibration sheet](images/15-calibration.png)
+
+Every calibration download gives you three files on the same raster: the interlaced artwork swept
+across bands, a **switch target** with the artwork replaced by flat white and black, and the 16-bit
+relief. The switch target is the one you actually read — it shows you _where_ the print flips with
+none of your artwork's detail in the way.
+
+**Reading it:** print, cure, and look at the switch target from your intended viewing distance while
+moving your head across the parallax axis. The right band is the one that flips **cleanly and
+uniformly across its whole width** — all black, then all white, with no banding, no gradient
+sweeping across, no ghost of the other state.
+
+### The pitch sweep needs a trick
+
+The obvious way to sweep LPI is to hold the height fixed and vary the pitch. That's wrong twice over.
+It varies the viewing cone as well as the pitch, so the bands aren't comparable; and the coarse bands
+may fall below the feasibility floor and not focus at all, so you'd be judging a broken lens against
+working ones.
+
+Because the cone depends only on the ratio `(p/2)/H`, giving each band its own height in proportion
+to its pitch fixes both problems at once — every band gets the same cone, and since the floor scales
+with pitch identically, every band focuses:
+
+```
+H_band = H_reference × LPI_reference / LPI_band
+```
+
+| Band   | Pitch    | Height    | Cone   | Focuses? |
+| ------ | -------- | --------- | ------ | -------- |
+| 40 LPI | 0.635 mm | 1.0125 mm | 53.34° | yes      |
+| 45 LPI | 0.564 mm | 0.9000 mm | 53.34° | yes      |
+| 50 LPI | 0.508 mm | 0.8100 mm | 53.34° | yes      |
+
+Since the relief is normalised against the tallest stack on the sheet, the finer bands — which need
+less ink — simply come out darker. So the sheet also tells you what each candidate pitch will cost
+you in height.
+
+---
+
+## The numbers, at the defaults
+
+100 mm wide, 1440 PPI, 45 LPI, 0.9 mm of gloss, index 1.5, no rotation, no phase. Raster sizes assume
+a 4:3 source, since the sheet takes its aspect ratio from the first view. Every value here comes out
+of the reference implementation.
+
+| Quantity                | Value                                   |
+| ----------------------- | --------------------------------------- |
+| Lens pitch              | 0.5644 mm (32.00 printer pixels)        |
+| Minimum feasible height | 0.8467 mm — so 0.9 clears it by 6.3%    |
+| Radius of curvature     | 0.3000 mm                               |
+| Lens sag                | 0.1983 mm                               |
+| Flat base beneath       | 0.7017 mm                               |
+| Focus below apex        | 0.9000 mm (equal to H, by construction) |
+| Viewing cone            | 53.34° (ceiling at this index: 56.6°)   |
+| Lenses across the sheet | 177                                     |
+| Relief raster           | 5669 × 4252 px — 24.1 MP                |
+| Artwork raster, 3 views | 1063 × 797 px — 0.85 MP                 |
+| 16-bit height step      | 0.0137 µm                               |
+
+A quick consistency check on the two ways of writing the radius: `H(n−1)/n = 0.9 × 0.5 / 1.5 =
+0.300000`, and from the solved sag via the chord, `0.300000`. They agree to six decimals, as they
+have to.
+
+---
+
+## Doing it yourself
+
+### What you need
+
+- A **UV flatbed** with a clear/varnish channel that can build to at least a millimetre or so, and a
+  RIP that takes a greyscale height map for it.
+- **Cured clear ink** whose refractive index you can look up or measure. Most UV clears are near 1.5.
+  If the datasheet is silent, calibrate for it.
+- A flat, dimensionally stable substrate.
+- N images that differ only by viewpoint — rendered from a 3D scene, shot on a camera slider, or
+  taken as the frames of an animation. For a flip or a loop rather than a depth effect they needn't
+  be viewpoints at all; any N frames that read as a sequence will do, and an animated GIF is the
+  easiest source of them.
+
+### In this tool
+
+1. Add a **Lenticular Print** node (or **Lens Grid Print** for 2D), plus a source of views: one
+   **Image Input** per view, or a single **Animation Input** whose `Frames` output carries a whole
+   decoded animation down one wire.
+2. Connect them. For the lenticular node connection order is viewing order. For the grid node each
+   port is named for the direction it's viewed from — connect by name and let the node handle the
+   mirroring.
+3. Set width, PPI, LPI, height and RI. Watch the **Info** output: it reports the solved sag, base,
+   focus and cone, and warns you if the combination can't focus.
+4. Press **Run**.
+5. Open the node's editor and download the **16-bit gloss depth map**. The `interlaced` output is
+   your artwork; the `depth` output is an 8-bit preview only — don't print that one.
+6. Before committing to a real print, download the **calibration sheets** and read them as above.
+
+### From scratch
+
+The whole method is about sixty lines of arithmetic. Nothing here needs this repository:
+
+```python
+# ---- inputs ---------------------------------------------------------
+#   views[]      N source images, in viewing order
+#   width_mm     printed width;  PPI, LPI, H (mm), n, phase, q
+#   o            orientation in RADIANS
+o          = radians(orientation_deg)
+height_mm  = width_mm * views[0].height / views[0].width   # sheet aspect
+frac       = lambda x: x - floor(x)
+
+# ---- solve the lens -------------------------------------------------
+p      = 25.4 / LPI
+H_min  = n * p / (2 * (n - 1))
+disc   = H*H*(n-1)**2 - n*n*p*p/4
+if disc < 0:
+    warn(f"cannot focus in {H} mm; need at least {H_min} mm")
+    s = p / 2                      # hemisphere, the strongest lens
+else:
+    s = (H*(n-1) - sqrt(disc)) / n # minor arc — the printable root
+R      = (s*s + (p/2)**2) / (2*s)
+b      = max(0, H - s)
+
+# ---- interlaced artwork ---------------------------------------------
+cells      = width_mm / p
+art_w      = max(ceil(cells * N * q), max(view.width for view in views))
+art_h      = round(art_w * views[0].height / views[0].width)
+mm_per_px  = width_mm / art_w
+
+for py in range(art_h):
+  for px in range(art_w):
+      x, y = (px + 0.5) * mm_per_px, (py + 0.5) * mm_per_px
+      u    =  x*cos(o) + y*sin(o)
+      v    = -x*sin(o) + y*cos(o)
+      sig  = u / p + phase
+      j, t = floor(sig), sig - floor(sig)
+      k    = min(N - 1, int(t * N))
+      u_c  = (j + 0.5 - phase) * p              # sample at the LENS CENTRE
+      sx, sy = u_c*cos(o) - v*sin(o), u_c*sin(o) + v*cos(o)
+      art[py][px] = bilinear(views[k], sx / width_mm, sy / height_mm)
+
+# ---- relief map (printer raster, 16-bit) ----------------------------
+map_w      = round(width_mm / 25.4 * PPI)
+map_h      = round(map_w * views[0].height / views[0].width)
+mm_per_px  = width_mm / map_w
+
+for py in range(map_h):
+  for px in range(map_w):
+      x, y = (px + 0.5) * mm_per_px, (py + 0.5) * mm_per_px
+      u    = x*cos(o) + y*sin(o)
+      t    = frac(u / p + phase)
+      d    = (t - 0.5) * p
+      z    = b + max(0, sqrt(max(0, R*R - d*d)) - (R - s))
+      depth[py][px] = round(min(1, z / H) * 65535)
+```
+
+For the 2D version: compute `v` as well, quantise it the same way to get a row index, use
+`d = hypot(d_u, d_v)` with `z = b` wherever `d > p/2`, and mirror both view indices.
+
+This listing isn't decorative — it's pinned. `src/lib/docsPseudocode.test.ts` is a literal port of it,
+asserted to produce **byte-identical** output to the real renderers at an awkward configuration: 23°
+orientation, phase 0.3, three views, odd pixel dimensions. If the code and this page ever drift
+apart, that test fails.
+
+### Printing
+
+1. Print the artwork in colour, scaled to the physical width you specified.
+2. Print the relief on top in clear ink, at the same physical width, from the 16-bit map. Check that
+   your RIP's white-equals-what-height setting matches what the map was normalised to.
+3. Cure it properly. Under-cured ink slumps, and a slumped lens is a longer-focus lens.
+
+---
+
+## When it goes wrong
+
+| What you see                            | Probably                                             | Try                                                     |
+| --------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
+| Soft everywhere, never a clean flip     | Focus isn't landing on the artwork                   | Check the feasibility floor; run the Height calibration |
+| Clean at one edge, smeared at the other | Pitch mismatch (laminated lens, or RIP scaling)      | Run the LPI calibration                                 |
+| Two views visible at once               | Focus too long, or the ink slumped                   | More height, or cure harder                             |
+| Depth inverted, motion feels wrong      | Pseudoscopic — views not mirrored                    | Mirror both view indices                                |
+| Stair-stepping on the lens surface      | 8-bit relief, or too few pixels per lens             | Emit 16-bit; raise PPI or lower LPI to ≥ 8 px per lens  |
+| A view missing from some lenses         | Artwork raster too small, a tile fell between pixels | Raise samples per tile to 2 or more                     |
+| Image slides sideways as it flips       | Sampling per-pixel instead of at the lens centre     | See [interlacing](#interlacing)                         |
+| Contrast lower than expected (2D only)  | The dead corners, ~21.5% of the area                 | Expected — raise LPI or live with it                    |
+
+---
+
+## What this doesn't do
+
+Worth being straight about:
+
+- **The optics are paraxial.** The focus used here is the paraxial focus of a single refracting
+  surface. A real spherical cap at these apertures has noticeable spherical aberration — the edge
+  rays focus shorter than the middle ones, so the flip is softer at the edge of the cone than in the
+  centre. An aspheric profile would fix it, and the profile equation is the only thing that'd change.
+- **No chromatic correction.** Index varies with wavelength, so the flip point differs slightly by
+  colour.
+- **Ink isn't glass.** Cured varnish shrinks and slumps and may not hold the shape you modelled. That
+  gap is exactly why the calibration sheets exist.
+- **Resolution.** One sample per lens, per view — and in 2D, per lens in both axes. That's intrinsic
+  to the technique, not a limitation of this implementation.
+- **Nobody has run this on a press yet.** The optics, geometry and rasterisation are covered by the
+  test suite in this repository. The author has not validated the output on a physical UV flatbed.
+  Treat the calibration sheets as mandatory, not optional.
+
+---
+
+## Where the code is
+
+| Topic                    | Implementation                                                                         |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| The lens solve           | `lensGeometry()`, `heightForViewAngle()` in `src/lib/lenticular.ts`                    |
+| Interlacing              | `renderInterlaced()`                                                                   |
+| The two rasters          | `interlacedSize()`, `outputSize()`                                                     |
+| The relief map           | `renderDepthMap()`                                                                     |
+| 16-bit PNG               | `encodeGray16Png()` in `src/lib/png16.ts`                                              |
+| The 2D grid              | `renderGridInterlaced()`, `renderGridDepthMap()`, `gridCellLabel()`                    |
+| Calibration              | `calibrationValues()`, `withCalibrationValue()`, `switchFrames()`, `gridSwitchViews()` |
+| The nodes                | `src/nodes/lenticular.ts`, `src/nodes/lensGrid.ts`                                     |
+| The numbers on this page | `src/lib/lenticular.test.ts`                                                           |
+| The figures              | `docs/figures.py` — run `python docs/figures.py` to redraw them                        |
+
+---
+
+## Prior art and licence
+
+Lenticular printing is old. Interlacing images into strips behind a ruled cylindrical sheet goes back
+to the early twentieth century, and Lippmann described integral photography — a 2D array of lenslets
+over a 2D array of small images — in 1908. None of the interlacing here is new, and this page doesn't
+claim otherwise.
+
+What it does set out carefully is the case where the lens is _printed onto_ the image rather than
+laminated over it, so that the apex-to-image distance is the ink stack itself. That's what produces
+the closed-form solve, the feasibility floor, the scale-invariance of the cone, the angle-matched
+pitch sweep, and the two-raster split described above.
+
+All of it is published freely under this repository's MIT licence, as a defensive disclosure: no
+patent is sought or asserted on any of it, and it's written out in this much detail specifically so
+that it stays available to everyone.
