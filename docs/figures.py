@@ -736,7 +736,7 @@ def fig_grid_plan():
     ax.text(
         n / 2,
         -0.42,
-        "The cap is inscribed, so the corners (21.5% of the area)\nstay flat and do not focus.",
+        "The cap is one pitch wide, so in a square array the corners\n(21.5% of the area) stay flat and do not focus.",
         ha="center",
         fontsize=9.2,
         color=SUB,
@@ -807,6 +807,73 @@ def fig_grid_profile():
         pad=10,
     )
     save(fig, "12-grid-profile.png")
+
+
+# ---------------------------------------------------------------------------
+# 12b — square against hexagonal packing of the same caps
+# ---------------------------------------------------------------------------
+
+
+def fig_packing():
+    """The two lenslet arrangements, drawn with caps of the same one-pitch width.
+
+    Amber is sheet left flat at base height; white discs are the caps. The fill
+    fractions quoted are exact: pi/4 for the square array, pi/(2*sqrt(3)) for
+    the hexagonal one, which is the densest packing of equal circles there is.
+    """
+    row = math.sqrt(3) / 2
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(11.0, 4.8))
+    # Both panels are a window onto an array that carries on past the edges;
+    # everything is drawn generously and clipped to the same 4p × 3.5p patch.
+    for a in (ax, bx):
+        a.set_aspect("equal")
+        clean(a)
+        a.set_xlim(0, 4)
+        a.set_ylim(0, 3.5)
+        # The flat sheet the caps stand on, so whatever they miss reads as amber.
+        a.add_patch(Rectangle((0, 0), 4, 3.5, facecolor=GLOSS_FILL, edgecolor="none", zorder=0))
+
+    # Square: rows and columns a full pitch apart, each cap touching four others.
+    for r in range(-1, 5):
+        for c in range(-1, 5):
+            ax.add_patch(Rectangle((c, r), 1, 1, facecolor="none", edgecolor=SUB, lw=0.8, zorder=1))
+            ax.add_patch(
+                Circle((c + 0.5, r + 0.5), 0.5, facecolor="white", edgecolor=GLOSS, lw=1.7, zorder=2)
+            )
+    arrow(ax, (1.5, 1.5), (2.5, 1.5), style="<|-|>", ms=7)
+    ax.text(2.0, 1.62, "p", ha="center", fontsize=10.5, style="italic", zorder=4)
+    ax.set_title("square grid — 4 neighbours", fontsize=11, weight="bold", loc="left")
+    ax.set_xlabel(
+        "Caps fill π/4 = 78.5% of the sheet.\nThe four corners of every cell, 21.5%, stay flat.",
+        fontsize=9.2,
+        color=SUB,
+        labelpad=10,
+    )
+
+    # Hex: odd rows offset half a pitch, so rows sit p·√3/2 apart and each cap
+    # touches six others. One Voronoi cell is outlined to show the footprint.
+    for r in range(-1, 6):
+        for c in range(-1, 6):
+            x = c + (0.5 if r % 2 else 0.0)
+            bx.add_patch(Circle((x, r * row), 0.5, facecolor="white", edgecolor=GLOSS, lw=1.7, zorder=2))
+    hexagon = [
+        (1.0 + (0.5 / row) * math.cos(math.radians(a)), 2 * row + (0.5 / row) * math.sin(math.radians(a)))
+        for a in range(30, 360, 60)
+    ]
+    bx.add_patch(Polygon(hexagon, closed=True, fill=False, ec=ART, lw=1.9, ls=(0, (4, 2.5)), zorder=3))
+    arrow(bx, (2.5, row), (3.5, row), style="<|-|>", ms=7)
+    bx.text(3.0, row + 0.12, "p", ha="center", fontsize=10.5, style="italic", zorder=4)
+    arrow(bx, (3.5, 2 * row), (3.5, 3 * row), style="<|-|>", ms=7)
+    bx.text(3.42, 2.5 * row, "p·√3/2", ha="right", va="center", fontsize=9.5, style="italic", zorder=4)
+    bx.set_title("hexagonal — 6 neighbours, rows 13% closer", fontsize=11, weight="bold", loc="left")
+    bx.set_xlabel(
+        "The same caps fill π/2√3 = 90.7%. Offsetting every other row drops it\n"
+        "into the hollows, so ~15% more lenslets fit and 9.3% is left flat.",
+        fontsize=9.2,
+        color=SUB,
+        labelpad=10,
+    )
+    save(fig, "12b-packing.png")
 
 
 # ---------------------------------------------------------------------------
@@ -913,6 +980,91 @@ def fig_mirroring():
 
 
 # ---------------------------------------------------------------------------
+# 14b — where the depth budget comes from, and what it costs
+# ---------------------------------------------------------------------------
+
+
+def fig_model_depth():
+    """Parallax on the sheet, and the depth that buys at the default lens.
+
+    Left: why the sheet plane is common to every view and depth is not. Right:
+    the printable depth from p·(N−1)/tan(cone/2) — the closed form the guide
+    quotes, which the viewing distance drops out of entirely.
+    """
+    L = DEFAULT
+    cone = L.view_angle
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(11.4, 4.6))
+
+    # ---- left: two eyes, one sheet, one near point --------------------------
+    clean(ax)
+    D = 3.0
+    eyes = [-1.15, 1.15]
+    sheet_y = 0.0
+    ax.plot([-2.6, 2.6], [sheet_y, sheet_y], color=INK, lw=2.0, zorder=3)
+    ax.text(-2.55, -0.22, "the sheet — every view agrees here", fontsize=9, color=INK)
+    near_y = 0.62
+    ax.add_patch(Circle((0, near_y), 0.075, facecolor=WARN, edgecolor="none", zorder=4))
+    ax.text(0.30, near_y - 0.16, "a point in front", fontsize=9, color=WARN)
+
+    hits = []
+    for ex, name in zip(eyes, ("left eye", "right eye")):
+        ax.add_patch(Circle((ex, D), 0.085, facecolor=ART, edgecolor="none", zorder=4))
+        ax.text(ex, D + 0.16, name, fontsize=9, color=ART, ha="center")
+        # Ray to the sheet through the near point: X = ex + t(x-ex), t = D/(D-z).
+        t = D / (D - near_y)
+        hit = ex + t * (0 - ex)
+        hits.append(hit)
+        ax.plot([ex, hit], [D, sheet_y], color=RAY, lw=1.4, zorder=2)
+        # …and the ray to the sheet-plane point straight below the subject.
+        ax.plot([ex, 0], [D, sheet_y], color=FAINT, lw=1.0, ls=(0, (4, 3)), zorder=1)
+    ax.add_patch(Circle((0, sheet_y), 0.06, facecolor=INK, edgecolor="none", zorder=5))
+    for hit in hits:
+        ax.plot([hit], [sheet_y], marker="o", ms=6, color=RAY, zorder=5)
+    arrow(ax, (hits[0], -0.45), (hits[1], -0.45), style="<|-|>", ms=8, color=RAY)
+    ax.text(
+        0,
+        -0.62,
+        "the near point lands here, and here:\nthat gap is the parallax, and it must\nstay inside one lenslet per view step",
+        ha="center",
+        va="top",
+        fontsize=9.2,
+        color=SUB,
+    )
+    ax.set_xlim(-2.7, 2.7)
+    ax.set_ylim(-1.45, 3.5)
+    ax.set_title(
+        "the eye shifts; the sheet plane does not move", fontsize=11, weight="bold", loc="left"
+    )
+
+    # ---- right: printable depth against grid size ---------------------------
+    grids = [2, 3, 4, 6]
+    depths = [L.pitch * (n - 1) / math.tan(math.radians(cone / 2)) for n in grids]
+    bx.bar([str(n) + "×" + str(n) for n in grids], depths, color=GLOSS_FILL, edgecolor=GLOSS, lw=1.6)
+    for label, d in zip(grids, depths):
+        bx.text(str(label) + "×" + str(label), d + 0.08, f"{d:.2f} mm", ha="center", fontsize=9.5)
+    bx.set_ylabel("printable subject depth (mm)")
+    bx.set_ylim(0, max(depths) * 1.22)
+    bx.grid(color=FAINT, lw=0.5, axis="y")
+    bx.set_axisbelow(True)
+    for s in ("top", "right"):
+        bx.spines[s].set_visible(False)
+    bx.set_title(
+        f"at {L.lpi:.0f} LPI and a {cone:.1f}° cone — depth = p(N−1)/tan(cone/2)",
+        fontsize=11,
+        weight="bold",
+        loc="left",
+    )
+    bx.set_xlabel(
+        "The viewing distance cancels out, and per-view resolution does not change with N:\n"
+        "a bigger grid is how you buy depth. Beyond these, features ghost instead of gliding.",
+        fontsize=9.2,
+        color=SUB,
+        labelpad=10,
+    )
+    save(fig, "14b-model-depth.png")
+
+
+# ---------------------------------------------------------------------------
 # 15 — a calibration sheet
 # ---------------------------------------------------------------------------
 
@@ -981,8 +1133,10 @@ if __name__ == "__main__":
     fig_quantisation()
     fig_grid_plan()
     fig_grid_profile()
+    fig_packing()
     fig_naming()
     fig_mirroring()
+    fig_model_depth()
     fig_calibration()
     L = DEFAULT
     print(

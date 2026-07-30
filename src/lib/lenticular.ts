@@ -232,19 +232,42 @@ export function switchFrames(count: number): RasterImage[] {
 }
 
 /**
+ * Is the array turned off the pixel axes? A multiple of 90° isn't: the strips
+ * still run straight up or straight across the raster.
+ */
+const turnedOffAxis = (orientationDeg: number): boolean => Math.abs(orientationDeg % 90) > 1e-9;
+
+/**
+ * Do this sheet's strip edges fall between pixels rather than on them?
+ *
+ * Sampling density is orientation-independent — the pixels are square, so a
+ * strip wide enough along x is wide enough at any angle — but *placement* is
+ * not. Turn the array and every boundary between two frames becomes a diagonal,
+ * and a diagonal is the one thing a raster this coarse cannot draw: a pixel
+ * straddling one belongs to two frames and gets whichever one its centre lands
+ * in, so the edge comes out as a staircase with steps a whole strip wide.
+ * See {@link interlacedSize}; {@link gridTilesOffPixelGrid} is the 2D case.
+ */
+export function stripsOffPixelGrid(settings: LenticularSettings): boolean {
+  return turnedOffAxis(settings.orientationDeg);
+}
+
+/**
  * Smallest raster that still holds everything the interlaced sheet knows.
  *
  * The interlaced artwork carries no lens geometry — it is flat ink that the
- * printing tool scales onto the sheet — so it has no reason to sit on the
- * printer's PPI raster. Two things bound it from below:
+ * printing tool scales onto the sheet — so as long as its strips run along the
+ * raster it has no reason to sit on the printer's PPI raster. Three things bound
+ * it from below:
  *
  *   • the interlace itself: `stripSamples` pixels for every frame strip of
  *     every lenticule, so no strip can be skipped by an unlucky phase;
- *   • the artwork: never resample the highest-resolution frame downwards.
+ *   • the artwork: never resample the highest-resolution frame downwards;
+ *   • the strip edges, if they are diagonal ({@link stripsOffPixelGrid}): those
+ *     need the printer's own raster, because that is the finest the staircase
+ *     along them can ever be made — one printed dot instead of one strip.
  *
- * The aspect ratio is the first frame's, as everywhere else. The bound is
- * orientation-independent: the pixels are square, so a strip that survives
- * along x survives at any angle.
+ * The aspect ratio is the first frame's, as everywhere else.
  */
 export function interlacedSize(settings: LenticularSettings, frames: RasterImage[]): OutputSize {
   const first = frames[0];
@@ -252,7 +275,8 @@ export function interlacedSize(settings: LenticularSettings, frames: RasterImage
   const samples = Math.max(1, settings.stripSamples);
   const forStrips = Math.ceil(lenticules * frames.length * samples);
   const forArtwork = Math.max(...frames.map((f) => f.width));
-  const width = Math.max(1, forStrips, forArtwork);
+  const forDiagonals = stripsOffPixelGrid(settings) ? outputSize(settings, first).width : 0;
+  const width = Math.max(1, forStrips, forArtwork, forDiagonals);
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -519,13 +543,15 @@ export function depthPreview(render: LenticularRender): RasterImage {
 // The optics are unchanged. A spherical cap and a cylinder obey the same
 // refraction at a surface of radius R, so `lensGeometry` solves this array too:
 // same sag, same base, same focus, same viewing cone. Only the footprint
-// differs — a round cap inscribed in each square cell, leaving the cell corners
-// (1 − π/4, about 21%) flat at base height.
+// differs — a round cap inscribed in its cell, leaving the cell's corners flat
+// at base height — and how those footprints tile the sheet (see LensPacking).
 // ---------------------------------------------------------------------------
 
 export interface LensGridSettings extends LenticularSettings {
   /** Lenslets per side of one view grid: 2 = 2×2 (4 views), 3 = 3×3 (9). */
   grid: number;
+  /** How the lenslets tile the sheet. */
+  packing: LensPacking;
   /** 0–1 phase down the second axis, the rows of lenslets. */
   phaseY: number;
   /**
@@ -543,6 +569,86 @@ export const DEFAULT_GRID = 3;
 
 export const clampGrid = (grid: number): number =>
   Math.min(MAX_GRID, Math.max(MIN_GRID, Math.round(grid) || MIN_GRID));
+
+/**
+ * How the round lenslet footprints tile the sheet.
+ *
+ * - `square`: rows and columns square-on, each cap inscribed in a square cell.
+ * - `hex`: every other row offset half a pitch and the rows pulled √3/2 as far
+ *   apart, so each cap touches six neighbours instead of four. This is the
+ *   densest packing of equal circles there is.
+ */
+export type LensPacking = 'square' | 'hex';
+
+/** Row spacing of a hex array, as a fraction of the pitch: √3/2 ≈ 0.866. */
+export const HEX_ROW_SPACING = Math.sqrt(3) / 2;
+
+/**
+ * Fraction of the sheet that sits under a cap rather than flat at base height.
+ * Square leaves the cell corners flat (π/4 ≈ 78.5% covered); hex closes them up
+ * to three-cornered slivers (π/2√3 ≈ 90.7%), so ~57% less of the sheet is flat.
+ */
+export const packingFill = (packing: LensPacking): number =>
+  packing === 'hex' ? Math.PI / (2 * Math.sqrt(3)) : Math.PI / 4;
+
+/** Config values arrive as unknowns; anything but an explicit `square` is hex. */
+export const clampPacking = (packing: unknown): LensPacking => (packing === 'square' ? 'square' : 'hex');
+
+/** Rows per pitch for a packing — the factor that turns `sv` into row indices. */
+const rowScaleOf = (packing: LensPacking): number => (packing === 'hex' ? HEX_ROW_SPACING : 1);
+
+/** One lenslet of the array, located from a point in lens coordinates. */
+interface LatticeHit {
+  /** The lenslet's centre, in the same `su`/`sv` units as the query. */
+  cu: number;
+  cv: number;
+  /** Offset from that centre, in pitch units on *both* axes. */
+  du: number;
+  dv: number;
+}
+
+/**
+ * Which lenslet covers a point, and where within it the point falls. `su`
+ * counts pitches across the array; `sv` counts rows down it.
+ *
+ * A square array is the trivial case: cell ⌊su⌋, ⌊sv⌋, centred half a step in.
+ * A hex array offsets odd rows half a pitch, so the covering lenslet is simply
+ * whichever centre is nearest — and three candidate rows is always enough,
+ * since a centre two rows off is more than a pitch away in v alone.
+ *
+ * Both offsets come back in pitch units (v scaled by the row spacing), which is
+ * what every caller wants: isotropic, so one cap radius and one view-tile size
+ * serve either packing.
+ */
+function latticeAt(su: number, sv: number, packing: LensPacking): LatticeHit {
+  if (packing === 'square') {
+    const cu = Math.floor(su) + 0.5;
+    const cv = Math.floor(sv) + 0.5;
+    return { cu, cv, du: su - cu, dv: sv - cv };
+  }
+  const row0 = Math.floor(sv);
+  let cu = 0;
+  let cv = 0;
+  let du = 0;
+  let dv = 0;
+  let bestD2 = Infinity;
+  for (let row = row0 - 1; row <= row0 + 1; row++) {
+    const shift = row & 1 ? 0.5 : 0;
+    const centreU = Math.round(su - shift - 0.5) + 0.5 + shift;
+    const centreV = row + 0.5;
+    const offU = su - centreU;
+    const offV = (sv - centreV) * HEX_ROW_SPACING;
+    const d2 = offU * offU + offV * offV;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      cu = centreU;
+      cv = centreV;
+      du = offU;
+      dv = offV;
+    }
+  }
+  return { cu, cv, du, dv };
+}
 
 /**
  * Where one row/column of the grid sits relative to the neutral, head-on view:
@@ -585,14 +691,41 @@ export function gridCells(grid: number): { col: number; row: number; id: string;
   return cells;
 }
 
-/** {@link interlacedSize} for a grid: every cell needs `grid` views across. */
+/**
+ * Do this sheet's view tiles run off the pixel grid? The 2D case of
+ * {@link stripsOffPixelGrid}, with one extra way to get there.
+ *
+ * A square array at 0° (or any multiple of 90°) tiles the artwork in rectangles
+ * whose edges are horizontal and vertical, so the minimal raster of
+ * {@link gridInterlacedSize} places every edge exactly. Stagger the rows for hex
+ * packing, or turn the array off the axes, and the tile edges go diagonal.
+ */
+export function gridTilesOffPixelGrid(settings: LensGridSettings): boolean {
+  return clampPacking(settings.packing) === 'hex' || stripsOffPixelGrid(settings);
+}
+
+/**
+ * {@link interlacedSize} for a grid: every cell needs `grid` views across.
+ *
+ * Sheets whose tiles are axis-aligned ship at the smallest raster that resolves
+ * them, as the 1D interlace does. Sheets with diagonal tile edges
+ * ({@link gridTilesOffPixelGrid}) instead ship on the printer's own PPI raster —
+ * the same one the lens map is on. That is the finest the print can be, so it is
+ * the most that spending pixels here can buy, and those extra pixels go
+ * straight into the diagonals: the staircase steps down to one printed dot.
+ */
 export function gridInterlacedSize(settings: LensGridSettings, views: RasterImage[]): OutputSize {
   const first = views[0];
   const cells = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
   const samples = Math.max(1, settings.stripSamples);
-  const forViews = Math.ceil(cells * clampGrid(settings.grid) * samples);
+  // Hex rows sit √3/2 as far apart, so a raster giving `stripSamples` px across
+  // a view tile gives fewer *down* it. Scale up so the floor holds both ways.
+  const forViews = Math.ceil(
+    (cells * clampGrid(settings.grid) * samples) / rowScaleOf(clampPacking(settings.packing)),
+  );
   const forArtwork = Math.max(...views.map((v) => v.width));
-  const width = Math.max(1, forViews, forArtwork);
+  const forDiagonals = gridTilesOffPixelGrid(settings) ? outputSize(settings, first).width : 0;
+  const width = Math.max(1, forViews, forArtwork, forDiagonals);
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -621,9 +754,16 @@ export function renderGridInterlaced(
   const size = options.interlacedSize ?? gridInterlacedSize(settings, views);
   const width = Math.max(1, Math.round(size.width));
   const height = Math.max(1, Math.round(size.height));
-  checkBudget(width, height, 'Interlaced artwork', 'Reduce Width (mm), LPI, the grid or the source size');
+  checkBudget(
+    width,
+    height,
+    'Interlaced artwork',
+    'Reduce Width (mm), PPI, LPI, the grid or the source size',
+  );
 
   const s = sheet(views, settings, options);
+  const packing = clampPacking(settings.packing);
+  const rowScale = rowScaleOf(packing);
   const phaseY = settings.phaseY - Math.floor(settings.phaseY);
   const mmPerPx = s.widthMm / width;
   const out = createImage(width, height, [255, 255, 255, 255]);
@@ -639,11 +779,16 @@ export function renderGridInterlaced(
       const u = xMm * s.cos + yMm * s.sin;
       const v = -xMm * s.sin + yMm * s.cos;
       const su = u / pitchMm + s.phase;
-      const sv = v / pitchMm + phaseY;
-      const cellU = Math.floor(su);
-      const cellV = Math.floor(sv);
-      const col = Math.min(grid - 1, Math.floor((su - cellU) * grid));
-      const row = Math.min(grid - 1, Math.floor((sv - cellV) * grid));
+      const sv = v / (pitchMm * rowScale) + phaseY;
+      const cell = latticeAt(su, sv, packing);
+
+      // Tiles are square in millimetres on both axes, so a view subtends the
+      // same angle horizontally and vertically. A hex cell reaches past a pitch
+      // at its two tips, which clamp into the outermost tiles.
+      const fu = Math.min(0.999999, Math.max(0, cell.du + 0.5));
+      const fv = Math.min(0.999999, Math.max(0, cell.dv + 0.5));
+      const col = Math.floor(fu * grid);
+      const row = Math.floor(fv * grid);
 
       // The lens inverts: the tile on the left of a cell is what an eye to the
       // *right* sees, so a view named "Left" belongs on the right.
@@ -651,8 +796,8 @@ export function renderGridInterlaced(
       const viewRow = settings.mirrorViews ? grid - 1 - row : row;
 
       // Sample at the cell centre, rotated back into sheet coordinates.
-      const uc = (cellU + 0.5 - s.phase) * pitchMm;
-      const vc = (cellV + 0.5 - phaseY) * pitchMm;
+      const uc = (cell.cu - s.phase) * pitchMm;
+      const vc = (cell.cv - phaseY) * pitchMm * rowScale;
       sampleNormalized(
         views[viewRow * grid + viewCol],
         (uc * s.cos - vc * s.sin) / s.widthMm,
@@ -666,8 +811,9 @@ export function renderGridInterlaced(
 }
 
 /**
- * The lens array as a 16-bit height field: a spherical cap per cell, inscribed
- * in the cell so the corners stay flat at base height.
+ * The lens array as a 16-bit height field: one spherical cap per lenslet, of
+ * diameter one pitch, so caps touch and whatever the packing leaves over — the
+ * square array's corners, the hex array's slivers — stays flat at base height.
  */
 export function renderGridDepthMap(
   views: RasterImage[],
@@ -680,6 +826,8 @@ export function renderGridDepthMap(
   checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI');
 
   const s = sheet(views, settings, options);
+  const packing = clampPacking(settings.packing);
+  const rowScale = rowScaleOf(packing);
   const phaseY = settings.phaseY - Math.floor(settings.phaseY);
   const mmPerPx = s.widthMm / width;
   const depth = new Uint16Array(width * height);
@@ -695,11 +843,13 @@ export function renderGridDepthMap(
       const u = xMm * s.cos + yMm * s.sin;
       const v = -xMm * s.sin + yMm * s.cos;
       const su = u / pitchMm + s.phase;
-      const sv = v / pitchMm + phaseY;
-      const du = (su - Math.floor(su) - 0.5) * pitchMm;
-      const dv = (sv - Math.floor(sv) - 0.5) * pitchMm;
+      const sv = v / (pitchMm * rowScale) + phaseY;
+      const cell = latticeAt(su, sv, packing);
+      const du = cell.du * pitchMm;
+      const dv = cell.dv * pitchMm;
 
-      // Round cap inscribed in the square cell; outside it, flat base.
+      // A cap of diameter one pitch around the nearest centre; outside it, flat
+      // base. In a hex array that circle is tangent to all six neighbours.
       const r = Math.hypot(du, dv);
       const arc =
         r <= pitchMm / 2 ? Math.sqrt(Math.max(0, radiusMm * radiusMm - r * r)) - (radiusMm - sagMm) : 0;
@@ -723,7 +873,7 @@ export function renderLensGrid(
     art.width,
     art.height,
     'Interlaced artwork',
-    'Reduce Width (mm), LPI, the grid or the source size',
+    'Reduce Width (mm), PPI, LPI, the grid or the source size',
   );
   checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI');
 
@@ -766,6 +916,10 @@ export function describeGeometry(
     `${frameCount} frames · ${settings.widthMm} mm wide`,
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
+    stripsOffPixelGrid(settings)
+      ? `Artwork on the full ${settings.ppi} PPI raster: a ${settings.orientationDeg}° array puts the ` +
+        `strip edges on diagonals, which need every printable dot to come out straight`
+      : `Artwork on the minimal raster: at ${settings.orientationDeg}° the strips run along the pixels`,
     `Lenticule pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / frameCount).toFixed(2)} px per frame strip`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
@@ -789,9 +943,12 @@ export function describeGeometry(
 /** Cells across and down the sheet — one lenslet each, one pixel per view. */
 export function gridCellCounts(settings: LensGridSettings, first: RasterImage): OutputSize {
   const across = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
+  // Hex rows are closer together than the pitch, so a hex sheet fits ~15% more
+  // rows of lenslets — the packing gain, spent on vertical resolution.
+  const rowScale = rowScaleOf(clampPacking(settings.packing));
   return {
     width: Math.max(1, Math.round(across)),
-    height: Math.max(1, Math.round((across * first.height) / first.width)),
+    height: Math.max(1, Math.round((across * first.height) / (first.width * rowScale))),
   };
 }
 
@@ -805,10 +962,18 @@ export function describeGridGeometry(
 ): string {
   const mm = (v: number) => v.toFixed(3);
   const grid = clampGrid(settings.grid);
+  const packing = clampPacking(settings.packing);
   const lines = [
     `${grid}×${grid} grid = ${grid * grid} views · ${settings.widthMm} mm wide`,
+    `${packing === 'hex' ? 'Hexagonal' : 'Square'} lenslet packing — ` +
+      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
+    gridTilesOffPixelGrid(settings)
+      ? `Artwork on the full ${settings.ppi} PPI raster: ${
+          packing === 'hex' ? 'staggered rows' : `a ${settings.orientationDeg}° array`
+        } put the view-tile edges on diagonals, which need every printable dot to come out straight`
+      : `Artwork on the minimal raster: square, axis-aligned tiles land on whole pixels`,
     `Lenslet pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / grid).toFixed(2)} px per view tile`,
     // The lens count *is* the per-view resolution: one lenslet shows one pixel

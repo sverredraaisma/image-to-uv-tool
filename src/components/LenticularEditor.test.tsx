@@ -184,10 +184,25 @@ describe('LensGridEditor', () => {
     const id = await gridWithViews();
     render(<LensGridEditor nodeId={id} />);
     expect(screen.getByText('2 × 2 = 4 views')).toBeInTheDocument();
-    expect(screen.getByText('10 × 10 px (one per lenslet)')).toBeInTheDocument();
+    // Hex by default: rows √3/2 apart, so 12 rows of lenslets fit where 10
+    // columns do, and the artwork grows to keep 2 px per tile down as well.
+    expect(screen.getByText(/Hexagonal \(offset rows\) — 90\.7% under a cap/)).toBeInTheDocument();
+    expect(screen.getByText('10 × 12 px (one per lenslet)')).toBeInTheDocument();
     expect(screen.getByText('100 × 100 px @ 100 PPI')).toBeInTheDocument(); // the lens
-    expect(screen.getByText('40 × 40 px')).toBeInTheDocument(); // 10 cells × 2 × 2
+    // Diagonal tile edges, so the artwork rides the lens map's own raster.
+    expect(screen.getByText('100 × 100 px')).toBeInTheDocument();
+    expect(screen.getByText(/edges between view tiles on diagonals/)).toBeInTheDocument();
     for (const button of screen.getAllByRole('button')) expect(button).toBeEnabled();
+  });
+
+  it('reports a square array when the packing is switched back', async () => {
+    const id = await gridWithViews();
+    s().updateNodeConfig(id, { packing: 'square' });
+    render(<LensGridEditor nodeId={id} />);
+    expect(screen.getByText(/Square \(rows and columns\) — 78\.5% under a cap/)).toBeInTheDocument();
+    expect(screen.getByText('10 × 10 px (one per lenslet)')).toBeInTheDocument();
+    expect(screen.getByText('40 × 40 px')).toBeInTheDocument(); // 10 cells × 2 × 2
+    expect(screen.getByText(/tiles the artwork in whole pixels/)).toBeInTheDocument();
   });
 
   it('names the unconnected cells and blocks the downloads', async () => {

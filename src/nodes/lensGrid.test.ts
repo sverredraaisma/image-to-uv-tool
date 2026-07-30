@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import '../nodes'; // register built-ins
 import { lensGridNode, gridSettingsFromConfig } from './lensGrid';
-import { lensGridInputs, nodePorts } from '../engine/ports';
+import { lensGridCellInputs, lensGridInputs, nodePorts } from '../engine/ports';
 import { getNodeDef } from '../engine/registry';
 import { EXAMPLES } from '../components/examples';
 import { createImage } from '../lib/image';
@@ -20,7 +20,7 @@ import type { ComputeContext, DataValue, RasterImage, SavedGraph } from '../type
 const ctx = (inputs: Record<string, DataValue | undefined>, config: Record<string, unknown>) =>
   ({ inputs, config }) as unknown as ComputeContext;
 
-/** Config that renders a fast 40 px artwork on a 100 px lens map. */
+/** Config that renders a fast artwork on a 100 px lens map. */
 const config = (over: Record<string, unknown> = {}) => ({
   ...lensGridNode.defaultConfig(),
   grid: 2,
@@ -35,6 +35,10 @@ const settings = (over: Partial<LensGridSettings> = {}): LensGridSettings => ({
   ...gridSettingsFromConfig(config()),
   ...over,
 });
+
+/** The square-packed lattice, where a cell is one pitch on both axes. */
+const square = (over: Partial<LensGridSettings> = {}): LensGridSettings =>
+  settings({ packing: 'square', ...over });
 
 const solid = (color: [number, number, number], w = 20, h = 20): RasterImage =>
   createImage(w, h, [...color, 255]);
@@ -107,25 +111,27 @@ describe('grid cell naming', () => {
 });
 
 describe('Lens Grid node ports', () => {
-  it('derives one required input per cell from the config', () => {
+  it('derives one input per cell from the config, after the sequence port', () => {
     const ports = nodePorts({ type: 'lensGrid', config: { grid: 3 } }, getNodeDef('lensGrid'));
-    expect(ports.inputs).toHaveLength(9);
-    expect(ports.inputs.every((p) => p.required && p.type === 'image')).toBe(true);
-    expect(ports.inputs[4].label).toBe('Centre (neutral)');
+    expect(ports.inputs).toHaveLength(10); // 9 cells + the whole grid on one wire
+    expect(ports.inputs[0]).toMatchObject({ id: 'views', type: 'sequence' });
+    expect(ports.inputs.slice(1).every((p) => p.type === 'image')).toBe(true);
+    expect(ports.inputs[5].label).toBe('Centre (neutral)');
     expect(ports.outputs.map((p) => p.id)).toEqual(['interlaced', 'depth', 'info']);
   });
 
   it('follows the grid setting', () => {
-    expect(lensGridInputs({ grid: 2 })).toHaveLength(4);
-    expect(lensGridInputs({ grid: 4 })).toHaveLength(16);
-    expect(lensGridInputs({})).toHaveLength(9); // default 3×3
-    expect(lensGridInputs({ grid: '2' })).toHaveLength(4); // config values can be strings
+    expect(lensGridCellInputs({ grid: 2 })).toHaveLength(4);
+    expect(lensGridCellInputs({ grid: 4 })).toHaveLength(16);
+    expect(lensGridCellInputs({})).toHaveLength(9); // default 3×3
+    expect(lensGridCellInputs({ grid: '2' })).toHaveLength(4); // config values can be strings
+    expect(lensGridInputs({ grid: 2 })).toHaveLength(5);
   });
 });
 
 describe('renderGridInterlaced', () => {
   it('splits every cell into a grid of view tiles', () => {
-    const s = settings();
+    const s = square();
     const img = renderGridInterlaced(QUAD, s, { interlacedSize: { width: 40, height: 40 } });
     expect(img.width).toBe(40);
     // 4 px per cell, 2 px per tile. Mirrored, so the top-left tile of a cell
@@ -139,7 +145,7 @@ describe('renderGridInterlaced', () => {
   });
 
   it('places views un-mirrored when the lens inversion is turned off', () => {
-    const img = renderGridInterlaced(QUAD, settings({ mirrorViews: false }), {
+    const img = renderGridInterlaced(QUAD, square({ mirrorViews: false }), {
       interlacedSize: { width: 40, height: 40 },
     });
     expect(px(img, 0, 0)).toEqual([255, 0, 0]); // Left · Up, straight through
@@ -148,10 +154,20 @@ describe('renderGridInterlaced', () => {
 
   it('shifts the tiles with each axis’ own phase', () => {
     const size = { width: 40, height: 40 };
-    const x = renderGridInterlaced(QUAD, settings({ phase: 0.5 }), { interlacedSize: size });
+    const x = renderGridInterlaced(QUAD, square({ phase: 0.5 }), { interlacedSize: size });
     expect(px(x, 0, 0)).toEqual([0, 0, 255]); // stepped one column
-    const y = renderGridInterlaced(QUAD, settings({ phaseY: 0.5 }), { interlacedSize: size });
+    const y = renderGridInterlaced(QUAD, square({ phaseY: 0.5 }), { interlacedSize: size });
     expect(px(y, 0, 0)).toEqual([0, 255, 0]); // stepped one row
+  });
+
+  it('offsets alternate rows of tiles when the lenslets pack hexagonally', () => {
+    const img = renderGridInterlaced(QUAD, settings(), { interlacedSize: { width: 40, height: 40 } });
+    // 4 px pitch, so hex rows are 3.46 px apart and shifted 2 px sideways: the
+    // tile pattern of the row below is the row above, moved half a pitch.
+    expect(px(img, 0, 0)).toEqual(px(img, 2, 4));
+    expect(px(img, 2, 0)).toEqual(px(img, 0, 4));
+    // Two rows down is 6.93 px, and the lattice lines up with itself again.
+    expect(px(img, 0, 7)).toEqual(px(img, 0, 0));
   });
 
   it('insists on exactly grid² views', () => {
@@ -165,19 +181,40 @@ describe('renderGridInterlaced', () => {
 describe('gridInterlacedSize', () => {
   it('needs grid tiles per cell, not just frames per lenticule', () => {
     // 10 cells across × grid × 2 samples.
-    expect(gridInterlacedSize(settings(), QUAD).width).toBe(40);
-    expect(gridInterlacedSize(settings({ grid: 3 }), QUAD).width).toBe(60);
+    expect(gridInterlacedSize(square(), QUAD).width).toBe(40);
+    expect(gridInterlacedSize(square({ grid: 3 }), QUAD).width).toBe(60);
+  });
+
+  it('adds the hex row spacing back, so a tile keeps its samples down too', () => {
+    // 40 ÷ √3/2: without it the closer rows would only get 1.7 px per tile. Well
+    // under the PPI raster this sheet is really printed on, though — see below.
+    const s = settings({ ppi: 1 });
+    expect(gridInterlacedSize(s, QUAD).width).toBe(47);
+    expect(gridInterlacedSize({ ...s, grid: 3 }, QUAD).width).toBe(70);
+  });
+
+  it('rasters diagonal tile edges at the printer’s own PPI', () => {
+    // 25.4 mm at 100 PPI: the artwork lands on the lens map's raster, because
+    // staggered rows leave no tile edge on a pixel boundary to aim at.
+    expect(gridInterlacedSize(settings(), QUAD).width).toBe(100);
+    // A turned square array is just as diagonal, so it gets the same treatment…
+    expect(gridInterlacedSize(square({ orientationDeg: 23 }), QUAD).width).toBe(100);
+    // …while one on the axes keeps the minimal raster, where every tile edge
+    // already falls on a whole pixel and more of them would buy nothing.
+    expect(gridInterlacedSize(square(), QUAD).width).toBe(40);
+    expect(gridInterlacedSize(square({ orientationDeg: -90 }), QUAD).width).toBe(40);
   });
 
   it('still keeps the highest-resolution view', () => {
     const big = solid([0, 0, 0], 500, 500);
+    expect(gridInterlacedSize(square(), [big, RU, LD, RD]).width).toBe(500);
     expect(gridInterlacedSize(settings(), [big, RU, LD, RD]).width).toBe(500);
   });
 });
 
 describe('renderGridDepthMap', () => {
   it('domes each cell, peaking at its centre', () => {
-    const map = renderGridDepthMap(QUAD, settings());
+    const map = renderGridDepthMap(QUAD, square());
     const at = (x: number, y: number) => map.depth[y * map.width + x];
     // 10 px per cell on the 100 px lens raster, so the apex is near (5, 5).
     expect(at(5, 5)).toBeGreaterThan(at(2, 5));
@@ -187,7 +224,7 @@ describe('renderGridDepthMap', () => {
   });
 
   it('leaves the cell corners flat at base height', () => {
-    const s = settings();
+    const s = square();
     const map = renderGridDepthMap(QUAD, s);
     const at = (x: number, y: number) => map.depth[y * map.width + x];
     // The corner of a cell is outside the inscribed cap: base height exactly,
@@ -199,9 +236,35 @@ describe('renderGridDepthMap', () => {
   });
 
   it('repeats identically in both axes', () => {
-    const map = renderGridDepthMap(QUAD, settings());
+    const map = renderGridDepthMap(QUAD, square());
     const at = (x: number, y: number) => map.depth[y * map.width + x];
     expect(at(23, 47)).toBe(at(3, 7));
+  });
+
+  it('offsets alternate rows of caps and pulls them closer together', () => {
+    const hex = renderGridDepthMap(QUAD, settings());
+    const sq = renderGridDepthMap(QUAD, square());
+    const at = (map: typeof hex, x: number, y: number) => map.depth[y * map.width + x];
+    // 10 px pitch, so hex rows are 8.66 px apart: apexes along y ≈ 4, then
+    // y ≈ 13 — and half a pitch over, which is what a square array doesn't do.
+    expect(at(hex, 5, 4)).toBeGreaterThan(at(hex, 0, 4));
+    expect(at(hex, 5, 4)).toBeGreaterThan(at(hex, 5, 9)); // 9 falls between rows
+    expect(at(hex, 10, 13)).toBeGreaterThan(at(hex, 5, 13));
+    expect(at(sq, 5, 13)).toBeGreaterThan(at(sq, 10, 13));
+  });
+
+  it('leaves less of the sheet flat than a square array does', () => {
+    const flat = (s: LensGridSettings) => {
+      const map = renderGridDepthMap(QUAD, s);
+      const base = Math.min(...map.depth);
+      return [...map.depth].filter((v) => v === base).length / map.depth.length;
+    };
+    // The whole point of hex packing: 1 − π/4 = 21.5% of a square array is flat
+    // base, against 1 − π/2√3 = 9.3% here. (Measured a little under each, since
+    // a 10 px cell can't resolve the very corners.)
+    expect(flat(square())).toBeCloseTo(1 - Math.PI / 4, 1);
+    expect(flat(settings())).toBeCloseTo(1 - Math.PI / (2 * Math.sqrt(3)), 1);
+    expect(flat(settings())).toBeLessThan(flat(square()) * 0.5);
   });
 });
 
@@ -222,15 +285,31 @@ describe('Lens Grid node', () => {
     expect(lensGridNode.customEditor).toBe('lensGrid');
     expect(lensGridNode.defaultConfig().grid).toBe(3);
     expect(lensGridNode.defaultConfig().mirrorViews).toBe(true);
+    expect(lensGridNode.defaultConfig().packing).toBe('hex');
   });
 
   it('interlaces the grid and reports both rasters', async () => {
     const out = await lensGridNode.compute(ctx(fourInputs, config()));
     const interlaced = out.interlaced as RasterImage;
-    expect(interlaced.width).toBe(40);
+    // Hex tile edges are diagonal, so the artwork shares the lens map's raster.
+    expect(interlaced.width).toBe(100);
     expect((out.depth as RasterImage).width).toBe(100);
     if (out.info?.kind === 'text') {
       expect(out.info.text).toContain('2×2 grid = 4 views');
+      expect(out.info.text).toContain('Hexagonal lenslet packing — 90.7% of the sheet under a cap');
+      expect(out.info.text).toContain('Artwork on the full 100 PPI raster: staggered rows');
+      // Closer rows, so a hex sheet fits 12 rows of lenslets where it fits 10
+      // columns — the packing gain, spent on vertical resolution.
+      expect(out.info.text).toContain('Each view resolves to 10×12 px');
+    } else throw new Error('expected a text info output');
+  });
+
+  it('lines the lenslets up in rows and columns when told to', async () => {
+    const out = await lensGridNode.compute(ctx(fourInputs, config({ packing: 'square' })));
+    expect((out.interlaced as RasterImage).width).toBe(40);
+    if (out.info?.kind === 'text') {
+      expect(out.info.text).toContain('Square lenslet packing — 78.5% of the sheet under a cap');
+      expect(out.info.text).toContain('Artwork on the minimal raster');
       expect(out.info.text).toContain('Each view resolves to 10×10 px');
     } else throw new Error('expected a text info output');
   });
@@ -242,11 +321,15 @@ describe('Lens Grid node', () => {
   });
 
   it('reads the grid-only settings out of config', () => {
-    const s = gridSettingsFromConfig({ grid: 4, phaseY: 0.25, mirrorViews: false });
-    expect(s).toMatchObject({ grid: 4, phaseY: 0.25, mirrorViews: false });
+    const s = gridSettingsFromConfig({ grid: 4, phaseY: 0.25, mirrorViews: false, packing: 'square' });
+    expect(s).toMatchObject({ grid: 4, phaseY: 0.25, mirrorViews: false, packing: 'square' });
     // …and inherits the shared print settings.
     expect(s.ppi).toBe(1440);
     expect(gridSettingsFromConfig({}).grid).toBe(3);
+    // Only an explicit 'square' opts out of hex — including in graphs saved
+    // before the setting existed, which carry no `packing` at all.
+    expect(gridSettingsFromConfig({}).packing).toBe('hex');
+    expect(gridSettingsFromConfig({ packing: 'nonsense' }).packing).toBe('hex');
   });
 });
 
@@ -371,7 +454,9 @@ describe('the loading-spinner example', () => {
     );
     const interlaced = result.interlaced as RasterImage;
     expect((result.depth as RasterImage).width).toBe(1181); // 50 mm at 600 PPI
-    expect(interlaced.width).toBe(512); // the source spinner's own resolution
+    // Both sheets on the print raster: the hex array's tile edges are diagonal,
+    // so the interlace is worth more than the 512 px sources carry on their own.
+    expect(interlaced.width).toBe(1181);
     if (result.info?.kind === 'text') expect(result.info.text).not.toContain('⚠');
     else throw new Error('expected a text info output');
   });

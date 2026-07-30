@@ -30,6 +30,7 @@ licensing [at the end](#prior-art-and-licence).
 - [Why the relief needs 16 bits](#why-the-relief-needs-16-bits)
 - [Angle and phase](#angle-and-phase)
 - [The two-dimensional version](#the-two-dimensional-version)
+- [Rendering the views from a model](#rendering-the-views-from-a-model)
 - [Calibrating](#calibrating)
 - [The numbers, at the defaults](#the-numbers-at-the-defaults)
 - [Doing it yourself](#doing-it-yourself)
@@ -238,6 +239,54 @@ it only needs to be big enough that (a) no view tile gets skipped, which means a
 tile, and (b) you never resample your sharpest source view downward. At the defaults that's 1063
 pixels where the relief needs 5669 — about a twenty-eighth of the data for exactly the same print.
 
+### Except when the strips run diagonally
+
+That twenty-eight-fold saving hides an assumption: it holds only while the strips line up **with the
+pixel grid**.
+
+Count pixels per strip and orientation looks irrelevant. Pixels are square, so two pixels across a
+strip measured along x are two pixels across it at any angle, and no strip is ever skipped. That is a
+statement about **sampling density**, and it is true. It says nothing about **placement**.
+
+Turn the array and every boundary between two frames becomes a diagonal. A pixel straddling a diagonal
+belongs to two frames and can be printed as only one of them — whichever one its centre happens to
+fall in. So the boundary isn't a line, it's a staircase:
+
+```
+   want                  coarse raster              printer's raster
+   ╲   A ╲   B           ┌───┬───┬───┐              ┌─┬─┬─┬─┬─┬─┬─┬─┐
+    ╲     ╲              │ A │ A │ B │              │A│A│A│B│B│B│B│B│
+     ╲     ╲             ├───┼───┼───┤   error up   ├─┼─┼─┼─┼─┼─┼─┼─┤   error up to
+      ╲     ╲            │ A │ B │ B │   to ½ px    │A│A│B│B│B│B│B│B│   ½ printed dot
+```
+
+Half a pixel of misplacement doesn't sound like much until you price it in strips. The minimal raster is
+_defined_ as `q` = 2 pixels per strip, so half a pixel is **a quarter of a strip** — a quarter of one
+view's slot in the flip, misassigned. On the PPI raster the same half pixel is half a printed dot: 32
+pixels span a lens at the defaults, so it is 1/64 of one.
+
+It doesn't average out, either. Every lens down the sheet is misassigned in the same direction, so it
+reads as a ragged edge with a long, regular period rather than as noise — and a strip under a lens is a
+whole view, so the reading eye gets the wrong one of them along that boundary.
+
+More pixels are the only cure, and there is exactly one sensible amount: **the printer's own raster**.
+That is as fine as the staircase can ever be made, because past it the extra pixels never reach the
+paper. So a sheet whose strips are diagonal ships its artwork at PPI, the same size as its relief; a
+sheet whose strips are axis-aligned keeps the small raster, where the saving is real and free.
+
+| Sheet                                           | Artwork raster                |
+| ----------------------------------------------- | ----------------------------- |
+| Lenticular at 0° or 90°                         | minimal (1063 px at defaults) |
+| Lenticular at any other angle                   | PPI (5669 px)                 |
+| 2D grid, square packing, 0° or 90°              | minimal                       |
+| 2D grid, square packing, any other angle        | PPI                           |
+| 2D grid, [hexagonal packing](#packing-the-caps) | PPI, at any angle             |
+
+Hex is in that last row by construction: staggering every other row is what makes the packing dense,
+and it is also what puts the tile edges on diagonals. You don't get one without the other.
+
+Both print nodes say which raster they chose, and why, in their geometry readout.
+
 ---
 
 ## Why the relief needs 16 bits
@@ -274,7 +323,7 @@ for aligning the flip to a preferred head position.
 
 ## The two-dimensional version
 
-Swap the ruling of cylinders for a square grid of spherical caps and the print moves in both axes —
+Swap the ruling of cylinders for an array of spherical caps and the print moves in both axes —
 left-right _and_ up-down — carrying N² views instead of N.
 
 **The optics don't change.** A sphere and a cylinder refract identically at a surface of radius `R`,
@@ -283,16 +332,53 @@ cone. Only the footprint is different.
 
 ![The 2D lens grid](images/11-grid-plan.png)
 
-Each cap is **inscribed** in its square cell, so its diameter is the pitch. That leaves the four
-corners — about 21.5% of the area, since a circle fills π/4 of its square — flat at base height,
-where they don't focus and contribute a little haze.
+Each cap has a diameter of exactly one pitch, so neighbouring caps touch. Whatever the array can't
+reach stays flat at base height, where it doesn't focus and contributes a little haze.
 
 ![Cap profile through the diagonal](images/12-grid-profile.png)
 
-The alternative would be stretching the cap out to the cell corners so nothing is wasted. It's
+The alternative would be stretching each cap out to its cell corners so nothing is wasted. It's
 tempting, and it's a trap: the sag would then be measured across the diagonal `p√2` instead of the
 pitch, which raises the feasibility floor by √2 — from 0.847 mm to 1.20 mm at 45 LPI. For realistic
 ink heights that's often the difference between working and not.
+
+### Packing the caps
+
+Circles don't tile a plane, so how you _arrange_ them decides how much of the sheet is left flat.
+The **Lenslet packing** setting offers the two arrangements worth having:
+
+| Packing               | Rows                                | Neighbours touched | Under a cap   | Left flat |
+| --------------------- | ----------------------------------- | ------------------ | ------------- | --------- |
+| Square grid           | square-on, one pitch apart          | 4                  | π/4 = 78.5%   | 21.5%     |
+| Hexagonal _(default)_ | offset half a pitch, `p·√3/2` apart | 6                  | π/2√3 = 90.7% | 9.3%      |
+
+![Square against hexagonal packing](images/12b-packing.png)
+
+Hexagonal is the densest packing of equal circles that exists — a fact proved for the plane, not just
+the best anyone has found. Shifting every other row by half a pitch lets the next row drop into the
+hollows, so rows sit `√3/2 ≈ 0.866` of a pitch apart instead of a full one. Three things follow:
+
+- **Less haze.** Under 10% of the sheet is flat instead of over 20%, so less than half as much light
+  passes the array unfocused.
+- **~15% more lenslets** in the same area (`1 / 0.866`), all of it in the vertical direction — a
+  100 mm × 75 mm sheet at 45 LPI carries 177 × 153 lenslets instead of 177 × 133, so each view
+  resolves that much taller.
+- **A bigger artwork file.** Staggered rows mean the tile edges no longer run along the pixel grid, so
+  the minimal raster can't place them (see [two rasters](#two-rasters-two-jobs)). A hex sheet's
+  interlace ships on the printer's own PPI raster instead — 5669 × 4252 at the defaults rather than
+  1228 × 921, the same size as the relief, and the diagonals come out at one printed dot instead of one
+  view tile.
+
+Nothing else moves: the pitch, sag, radius, base and viewing cone are the same lens either way, and
+the caps still touch (in hex they touch six neighbours instead of four). Reach for the square grid
+when you're laminating a ready-made square lens array and the print has to line up with it.
+
+Finding which lenslet covers a pixel stops being a floor-divide once the rows are offset, so the
+renderer takes the nearest of the three candidate rows' centres — two rows away is more than a pitch
+off vertically on its own, so three is always enough. Within a lenslet the view tiles are square in
+millimetres on both axes, which keeps a view's angular slice the same horizontally and vertically; a
+hex cell reaches slightly past a pitch at its top and bottom tips, and those clamp into the
+outermost tiles.
 
 ### Naming the views
 
@@ -317,16 +403,130 @@ flipped.
 A lenticular quantises one axis and leaves the other alone. A grid quantises both, so each view is
 cut down to one sample per lens in each direction:
 
-| Arrangement | Views | Artwork raster (100 mm, 45 LPI, 4:3) | Each view resolves to |
-| ----------- | ----- | ------------------------------------ | --------------------- |
-| 1D, N = 2   | 2     | 709 × 532 px                         | 177 × 532             |
-| 1D, N = 3   | 3     | 1063 × 797 px                        | 177 × 797             |
-| 2D, 2 × 2   | 4     | 709 × 532 px                         | 177 × 133             |
-| 2D, 3 × 3   | 9     | 1063 × 797 px                        | 177 × 133             |
+| Arrangement       | Views | Artwork raster (100 mm, 45 LPI, 4:3) | Each view resolves to |
+| ----------------- | ----- | ------------------------------------ | --------------------- |
+| 1D, N = 2         | 2     | 709 × 532 px                         | 177 × 532             |
+| 1D, N = 3         | 3     | 1063 × 797 px                        | 177 × 797             |
+| 2D, 2 × 2, square | 4     | 709 × 532 px                         | 177 × 133             |
+| 2D, 3 × 3, square | 9     | 1063 × 797 px                        | 177 × 133             |
+| 2D, 2 × 2, hex    | 4     | 5669 × 4252 px (PPI raster)          | 177 × 153             |
+| 2D, 3 × 3, hex    | 9     | 5669 × 4252 px (PPI raster)          | 177 × 153             |
 
-That's about a 6× loss vertically at a 3×3 grid, which is why detail that survives a lenticular can
-vanish in a grid. In practice you want a **higher** LPI for a grid — and conveniently, finer pitch
-also needs less ink height, so the two constraints pull the same way for once.
+That's a 6× loss vertically at a square 3×3 grid — 5× at a hex one, which is what the closer rows buy
+you — and it's why detail that survives a lenticular can vanish in a grid. In practice you want a
+**higher** LPI for a grid — and conveniently, finer pitch also needs less ink height, so the two
+constraints pull the same way for once.
+
+Note what does _not_ change with N: **each view still resolves to one pixel per lenslet whatever the
+grid size**, so 177 × 153 is the answer for a 2 × 2 and for a 6 × 6 alike. More views cost you artwork
+raster and light per view, not sharpness. Hold on to that — it is what makes the depth budget below
+affordable.
+
+---
+
+## Rendering the views from a model
+
+If the subject is a 3D model rather than nine photographs, the views can be rendered — and the
+rendering has to be done in a particular way, which is why the tool has its own renderer (**3D Model
+Input** → **Model → Grid Views**) instead of leaving you to a 3D package.
+
+### Shift the eye; never rotate it
+
+The obvious approach is to point a camera at the subject from each of the N² positions. Don't. Aiming
+the camera ("toe-in") gives every view a different keystone, and it introduces _vertical_ parallax
+between views that should differ only horizontally. Under a lens grid that reads as a wobble as your
+head moves, and no amount of care in the print will fix it.
+
+Instead keep one view direction for every view and move only the eye position, across a plane
+parallel to the sheet. Each view is then a shear of one projection. Concretely, with the eye at
+(`eₓ`, `e_y`, `D`) and the sheet at z = 0, the ray to a point (`x`, `y`, `z`) crosses the sheet at
+
+```
+t = D / (D − z)
+X = eₓ + t(x − eₓ)        Y = e_y + t(y − e_y)
+```
+
+![Parallax on the sheet, and the depth it buys](images/14b-model-depth.png)
+
+Set `z = 0` in that and `t` is 1, so `X = x`: **the eye cancels out.** Every view puts a point on the
+sheet plane in exactly the same place, which is why that plane is the one that prints sharp no matter
+how far you tilt. Off the plane `t ≠ 1`, the eye term survives, and that difference _is_ the parallax
+— opposite in sign either side of the sheet, which is the near-things-move-the-other-way you can
+verify by holding a finger up against a wall.
+
+`t` earns its keep twice: it is `1/w` for this projection, so it interpolates linearly across a
+triangle in screen space and doubles as the z-buffer key.
+
+### The depth budget, which is smaller than you think
+
+Under a lens grid each view is sampled **once per lenslet**. So a feature that moves more than about
+one lenslet between adjacent views is never recorded in between: instead of gliding it jumps, and the
+lens blur turns the jump into a double image. That gives a hard ceiling on usable depth.
+
+Take it from the projection. The eye step between adjacent views is `s = 2D·tan(cone/2)/(N−1)`, and
+∂X/∂eₓ = 1 − t, so a point `z` off the sheet moves `s·z/(D − z)` per step. Set that to one pitch and
+solve, and for the usual case of `D ≫ z` the whole thing collapses:
+
+```
+usable depth (front to back)  ≈  p · (N − 1) / tan(cone/2)
+```
+
+**The viewing distance cancels out.** Depth is set by the pitch, the cone and the grid — nothing else.
+At the defaults (45 LPI, 0.9 mm, RI 1.5, so a 53.3° cone) that is:
+
+| Grid  | Printable subject depth |
+| ----- | ----------------------- |
+| 2 × 2 | 1.1 mm                  |
+| 3 × 3 | 2.2 mm                  |
+| 4 × 4 | 3.4 mm                  |
+| 6 × 6 | 5.6 mm                  |
+
+Two millimetres, for a 100 mm print. That is the single most surprising number in this document, and
+it is not a limitation of the implementation — it is what one sample per lenslet per view means. Three
+ways to buy more, in order of how much they cost you:
+
+1. **A bigger grid.** Depth grows with `N − 1` and per-view resolution doesn't change at all, so this
+   is nearly free — you pay in artwork raster and in light split more ways.
+2. **A coarser pitch.** Depth grows with `p`, but coarse lenses need
+   [thick ink](#when-it-cant-work) and you lose resolution one-for-one.
+3. **A narrower cone.** Fewer degrees to look around in, but every degree carries more depth.
+
+The render node reports the parallax per view step in lenslets and warns past 1.5 of them, with the
+depth it suggests instead. Treat that line as the one to satisfy before printing anything.
+
+### Compress the projection, not the model
+
+Fitting a solid to 2 mm of depth by squashing its geometry ruins it: squashed geometry has squashed
+_normals_, so a cube flattened to 2 mm shades exactly like the 2 mm slab it has become — three faces
+at one flat grey, no solidity at all.
+
+So the renderer fits the model to the sheet with its proportions intact, computes shading from that
+true shape, and compresses z **only when projecting**. Shading cues stay at full strength while the
+parallax stays printable. This is not a trick invented for lens prints: it is what a bas-relief does,
+and sculptors have been doing it since Donatello.
+
+### Where the colour comes from
+
+STL carries shape and nothing else, so an STL prints in one flat material colour. **OBJ** carries two
+more things, and the tool reads both:
+
+- **Texture coordinates** (`vt`, referenced from the face lines). The texture image itself arrives on
+  a **wire**, not from the file. That is deliberate: a `.mtl` names a third file for the image, and a
+  browser handed one uploaded file can fetch neither — while in a node graph the map wants to be a
+  wire anyway, so anything that makes an image can feed it.
+- **Vertex colours** (`v x y z r g b`). Used when no texture is wired, which is how the
+  six-coloured-faces cube in the examples works: each face gets its own four corners, so its colour
+  stays flat rather than blending into its neighbours.
+
+Whichever applies replaces the material colour rather than tinting it — a photographic texture must
+not be quietly dyed by whatever the colour swatch happens to be set to — and both are interpolated
+perspective-correctly, so a texture doesn't swim across a face tilted away from you.
+
+### Nothing needs to be rendered large
+
+One pixel per lenslet per view means 177 × 133 at the defaults. The node renders 512 wide out of the
+box, which is already generous, and warns if you go below what the print resolves. A 3D package
+rendering nine 4K views for this is wasting nine tenths of the pixels.
 
 ---
 
@@ -423,8 +623,10 @@ have to.
 2. Connect them. For the lenticular node connection order is viewing order. For the grid node each
    port is named for the direction it's viewed from — connect by name and let the node handle the
    mirroring.
-3. Set width, PPI, LPI, height and RI. Watch the **Info** output: it reports the solved sag, base,
-   focus and cone, and warns you if the combination can't focus.
+3. Set width, PPI, LPI, height and RI. On the grid node also pick **Lenslet packing** — leave it
+   hexagonal unless you are lining the print up with an existing square array. Watch the **Info**
+   output: it reports the solved sag, base, focus and cone, which raster the artwork landed on and
+   why, and warns you if the combination can't focus.
 4. Press **Run**.
 5. Open the node's editor and download the **16-bit gloss depth map**. The `interlaced` output is
    your artwork; the `depth` output is an 8-bit preview only — don't print that one.
@@ -457,7 +659,11 @@ b      = max(0, H - s)
 
 # ---- interlaced artwork ---------------------------------------------
 cells      = width_mm / p
-art_w      = max(ceil(cells * N * q), max(view.width for view in views))
+map_w      = round(width_mm / 25.4 * PPI)        # the printer's own raster
+diagonal   = abs(orientation_deg % 90) > 0       # strip edges off the pixels?
+art_w      = max(ceil(cells * N * q),
+                 max(view.width for view in views),
+                 map_w if diagonal else 0)       # diagonals need every dot
 art_h      = round(art_w * views[0].height / views[0].width)
 mm_per_px  = width_mm / art_w
 
@@ -474,7 +680,6 @@ for py in range(art_h):
       art[py][px] = bilinear(views[k], sx / width_mm, sy / height_mm)
 
 # ---- relief map (printer raster, 16-bit) ----------------------------
-map_w      = round(width_mm / 25.4 * PPI)
 map_h      = round(map_w * views[0].height / views[0].width)
 mm_per_px  = width_mm / map_w
 
@@ -489,7 +694,10 @@ for py in range(map_h):
 ```
 
 For the 2D version: compute `v` as well, quantise it the same way to get a row index, use
-`d = hypot(d_u, d_v)` with `z = b` wherever `d > p/2`, and mirror both view indices.
+`d = hypot(d_u, d_v)` with `z = b` wherever `d > p/2`, and mirror both view indices. For hexagonal
+packing, divide `v` by `p·√3/2` instead of `p`, offset odd rows by half a pitch, take the nearest of
+the three candidate row centres — and treat `diagonal` as true, staggered rows being diagonal by
+construction.
 
 This listing isn't decorative — it's pinned. `src/lib/docsPseudocode.test.ts` is a literal port of it,
 asserted to produce **byte-identical** output to the real renderers at an awkward configuration: 23°
@@ -507,16 +715,17 @@ apart, that test fails.
 
 ## When it goes wrong
 
-| What you see                            | Probably                                             | Try                                                     |
-| --------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
-| Soft everywhere, never a clean flip     | Focus isn't landing on the artwork                   | Check the feasibility floor; run the Height calibration |
-| Clean at one edge, smeared at the other | Pitch mismatch (laminated lens, or RIP scaling)      | Run the LPI calibration                                 |
-| Two views visible at once               | Focus too long, or the ink slumped                   | More height, or cure harder                             |
-| Depth inverted, motion feels wrong      | Pseudoscopic — views not mirrored                    | Mirror both view indices                                |
-| Stair-stepping on the lens surface      | 8-bit relief, or too few pixels per lens             | Emit 16-bit; raise PPI or lower LPI to ≥ 8 px per lens  |
-| A view missing from some lenses         | Artwork raster too small, a tile fell between pixels | Raise samples per tile to 2 or more                     |
-| Image slides sideways as it flips       | Sampling per-pixel instead of at the lens centre     | See [interlacing](#interlacing)                         |
-| Contrast lower than expected (2D only)  | The dead corners, ~21.5% of the area                 | Expected — raise LPI or live with it                    |
+| What you see                            | Probably                                             | Try                                                                             |
+| --------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Soft everywhere, never a clean flip     | Focus isn't landing on the artwork                   | Check the feasibility floor; run the Height calibration                         |
+| Clean at one edge, smeared at the other | Pitch mismatch (laminated lens, or RIP scaling)      | Run the LPI calibration                                                         |
+| Two views visible at once               | Focus too long, or the ink slumped                   | More height, or cure harder                                                     |
+| Depth inverted, motion feels wrong      | Pseudoscopic — views not mirrored                    | Mirror both view indices                                                        |
+| Stair-stepping on the lens surface      | 8-bit relief, or too few pixels per lens             | Emit 16-bit; raise PPI or lower LPI to ≥ 8 px per lens                          |
+| A view missing from some lenses         | Artwork raster too small, a tile fell between pixels | Raise samples per tile to 2 or more                                             |
+| Image slides sideways as it flips       | Sampling per-pixel instead of at the lens centre     | See [interlacing](#interlacing)                                                 |
+| Ragged, regularly-stepped view edges    | Diagonal strips on a minimal artwork raster          | Raster the artwork at PPI — see [above](#except-when-the-strips-run-diagonally) |
+| Contrast lower than expected (2D only)  | Sheet left flat between the caps: 21.5% square       | Switch to [hex packing](#packing-the-caps) for 9.3%, or raise LPI               |
 
 ---
 
@@ -534,9 +743,12 @@ Worth being straight about:
   gap is exactly why the calibration sheets exist.
 - **Resolution.** One sample per lens, per view — and in 2D, per lens in both axes. That's intrinsic
   to the technique, not a limitation of this implementation.
-- **Nobody has run this on a press yet.** The optics, geometry and rasterisation are covered by the
-  test suite in this repository. The author has not validated the output on a physical UV flatbed.
-  Treat the calibration sheets as mandatory, not optional.
+- **Your printer is not the author's.** This has been printed: the technique works on a physical UV
+  flatbed, and the guide reflects what came off it — the
+  [diagonal-raster problem](#except-when-the-strips-run-diagonally) above is the kind of thing that only
+  turns up that way. But height, index and slump are properties of _your_ machine and _your_ varnish,
+  and the whole reason the calibration sheets exist is that nobody can hand you those three numbers.
+  Print them first; treat them as mandatory, not optional.
 
 ---
 
@@ -550,8 +762,11 @@ Worth being straight about:
 | The relief map           | `renderDepthMap()`                                                                     |
 | 16-bit PNG               | `encodeGray16Png()` in `src/lib/png16.ts`                                              |
 | The 2D grid              | `renderGridInterlaced()`, `renderGridDepthMap()`, `gridCellLabel()`                    |
+| Square vs hex packing    | `latticeAt()`, `HEX_ROW_SPACING`, `packingFill()`                                      |
 | Calibration              | `calibrationValues()`, `withCalibrationValue()`, `switchFrames()`, `gridSwitchViews()` |
-| The nodes                | `src/nodes/lenticular.ts`, `src/nodes/lensGrid.ts`                                     |
+| Rendering from a model   | `src/lib/render3d.ts` — `projectToSheet()`, `eyeOffsetsMm()`, `disparityPerStep()`     |
+| Reading a mesh in        | `parseMesh()` in `mesh.ts` → `parseStl()` / `parseObj()`                               |
+| The nodes                | `src/nodes/lenticular.ts`, `src/nodes/lensGrid.ts`, `src/nodes/model3d.ts`             |
 | The numbers on this page | `src/lib/lenticular.test.ts`                                                           |
 | The figures              | `docs/figures.py` — run `python docs/figures.py` to redraw them                        |
 

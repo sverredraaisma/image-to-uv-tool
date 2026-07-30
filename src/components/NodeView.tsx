@@ -69,13 +69,18 @@ export function NodeView({ id, selected }: NodeProps) {
   const inlineFields = (def.configFields ?? []).filter((f) => !f.advanced);
   const hasPopup = (def.configFields ?? []).some((f) => f.advanced) || !!def.customEditor;
 
-  // The two nodes whose source is an uploaded file rather than a config value.
+  // The nodes whose source is an uploaded file rather than a config value.
   const upload =
     node.type === 'imageInput'
       ? { accept: 'image/*', label: 'Upload image…' }
       : node.type === 'animationInput'
         ? { accept: 'image/gif,image/webp,image/apng,image/png,image/*', label: 'Upload animation…' }
-        : null;
+        : node.type === 'modelInput'
+          ? {
+              accept: '.stl,.obj,model/stl,model/obj,application/sla,application/vnd.ms-pki.stl',
+              label: 'Upload mesh (STL/OBJ)…',
+            }
+          : null;
 
   const portClass = (side: ConnectionSide, portId: string) => {
     let cls = `port port-${side}`;

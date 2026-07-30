@@ -943,6 +943,52 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     tips: [
       'Each view resolves to a single pixel per lenslet, so views cost resolution fast — start at grid 2 or 3.',
       'Ports are named for where the view is seen from: Left · Up, Centre (neutral), Right · Down.',
+      'Hexagonal packing (the default) offsets every other row and pulls the rows √3/2 as far apart: the densest way to pack equal circles, so ~15% more lenslets fit and only 9% of the sheet is left flat instead of 21%. Switch to Square grid if you are laminating a ready-made square lens array.',
+      'Wire Model → Grid Views into the All views input and the whole grid arrives on one edge, in order. A cell port wired individually overrides its view, so you can retouch just one.',
+    ],
+  },
+
+  modelInput: {
+    summary:
+      'Uploads a mesh — STL (binary or ASCII) or OBJ — and puts it on a wire. Units, origin and scale are ignored: whatever renders it fits it to the print. Pair it with Model → Grid Views.',
+    uses: [
+      {
+        title: 'A 3D print you can’t print',
+        detail:
+          'A model too fine or too large to print in resin can be printed as a lens-grid picture of itself, which you look around instead of holding.',
+        chain: ['3D Model Input', 'Model → Grid Views', 'Lens Grid Print'],
+      },
+    ],
+    tips: [
+      'STL carries no colour at all, so its views come out in one material colour — set that and the light under Advanced in the render node. Export as OBJ instead and the mesh can bring texture coordinates or vertex colours with it.',
+      'A textured OBJ needs its image on a wire, not a .mtl file: connect any image node to the render node’s Texture input. Nothing can fetch the sibling files a .mtl names from inside a browser tab.',
+      'A dense scan can be millions of triangles; decimate it first. Nothing here needs more detail than the print resolves — about 177×153 per view at 100 mm and 45 LPI.',
+    ],
+  },
+
+  modelViews: {
+    summary:
+      'Renders a mesh from every eye position of a lens grid and puts the whole set on one wire, in the order Lens Grid Print names its cells — connect it to All views. The eye shifts but never rotates, so the sheet plane stays sharp in every view and only depth moves.',
+    uses: [
+      {
+        title: 'Look-around object',
+        detail:
+          'A 3×3 grid of a solid object gives real head-tracking parallax in both axes, from one file instead of nine renders.',
+        chain: ['3D Model Input', 'Model → Grid Views', 'Lens Grid Print'],
+      },
+      {
+        title: 'Relief without the relief',
+        detail:
+          'Feed the Depth output into Heightmap → STL or the gloss chain to combine the parallax print with a physical relief of the same model.',
+        chain: ['3D Model Input', 'Model → Grid Views', 'Heightmap → STL'],
+      },
+    ],
+    tips: [
+      'Subject depth is the whole game. Info reports the parallax in lenslets per view step: past ~1.5 the print ghosts instead of reading as depth, under ~0.15 it looks flat. Change depth, not the grid, first.',
+      'Leave View cone on “From the lens” so the views span exactly what the lens can show — the same LPI, gloss height and RI you set on the print node.',
+      'The sheet plane is where the print is sharp, and the model straddles it. Anything you want pin-sharp should sit at mid-depth.',
+      'Rotate to frame the subject; the fit is recomputed from the rotated silhouette, so nothing falls off the sheet.',
+      'Colour comes from the Texture input if the mesh has UVs, else the mesh’s own vertex colours, else the flat material colour. A texture replaces that colour rather than tinting it. Info says which one a render actually used.',
     ],
   },
 

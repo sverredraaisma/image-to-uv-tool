@@ -49,7 +49,9 @@ function docImplementation(views: RasterImage[], p: LenticularSettings) {
   };
 
   const cells = width_mm / pitch;
-  const art_w = Math.max(Math.ceil(cells * N * q), ...views.map((v) => v.width));
+  const map_w = Math.round((width_mm / 25.4) * PPI);
+  const diagonal = Math.abs(p.orientationDeg % 90) > 0;
+  const art_w = Math.max(Math.ceil(cells * N * q), ...views.map((v) => v.width), diagonal ? map_w : 0);
   const art_h = Math.round((art_w * views[0].height) / views[0].width);
   const art = createImage(art_w, art_h, [255, 255, 255, 255]);
   let mmPerPx = width_mm / art_w;
@@ -70,7 +72,6 @@ function docImplementation(views: RasterImage[], p: LenticularSettings) {
     }
   }
 
-  const map_w = Math.round((width_mm / 25.4) * PPI);
   const map_h = Math.round((map_w * views[0].height) / views[0].width);
   const depth = new Uint16Array(map_w * map_h);
   mmPerPx = width_mm / map_w;

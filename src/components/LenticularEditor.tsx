@@ -10,13 +10,16 @@ import {
   gridCellCounts,
   gridInterlacedSize,
   gridSwitchViews,
+  gridTilesOffPixelGrid,
   interlacedSize,
   lensGeometry,
   outputSize,
+  packingFill,
   renderDepthMap,
   renderGridDepthMap,
   renderGridInterlaced,
   renderInterlaced,
+  stripsOffPixelGrid,
   switchFrames,
   type CalibrationParam,
   type CalibrationSpec,
@@ -25,7 +28,7 @@ import {
   type OutputSize,
   type RenderOptions,
 } from '../lib/lenticular';
-import { lensGridInputs } from '../engine/ports';
+import { lensGridCellInputs } from '../engine/ports';
 import { settingsFromConfig } from '../nodes/lenticular';
 import { gridSettingsFromConfig } from '../nodes/lensGrid';
 import { bool, num } from '../nodes/helpers';
@@ -59,6 +62,8 @@ interface PrintKind {
   missing: ReactNode;
   /** Extra rows for the geometry table. */
   rows?: ReactNode;
+  /** Extra paragraph under the downloads note, on how the artwork is rastered. */
+  artNote?: ReactNode;
   /** Physical gutter between calibration bands. */
   bandGapMm: number;
   artSize: OutputSize | null;
@@ -183,6 +188,7 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
         <em>is</em> the lens; the interlaced artwork is flat ink, so it ships at the smallest size that keeps
         both the interlace and your source resolution — scale it to the sheet in the printing tool.
       </p>
+      {kind.artNote}
       <div className="lenticular-actions">
         <button type="button" className="btn" disabled={!ready || !!busy} onClick={downloadMain}>
           {busy === 'depth' ? 'Rendering…' : '16-bit gloss depth map'}
@@ -276,6 +282,15 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
         views: frames,
         ready,
         missing: 'Connect at least 2 images to the Frames input — they interlace in connection order.',
+        artNote: stripsOffPixelGrid(settings) ? (
+          <p className="lenticular-note">
+            At {settings.orientationDeg}° the edges between frame strips are diagonals, which no coarse raster
+            can place — a pixel straddling two frames takes whichever one its centre lands in, and the
+            boundary steps a whole strip at a time. So this sheet ignores the minimal raster and goes out on
+            the printer&apos;s own {settings.ppi} PPI raster, the same one as the depth map. Straighten the
+            array to 0° or 90° and it drops back to the small one.
+          </p>
+        ) : null,
         bandGapMm: BAND_GAP_MM,
         artSize: ready ? interlacedSize(settings, frames) : null,
         renderArt: (v, options) => renderInterlaced(v, settings, options),
@@ -293,7 +308,14 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
     useShallow((s) => {
       const nd = s.nodes.find((n) => n.id === nodeId);
       if (!nd) return [];
-      return lensGridInputs(nd.config).map((port) => imageOn(s.edges, s.runtime, nodeId, port.id));
+      // A Sequence wired to `views` carries the whole grid; a cell port wired
+      // individually overrides it. Same precedence as the node's own gather.
+      const bundle = s.edges.find((e) => e.target === nodeId && e.targetHandle === 'views');
+      const bundled = bundle ? s.runtime[bundle.source]?.outputs?.[bundle.sourceHandle] : undefined;
+      const frames = bundled?.kind === 'sequence' ? bundled.frames : [];
+      return lensGridCellInputs(nd.config).map(
+        (port, i) => imageOn(s.edges, s.runtime, nodeId, port.id) ?? frames[i],
+      );
     }),
   );
 
@@ -302,10 +324,11 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
   const grid = clampGrid(settings.grid);
   const present = views.filter((v): v is RasterImage => !!v);
   const ready = present.length === grid * grid;
-  const missingLabels = lensGridInputs(node.config)
+  const missingLabels = lensGridCellInputs(node.config)
     .filter((_, i) => !views[i])
     .map((p) => p.label);
   const cells = ready ? gridCellCounts(settings, present[0]) : null;
+  const offGrid = gridTilesOffPixelGrid(settings);
 
   return (
     <PrintEditor
@@ -326,9 +349,29 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
             <dd>
               {grid} × {grid} = {grid * grid} views
             </dd>
+            <dt>Packing</dt>
+            <dd>
+              {settings.packing === 'hex' ? 'Hexagonal (offset rows)' : 'Square (rows and columns)'} —{' '}
+              {(packingFill(settings.packing) * 100).toFixed(1)}% under a cap
+            </dd>
             <dt>Per-view resolution</dt>
             <dd>{cells ? `${cells.width} × ${cells.height} px (one per lenslet)` : '—'}</dd>
           </>
+        ),
+        artNote: offGrid ? (
+          <p className="lenticular-note">
+            {settings.packing === 'hex' ? 'Staggered rows' : `A ${settings.orientationDeg}° array`} put the
+            edges between view tiles on diagonals, which no coarse raster can place — a pixel straddling two
+            views takes whichever one its centre lands in, and the boundary steps a whole tile at a time. So
+            this sheet ignores the minimal raster and goes out on the printer&apos;s own {settings.ppi} PPI
+            raster, the same one as the depth map: the finest the print can resolve, spent where it shows.
+          </p>
+        ) : (
+          <p className="lenticular-note">
+            A square array on the axes tiles the artwork in whole pixels, so the minimal raster places every
+            tile edge exactly and a bigger one would buy nothing. Hex packing (or turning the array off the
+            axes) puts those edges on diagonals and moves the artwork onto the full {settings.ppi} PPI raster.
+          </p>
         ),
         renderArt: (v, options) => renderGridInterlaced(v, settings, options),
         renderDepth: (options) => renderGridDepthMap(present, settings, options),
