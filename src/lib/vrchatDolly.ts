@@ -1,5 +1,5 @@
-// Camera dolly paths for VRChat, so a world can be photographed into the views
-// a lenticular or lens-grid print needs.
+// Camera dolly paths for VRChat, so a world can be filmed into the views a
+// lenticular print needs.
 //
 // The print does not want "some shots from different angles". It wants the one
 // arrangement `render3d.ts` describes: the eye TRANSLATES across a plane and
@@ -9,9 +9,18 @@
 // differently, which under a lens reads as a wobble no amount of care in the
 // print will fix.
 //
-// So a path built here is a straight line (or a grid) of camera positions with
-// **one rotation repeated at every point**. That is the whole trick, and it is
-// why this is worth generating rather than flying by hand.
+// So a path built here is a straight line of camera positions with **one
+// rotation repeated at every point**. That is the whole trick, and it is why
+// this is worth generating rather than flying by hand.
+//
+// The path is meant to be *recorded*, not photographed stop by stop. It is one
+// continuous sweep across the cone at a steady pace, and the views come out of
+// the recording afterwards: a path point per view, so every view has a known
+// timestamp, and no holds anywhere. A 16-view run is then twenty seconds of
+// video rather than sixteen trips into the camera menu — and because the
+// camera is always moving, the gap between neighbouring views is only ever as
+// wide as the cone divided by the views, which is the number the print cares
+// about.
 //
 // The cone and the spacing come from the same functions the renderer and the
 // print node use — `lensGeometry()` for the angle the lens can show,
@@ -36,15 +45,17 @@ export interface Quat {
   w: number;
 }
 
-/** How the views are laid out across the cone. */
-export type DollyLayout = { kind: 'sequence'; views: number } | { kind: 'grid'; grid: number };
-
 /** Where the cone comes from: solved from the lens, or stated outright. */
 export type ConeSource =
   { kind: 'lens'; lpi: number; heightMm: number; ri: number } | { kind: 'manual'; coneDeg: number };
 
 export interface DollyOptions {
-  layout: DollyLayout;
+  /**
+   * How many views the print will interlace. One path point each, so this is
+   * also how finely the sweep is sampled — see `maxViewsForLens`, which is what
+   * the lenticule can actually carry.
+   */
+  views: number;
   cone: ConeSource;
   /**
    * The point that will print sharp. Everything on the plane through it,
@@ -57,8 +68,8 @@ export interface DollyOptions {
   /** Which way the cameras face. Unity Euler, degrees: yaw about Y, then pitch. */
   headingDeg: number;
   pitchDeg: number;
-  /** Seconds to sit at each stop, so there is time to take the shot. */
-  holdSeconds: number;
+  /** How long the whole sweep takes, seconds. Slower is less motion blur. */
+  durationSeconds: number;
   /** VRChat's camera zoom value, passed through to every point untouched. */
   zoom: number;
   /** Focal distance for depth of field; defaults to the anchor distance. */
@@ -70,13 +81,15 @@ export interface DollyOptions {
 export interface DollyPoint {
   /** 0-based index in capture order — the order the print node reads. */
   index: number;
-  /** Cell this shot fills, e.g. `Left · Up`, or `View 3/12` for a 1D run. */
+  /** `View 3/12`, in the order Lenticular Print reads its frames. */
   label: string;
+  /** Seconds into the recording, so the frame can be pulled from the video. */
+  timeSeconds: number;
   position: Vec3;
   /** The same rotation at every point, by construction. */
   rotation: Quat;
-  /** Offset from the centre of the path, metres: right and up. */
-  offsetM: { right: number; up: number };
+  /** Offset from the centre of the sweep, metres; negative is to the left. */
+  offsetM: number;
 }
 
 const rad = (deg: number): number => (deg * Math.PI) / 180;
@@ -129,69 +142,38 @@ export function coneDegrees(cone: ConeSource): number {
   return lensGeometry(settings).viewAngleDeg;
 }
 
-/** Name for a shot, matching what Lens Grid Print calls the cell it fills. */
-const axisLabel = (index: number, count: number, low: string, high: string): string => {
-  const offset = index - (count - 1) / 2;
-  if (offset === 0) return 'Centre';
-  const word = offset < 0 ? low : high;
-  const rank = Math.ceil(Math.abs(offset));
-  const maxRank = Math.ceil((count - 1) / 2);
-  if (maxRank <= 1) return word;
-  if (maxRank === 2) return rank === 1 ? word : `Far ${word.toLowerCase()}`;
-  return `${word} ${rank}`;
-};
-
-const cellLabel = (col: number, row: number, grid: number): string => {
-  const x = axisLabel(col, grid, 'Left', 'Right');
-  const y = axisLabel(row, grid, 'Up', 'Down');
-  if (x === 'Centre' && y === 'Centre') return 'Centre (neutral)';
-  if (x === 'Centre') return y;
-  if (y === 'Centre') return x;
-  return `${x} · ${y}`;
-};
-
 /**
- * Every stop on the path, in the order the print node reads its views: a grid
- * runs row-major from `Left · Up`, a 1D run goes left eye first (Lenticular
- * Print reverses it for the lens, as it does for a rendered run).
+ * Every point of the sweep, left eye first — the order Lenticular Print reads
+ * its frames in, before it reverses them for the lens.
+ *
+ * One point per view, spaced across the cone the way the renderer spaces its
+ * eyes: evenly in *angle*, which is not evenly in position. That spacing is
+ * what puts each view at a known moment of the recording, whatever the client
+ * does between points, and it is why the timestamps below can be trusted.
  */
 export function dollyPoints(o: DollyOptions): DollyPoint[] {
+  const views = Math.max(2, Math.round(o.views));
   const coneDeg = coneDegrees(o.cone);
   const rotation = quaternionFromYawPitch(o.headingDeg, o.pitchDeg);
-  const { right, up, forward } = cameraBasis(rotation);
+  const { right, forward } = cameraBasis(rotation);
   const distance = Math.max(0.01, o.distanceM);
-  // The same tan-spaced positions the renderer puts its eyes at, in metres.
-  const offsets = (count: number) => eyeOffsetsMm(count, coneDeg, distance * 1000).map((mm) => mm / 1000);
+  const times = viewTimestamps(views, o.durationSeconds);
 
-  const at = (dRight: number, dUp: number, index: number, label: string): DollyPoint => ({
+  // The same tan-spaced positions the renderer puts its eyes at, in metres.
+  const offsets = eyeOffsetsMm(views, coneDeg, distance * 1000).map((mm) => mm / 1000);
+
+  return offsets.map((offset, index) => ({
     index,
-    label,
+    label: `View ${index + 1}/${views}`,
+    timeSeconds: times[index],
     position: {
-      x: o.anchor.x - forward.x * distance + right.x * dRight + up.x * dUp,
-      y: o.anchor.y - forward.y * distance + right.y * dRight + up.y * dUp,
-      z: o.anchor.z - forward.z * distance + right.z * dRight + up.z * dUp,
+      x: o.anchor.x - forward.x * distance + right.x * offset,
+      y: o.anchor.y - forward.y * distance + right.y * offset,
+      z: o.anchor.z - forward.z * distance + right.z * offset,
     },
     rotation,
-    offsetM: { right: dRight, up: dUp },
-  });
-
-  if (o.layout.kind === 'sequence') {
-    const count = Math.max(2, Math.round(o.layout.views));
-    const xs = offsets(count);
-    return xs.map((dx, i) => at(dx, 0, i, `View ${i + 1}/${count}`));
-  }
-
-  const grid = Math.max(2, Math.round(o.layout.grid));
-  const xs = offsets(grid);
-  const points: DollyPoint[] = [];
-  for (let row = 0; row < grid; row++) {
-    for (let col = 0; col < grid; col++) {
-      // Row 0 is `Up`: the camera stands above the centre, so the offset is the
-      // negative of the row's — the same sign flip the renderer makes.
-      points.push(at(xs[col], -xs[row], points.length, cellLabel(col, row, grid)));
-    }
-  }
-  return points;
+    offsetM: offset,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -261,7 +243,10 @@ export function dollyFile(
       // Position, rotation and duration first, as the client writes them.
       Position: roundVec(p.position),
       Rotation: roundQuat(p.rotation),
-      Duration: Math.max(0.01, o.holdSeconds),
+      // The leg from this point to the next. Equal for every point, so the
+      // sweep runs at one steady pace and view k sits at k·Duration into the
+      // recording — which is the whole basis for pulling frames by timestamp.
+      Duration: legSeconds(o),
       ...DEFAULT_FILE_FIELDS,
       // …and the ones this path is actually about, which nothing may override.
       Zoom: o.zoom,
@@ -275,6 +260,41 @@ export function dollyFile(
     return { ...template, ...point };
   });
 }
+
+/**
+ * When each view passes, seconds from the start of the sweep. The frames come
+ * out of the recording at these times, so this is the one number the path and
+ * the extraction have to agree on — hence one function, used by both.
+ */
+export function viewTimestamps(views: number, durationSeconds: number): number[] {
+  const count = Math.max(2, Math.round(views));
+  const leg = Math.max(0.01, durationSeconds) / (count - 1);
+  return Array.from({ length: count }, (_, i) => i * leg);
+}
+
+/**
+ * The crop, as an ffmpeg expression rather than a number.
+ *
+ * `iw`/`ih` are resolved by ffmpeg itself, so this needs neither ffprobe nor
+ * any idea of what the recording's resolution turned out to be: take the
+ * largest rectangle of the sheet's shape that fits, divide by the zoom, and
+ * offset it from the centre.
+ */
+export function cropFilter(aspect: number, zoom = 1, offset = { x: 0, y: 0 }): string {
+  const a = Math.max(0.01, aspect);
+  const z = Math.max(0.05, zoom);
+  // The commas inside min() have to survive as commas: ffmpeg splits a
+  // filtergraph on them, so an unescaped one ends the crop filter halfway
+  // through its own argument.
+  return (
+    `crop=min(iw\\,ih*${a})/${z}:min(ih\\,iw/${a})/${z}:` +
+    `(iw-out_w)/2+iw*${offset.x}:(ih-out_h)/2+ih*${offset.y}`
+  );
+}
+
+/** Seconds per leg: the sweep, divided by the gaps between its views. */
+export const legSeconds = (o: DollyOptions): number =>
+  Math.max(0.01, o.durationSeconds) / Math.max(1, Math.round(o.views) - 1);
 
 /** Six decimals is a micrometre at these scales, and keeps the file readable. */
 const mm = (n: number): number => Math.round(n * 1e6) / 1e6;
@@ -302,11 +322,41 @@ export interface PrintTarget {
    * of subject movement covers. Set it to what the camera is actually on.
    */
   fovDeg: number;
+  /** Frames a second the recording is made at. */
+  fps: number;
+  /** Printer resolution, which with the LPI caps how many views can be shown. */
+  ppi: number;
+  /** Artwork pixels per frame strip — the print node's own setting. */
+  stripSamples: number;
 }
+
+/**
+ * How many views a lenticule can actually carry: the artwork under it is
+ * `ppi / lpi` printed dots wide, and each frame strip needs `stripSamples` of
+ * them. Ask for more views than this and the extra ones have nowhere to go —
+ * which a recording makes very easy to do by accident, since frames are free
+ * once the camera is rolling.
+ */
+export const maxViewsForLens = (target: PrintTarget): number =>
+  Math.max(2, Math.floor(target.ppi / Math.max(1e-6, target.lpi * Math.max(1, target.stripSamples))));
 
 export interface DollyReport {
   coneDeg: number;
+  /** Views the sweep is sampled into — one path point each. */
   shots: number;
+  /** How far the camera travels end to end, metres. */
+  sweepM: number;
+  /** How long the sweep takes, seconds, and the gap between views. */
+  durationS: number;
+  legS: number;
+  /**
+   * How far the camera moves during one frame of the recording, metres. This
+   * is the motion blur: a recorded frame is not an instant, it is a slice of
+   * the sweep.
+   */
+  metresPerRecordedFrame: number;
+  /** Recorded frames that fall between one view and the next. */
+  framesPerView: number;
   /** Widest gap between neighbouring stops, metres — the one that decides. */
   stepM: number;
   /** Distance from the outermost stop to the centre line, metres. */
@@ -346,10 +396,12 @@ export interface DollyReport {
 export function reportFor(o: DollyOptions, target: PrintTarget): DollyReport {
   const points = dollyPoints(o);
   const coneDeg = coneDegrees(o.cone);
-  const count = o.layout.kind === 'sequence' ? o.layout.views : o.layout.grid;
-  const xs = eyeOffsetsMm(Math.max(2, Math.round(count)), coneDeg, o.distanceM * 1000);
+  const views = Math.max(2, Math.round(o.views));
+  const xs = eyeOffsetsMm(views, coneDeg, o.distanceM * 1000);
   const stepM = Math.abs(xs[1] - xs[0]) / 1000;
   const D = o.distanceM;
+  const legS = legSeconds(o);
+  const fps = Math.max(1, target.fps);
 
   const frameWidthM = 2 * D * Math.tan(rad(Math.min(179, Math.max(1, target.fovDeg))) / 2);
   const lensletsAcross = (Math.max(1, target.printWidthMm) * Math.max(1, target.lpi)) / 25.4;
@@ -358,6 +410,14 @@ export function reportFor(o: DollyOptions, target: PrintTarget): DollyReport {
   return {
     coneDeg,
     shots: points.length,
+    sweepM: (2 * Math.abs(xs[xs.length - 1])) / 1000,
+    durationS: legS * (views - 1),
+    legS,
+    // The widest leg divided by the frames it is filmed over: the camera is
+    // fastest at the ends of the sweep, so this is the worst case, which is
+    // the one worth quoting.
+    metresPerRecordedFrame: stepM / (legS * fps),
+    framesPerView: legS * fps,
     stepM,
     outerM: Math.abs(xs[xs.length - 1]) / 1000,
     frameWidthM,
@@ -419,11 +479,26 @@ export function viewsForDepth(
   return views;
 }
 
-/** The same path with a different number of stops across the same cone. */
-const withViews = (o: DollyOptions, views: number): DollyOptions => ({
-  ...o,
-  layout: o.layout.kind === 'grid' ? { kind: 'grid', grid: views } : { kind: 'sequence', views },
-});
+/** The same sweep sampled into a different number of views. */
+const withViews = (o: DollyOptions, views: number): DollyOptions => ({ ...o, views });
+
+/**
+ * How far a feature `depthM` behind the focal plane smears *within* one
+ * recorded frame, in lenslets.
+ *
+ * A photograph is an instant; a video frame is a slice of the sweep, and the
+ * camera keeps moving through it. Under a lens that smear is not a soft edge —
+ * it is the view itself being mixed with its neighbour before the print ever
+ * gets to interlace them. Keeping it well under a lenslet is what makes a fast
+ * sweep safe; the way to buy it back is a slower sweep or a higher frame rate,
+ * both of which cost nothing but time.
+ */
+export function blurLenslets(o: DollyOptions, target: PrintTarget, depthM: number): number {
+  const report = reportFor(o, target);
+  const D = Math.max(0.01, o.distanceM);
+  const moved = (report.metresPerRecordedFrame * Math.abs(depthM)) / (D + depthM);
+  return moved / report.metresPerLenslet;
+}
 
 /** Parallax a feature `depthM` behind the focal plane will show, in lenslets. */
 export function parallaxAt(o: DollyOptions, target: PrintTarget, depthM: number): number {

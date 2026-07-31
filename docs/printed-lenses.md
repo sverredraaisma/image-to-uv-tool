@@ -770,16 +770,20 @@ press ends up is to print one and look at it.
 A rendered mesh is not the only source of views. Anything that can be photographed from a chosen
 position can be photographed from N of them — and a game with a free camera is a rig you already own.
 VRChat is the case this repository has a tool for, because its camera can be driven along a **dolly
-path** read from a JSON file, which is exactly the shape of the problem: a list of positions and
-rotations, walked in order.
+path** read from a JSON file, which is exactly the shape of the problem: positions and rotations,
+walked in order.
 
 ```bash
-npm run dolly -- --grid 3 --distance 4 --heading 180 --anchor 0,1.2,0 --out cube.json
-npm run dolly -- --help
+npm run dolly -- --views 16 --distance 4 --heading 180 --anchor 0,1.2,0 --out sweep.json
+npm run frames -- --video sweep.mp4 --plan sweep.plan.json --start 3.4 --out views.gif
 ```
 
-The script writes the path and then tells you what it is worth as a print. Both halves matter, and
-the second one more than people expect.
+Two steps: build a sweep and record it, then pull the views out of the recording as a GIF that an
+**Animation Input** feeds straight into **Lenticular Print**.
+
+**Lenticular prints only.** A lens grid wants a raster of camera positions, which means a raster of
+sweeps and a way to hold the vertical rows apart — not something a camera on rails does usefully, and
+not something worth pretending about. For a grid, render the views from a mesh.
 
 ### The one rule the path exists to enforce
 
@@ -788,16 +792,38 @@ bullet is the reason to generate a path at all rather than fly the camera by han
 
 > **The camera translates. It never rotates.**
 
-Every stop shares one rotation, so every shot is a shear of one projection and the plane through the
-anchor prints sharp. Point the camera at your subject for each shot instead — which is what anyone
-flying by hand naturally does, and what VRChat's own _LookAtMe_ does automatically — and each frame
-is keystoned differently. Under the lens that reads as a wobble as your head moves, and nothing in
-the print can take it out again. The generated path sets `LookAtMe: false` on every point for the
-same reason.
+Every point shares one rotation, so every frame is a shear of one projection and the plane through the
+anchor prints sharp. Point the camera at your subject instead — which is what anyone flying by hand
+naturally does, and what VRChat's own _LookAtMe_ does automatically — and each frame is keystoned
+differently. Under the lens that reads as a wobble as your head moves, and nothing in the print can
+take it out again. The generated path sets `LookAtMe: false` on every point for the same reason.
 
-The stops themselves are the same tan-spaced positions `eyeOffsetsMm()` gives the mesh renderer,
-spanning the same cone `lensGeometry()` solves from your LPI, gloss height and RI. A path and a print
+The points themselves are the same tan-spaced positions `eyeOffsetsMm()` gives the mesh renderer,
+spanning the same cone `lensGeometry()` solves from your LPI, gloss height and RI. A sweep and a print
 made from the same numbers agree because they are computed by the same functions.
+
+### Why it is one continuous take
+
+The obvious way to shoot N views is to stand at each position and take a photograph. It works, and it
+is miserable: sixteen trips into the camera menu, and any drift between them lands in the print.
+
+So the path holds nowhere. Every leg is the same length of time, the camera never stops, and you
+record the whole sweep in one take — twenty seconds of video instead of sixteen deliberate shots.
+Because there is a path point per view and the legs are equal, **view `k` is at `k × leg` seconds**
+into the recording, which is what makes the frames findable afterwards without counting anything.
+
+That also means the sweep can be as slow as you like for free, and slow is what buys quality: a
+recorded frame is not an instant but a slice of the sweep, and the camera keeps moving through it. A
+subject one metre off the focal plane smears by
+
+```
+metres per recorded frame × Z/(D + Z) ÷ metres per lenslet
+```
+
+lenslets **inside a single frame** — the view mixed with its neighbour before the print ever gets to
+interlace them. Keep it comfortably under one. Halving the sweep speed halves it; so does doubling
+the frame rate. The script quotes the figure for a subject 1 m off the plane, and both ways out cost
+nothing but time.
 
 ### What a metre of world is worth on the sheet
 
@@ -813,11 +839,11 @@ metres of subject per lenslet  =  2·D·tan(fov/2) / (print width × LPI / 25.4)
 ```
 
 At 4 m with a 60° frame that is 4.62 m across 177 lenslets: **26 mm of world per lenslet**. Anything
-that shifts more than 26 mm between neighbouring shots has crossed a lenslet, and the
+that shifts more than 26 mm between neighbouring views has crossed a lenslet, and the
 [depth budget](#the-depth-budget-which-is-smaller-than-you-think) applies from there exactly as it
 does to a rendered subject: crisp under one lenslet, haze to about four, doubling past that.
 
-Two consequences worth having in mind before you walk a path:
+Two consequences worth having in mind before you record:
 
 - **A wider frame is the forgiving one.** Each lenslet covers more world, so the same camera step
   crosses fewer of them. Zooming in tightens the budget in proportion to `tan(fov/2)`. You pay for
@@ -826,23 +852,35 @@ Two consequences worth having in mind before you walk a path:
   only as `Z/(D + Z)`, so doubling the distance buys almost nothing unless you also re-frame.
 
 `--depth M` puts the question the other way round and answers it: _for this much scene behind the
-plane, how many shots do I actually need?_ Expect the answer to be larger than the number you had in
-mind — a 3 m room at a 60° frame wants dozens of stops, which is why the tool says so before you
-spend an evening walking one.
+plane, how many views do I actually need?_ Expect the answer to be larger than the number you had in
+mind — and to run into the other ceiling, which is the lens itself: a lenticule is `PPI / LPI` printed
+dots wide, so at 1440 PPI, 45 LPI and two dots a strip it can only ever show **16 views**. Past that
+the extra frames have nowhere to go, however cheap the recording made them. When the two numbers
+disagree, the answer is to frame wider, or to let the far half of the scene go to haze on purpose.
 
-### Taking the shots
+### Recording it, and getting the frames back
 
-1. Generate the path and load it in the in-game camera's **Dolly** mode.
+1. Generate the sweep and load it in the in-game camera's **Dolly** mode.
 2. Set the camera to the field of view you told the script about, and check the reported frame width
    against what you actually see. That number is the one assumption the script cannot verify for you.
-3. Walk the path, taking one photo at each stop. `--hold` sets how long the client spends on each
-   leg, so there is time to take the shot; `--shot-list` writes the stops out as text to tick off.
-4. Feed the photos into **Lenticular Print** (a 1D run) or **Lens Grid Print** (a grid) in the order
-   the script listed them — a grid runs row-major from `Left · Up`, which is the order the print node
-   names its cells, and a 1D run goes left eye first, which is the order it expects before it
-   reverses the frames for the lens.
+3. Start recording, then start the dolly. Note roughly when the camera begins to move — that is
+   `--start`, and it is the only number the second step needs from you.
+4. `npm run frames -- --video … --plan … --start …` pulls the frame at each view's timestamp, crops
+   it to the sheet's shape, and writes the views as a GIF in viewing order.
+5. Drop the GIF on an **Animation Input** and wire its Frames output into **Lenticular Print**. The
+   whole run travels on one wire and interlaces in the order it arrives, which is the order the sweep
+   was walked: left eye first, reversed by the print node for the lens.
 
-The file itself is the only part of this that depends on somebody else's format rather than on
+The GIF is written at one pixel per lenslet by default — 177 px at the defaults — because that is
+everything the print can resolve. `--width` raises it if you want something to look at rather than to
+print. Cropping defaults to the widest 4:3 rectangle the recording holds; `--aspect`, `--zoom` and
+`--offset` place it, and the sheet takes its proportions from whatever comes out.
+
+Neither script needs to know the recording's resolution: the crop is written as an ffmpeg expression
+in `iw`/`ih`, which ffmpeg resolves for itself. `--dry-run` prints the commands instead of running
+them, which is also the answer when ffmpeg lives on a different machine.
+
+The dolly file itself is the only part of this that depends on somebody else's format rather than on
 optics. If a client update ever changes the fields, export any path from the camera yourself and pass
 it as `--template`: every field it carries is copied onto each point, and only the geometry is
 overwritten.

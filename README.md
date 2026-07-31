@@ -120,11 +120,14 @@ time, with a progress bar on the node and **Cancel ✕** working between chunks.
 covers the calibration sheets in the print editor. Only a raster past 500 MP — two gigabytes of
 buffer — is turned down outright.
 
-**Views can also be photographed rather than rendered.** `npm run dolly` writes a **VRChat camera
-dolly path** that walks the camera across the lens's own viewing cone — one rotation repeated at
-every stop, because a camera that turns keystones every shot — and then reports what the scene can
-carry: how much world a lenslet is worth at your framing, how deep the scene may be before it hazes,
-and how many shots a given depth actually needs. See
+**Views can also be filmed rather than rendered.** `npm run dolly` writes a **VRChat camera dolly
+sweep** — one continuous take across the lens's own viewing cone, one rotation repeated at every
+point because a camera that turns keystones every frame, and no holds anywhere, so you record it in
+one pass rather than taking sixteen deliberate photographs. `npm run frames` then pulls the views out
+of the recording at their known timestamps, crops them to the sheet and writes a GIF that an
+**Animation Input** feeds straight into **Lenticular Print**. Both report what the scene can carry:
+how much world a lenslet is worth at your framing, how deep the scene may be before it hazes, how
+much a frame smears while the camera moves through it, and how many views a given depth needs. See
 [Shooting the views in a game world](docs/printed-lenses.md#shooting-the-views-in-a-game-world).
 
 **Model → Stereo Views** and **Model → Grid Views** feed the 1D and 2D cases from a mesh. Both render

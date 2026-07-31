@@ -20,7 +20,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:ui": "vitest --ui",
-    "dolly": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-node.mjs scripts/vrchat-dolly.ts"
+    "dolly": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-node.mjs scripts/vrchat-dolly.ts",
+    "frames": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-node.mjs scripts/vrchat-frames.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.3.5",
