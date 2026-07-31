@@ -54,19 +54,26 @@ export const CHUNK_PIXELS = 4_000_000;
 
 /** A render that needs the caller's consent before it runs. */
 export class OversizeOutputError extends Error {
-  constructor(
-    /** Which raster: 'Interlaced artwork' or 'Depth map'. */
-    readonly what: string,
-    readonly width: number,
-    readonly height: number,
-    /** How to make it smaller instead, if that is what the user would rather. */
-    readonly fix: string,
-    /** Chunks the render would be split into once allowed. */
-    readonly chunks: number,
-    message: string,
-  ) {
+  /** Which raster: 'Interlaced artwork' or 'Depth map'. */
+  readonly what: string;
+  readonly width: number;
+  readonly height: number;
+  /** How to make it smaller instead, if that is what the user would rather. */
+  readonly fix: string;
+  /** Chunks the render would be split into once allowed. */
+  readonly chunks: number;
+
+  // Fields assigned in the body rather than declared as constructor parameter
+  // properties: those are the one piece of TypeScript that cannot be stripped
+  // away, and this module is imported by scripts that Node runs directly.
+  constructor(what: string, width: number, height: number, fix: string, chunks: number, message: string) {
     super(message);
     this.name = 'OversizeOutputError';
+    this.what = what;
+    this.width = width;
+    this.height = height;
+    this.fix = fix;
+    this.chunks = chunks;
   }
 
   get pixels(): number {
