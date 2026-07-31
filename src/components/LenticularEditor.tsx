@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/store';
 import { platform } from '../lib/platform';
 import { downloadBlob } from '../lib/download';
+import { runChunked } from '../lib/chunked';
 import { encodeGray16Png } from '../lib/png16';
 import {
   calibrationValues,
@@ -18,16 +19,18 @@ import {
   radialInterlacedSize,
   radialSwitchViews,
   radialViews,
-  renderDepthMap,
-  renderGridDepthMap,
-  renderGridInterlaced,
-  renderInterlaced,
-  renderRadialDepthMap,
-  renderRadialInterlaced,
+  radialDepthMapChunks,
+  radialInterlaceChunks,
+  depthMapChunks,
+  gridDepthMapChunks,
+  gridInterlaceChunks,
+  interlaceChunks,
+  OversizeOutputError,
   stripsOffPixelGrid,
   switchFrames,
   clampRadialViews,
   type CalibrationParam,
+  type ChunkProgress,
   type CalibrationSpec,
   type DepthMapResult,
   type LenticularSettings,
@@ -60,6 +63,8 @@ const slug = (v: number) => String(Math.round(v * 1000) / 1000).replace('.', '-'
 interface PrintKind {
   /** Filename stem, e.g. `lenticular` or `lensgrid`. */
   slug: string;
+  /** The node this editor belongs to — oversize consent is held per node. */
+  nodeId: string;
   settings: LenticularSettings;
   /** Source images, in the order the renderer consumes them. */
   views: RasterImage[];
@@ -74,8 +79,11 @@ interface PrintKind {
   /** Physical gutter between calibration bands. */
   bandGapMm: number;
   artSize: OutputSize | null;
-  renderArt(views: RasterImage[], options: RenderOptions): RasterImage;
-  renderDepth(options: RenderOptions): DepthMapResult;
+  // Chunked, like the node's own run: a calibration sheet is the same size as
+  // the print and takes just as long, so it gets the same progress and the
+  // same "this is a big one" question rather than freezing the editor.
+  renderArt(views: RasterImage[], options: RenderOptions): Generator<ChunkProgress, RasterImage>;
+  renderDepth(options: RenderOptions): Generator<ChunkProgress, DepthMapResult>;
   /** Solid views that read as a hard flip, for the switch sheet. */
   switchViews(): RasterImage[];
 }
@@ -88,7 +96,10 @@ interface PrintKind {
  */
 function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) {
   const addToast = useStore((s) => s.addToast);
+  const requestOversize = useStore((s) => s.requestOversize);
+  const oversizeAllowed = useStore((s) => s.oversizeAllowed);
   const [busy, setBusy] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
 
   const { settings, views, ready } = kind;
   const geometry = lensGeometry(settings);
@@ -109,23 +120,54 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
     downloadBlob(new Blob([png as BlobPart], { type: 'image/png' }), name);
   };
 
-  const run = async (job: string, work: () => Promise<void>) => {
+  /** Render options with whatever the user has already agreed to. */
+  const withConsent = (options: RenderOptions): RenderOptions => ({
+    ...options,
+    allowOversize: oversizeAllowed(kind.nodeId),
+  });
+
+  /** Run one chunked render, reporting its chunks under the busy button. */
+  const drive = <T,>(gen: Generator<ChunkProgress, T>): Promise<T> =>
+    runChunked(gen, { onProgress: (message) => setProgress(message) });
+
+  /**
+   * A download job. An oversize raster stops the job and puts the question to
+   * the user instead of failing it — saying yes runs the very same job again,
+   * this time with consent in hand.
+   */
+  const run = (job: string, work: () => Promise<void>) => {
     if (busy) return;
     setBusy(job);
-    try {
-      // Yield once so the button's busy state paints before the render blocks.
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await work();
-    } catch (err) {
-      addToast('error', err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
+    void (async () => {
+      try {
+        // Yield once so the button's busy state paints before work starts.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await work();
+      } catch (err) {
+        if (err instanceof OversizeOutputError) {
+          requestOversize({
+            nodeId: kind.nodeId,
+            label: 'This sheet',
+            what: err.what,
+            width: err.width,
+            height: err.height,
+            chunks: err.chunks,
+            fix: err.fix,
+            retry: () => run(job, work),
+          });
+        } else {
+          addToast('error', err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        setBusy(null);
+        setProgress(null);
+      }
+    })();
   };
 
   const downloadMain = () =>
     run('depth', async () => {
-      const map = kind.renderDepth({});
+      const map = await drive(kind.renderDepth(withConsent({})));
       downloadDepth16(map, `${kind.slug}-depth16-${settings.lpi}lpi-${slug(settings.heightMm)}mm.png`);
     });
 
@@ -133,23 +175,25 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
     run(calib.param, async () => {
       const spec = calibrationSpec(calib);
       const values = calibrationValues(spec);
-      const options: RenderOptions = { calibration: spec, bandGapMm: kind.bandGapMm };
-      const art = kind.renderArt(views, options);
+      const options = withConsent({ calibration: spec, bandGapMm: kind.bandGapMm });
+      const art = await drive(kind.renderArt(views, options));
       const stem = `${kind.slug}-calib-${calib.param}-${slug(values[0])}-to-${slug(values[values.length - 1])}-${values.length}bands`;
       downloadBlob(await platform.encodePngBlob(art), `${stem}-interlaced.png`);
 
       // The same sheet with the artwork replaced by a hard white→black switch:
       // where the print flips, with none of the art's own detail in the way.
       // Forced onto the artwork's raster so the two sheets overlay exactly.
-      const switched = kind.renderArt(kind.switchViews(), {
-        ...options,
-        interlacedSize: { width: art.width, height: art.height },
-      });
+      const switched = await drive(
+        kind.renderArt(kind.switchViews(), {
+          ...options,
+          interlacedSize: { width: art.width, height: art.height },
+        }),
+      );
       downloadBlob(await platform.encodePngBlob(switched), `${stem}-switch.png`);
 
       // The depth scale rides in the filename: with auto height each LPI band
       // gets its own stack, so "what does white mean" changes per sheet.
-      const map = kind.renderDepth(options);
+      const map = await drive(kind.renderDepth(options));
       downloadDepth16(map, `${stem}-depth16-max${slug(map.scaleMm)}mm.png`);
     });
 
@@ -198,7 +242,7 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
       {kind.artNote}
       <div className="lenticular-actions">
         <button type="button" className="btn" disabled={!ready || !!busy} onClick={downloadMain}>
-          {busy === 'depth' ? 'Rendering…' : '16-bit gloss depth map'}
+          {busy === 'depth' ? (progress ?? 'Rendering…') : '16-bit gloss depth map'}
         </button>
       </div>
 
@@ -285,6 +329,7 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
       config={node.config}
       kind={{
         slug: 'lenticular',
+        nodeId,
         settings,
         views: frames,
         ready,
@@ -300,8 +345,8 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
         ) : null,
         bandGapMm: BAND_GAP_MM,
         artSize: ready ? interlacedSize(settings, frames) : null,
-        renderArt: (v, options) => renderInterlaced(v, settings, options),
-        renderDepth: (options) => renderDepthMap(frames, settings, options),
+        renderArt: (v, options) => interlaceChunks(v, settings, options),
+        renderDepth: (options) => depthMapChunks(frames, settings, options),
         switchViews: () => switchFrames(frames.length),
       }}
     />
@@ -341,6 +386,7 @@ export function RadialGridEditor({ nodeId }: { nodeId: string }) {
       config={node.config}
       kind={{
         slug: 'radial',
+        nodeId,
         settings,
         views: present,
         ready,
@@ -369,15 +415,17 @@ export function RadialGridEditor({ nodeId }: { nodeId: string }) {
         ),
         artNote: (
           <p className="lenticular-note">
-            The wedge edges are radial lines, so no orientation makes them run along the pixels and they
-            converge to a point at the centre of every lenslet. The artwork therefore always ships on the
-            printer&apos;s own {settings.ppi} PPI raster — the finest the print can resolve, spent where the
-            views separate. That convergence is the effect, not a defect: it is what makes all {n} views merge
-            when you look at the sheet square on.
+            The wedge edges are radial lines, so no orientation makes them run along the pixels: every pixel
+            of artwork up to the {settings.ppi} PPI cap buys a straighter seam. The size above is what the
+            wedges themselves need — two pixels across a wedge at the <em>rim</em>, where a wedge is widest —
+            so raise <em>Artwork px per wedge</em> under Advanced to spend towards that cap if the seams look
+            stepped. The wedges also converge to a point at the centre of every lenslet, and no raster can
+            hold that: it is the effect rather than a defect, and it is what makes all {n} views merge when
+            you look at the sheet square on.
           </p>
         ),
-        renderArt: (v, options) => renderRadialInterlaced(v, settings, options),
-        renderDepth: (options) => renderRadialDepthMap(present, settings, options),
+        renderArt: (v, options) => radialInterlaceChunks(v, settings, options),
+        renderDepth: (options) => radialDepthMapChunks(present, settings, options),
         switchViews: () => radialSwitchViews(n),
       }}
     />
@@ -418,6 +466,7 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
       config={node.config}
       kind={{
         slug: 'lensgrid',
+        nodeId,
         settings,
         views: present,
         ready,
@@ -451,13 +500,14 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
           </p>
         ) : (
           <p className="lenticular-note">
-            A square array on the axes tiles the artwork in whole pixels, so the minimal raster places every
-            tile edge exactly and a bigger one would buy nothing. Hex packing (or turning the array off the
-            axes) puts those edges on diagonals and moves the artwork onto the full {settings.ppi} PPI raster.
+            A square array on the axes tiles the artwork in whole pixels, so this raster places every tile
+            edge exactly and a bigger one would buy nothing. Hex packing (or turning the array off the axes)
+            puts those edges on diagonals, where more pixels — up to the {settings.ppi} PPI cap — do buy
+            something.
           </p>
         ),
-        renderArt: (v, options) => renderGridInterlaced(v, settings, options),
-        renderDepth: (options) => renderGridDepthMap(present, settings, options),
+        renderArt: (v, options) => gridInterlaceChunks(v, settings, options),
+        renderDepth: (options) => gridDepthMapChunks(present, settings, options),
         switchViews: () => gridSwitchViews(grid),
       }}
     />

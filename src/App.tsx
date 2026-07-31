@@ -4,6 +4,7 @@ import { Canvas } from './components/Canvas';
 import { PreviewModal } from './components/PreviewModal';
 import { SettingsModal } from './components/SettingsModal';
 import { HelpModal } from './components/HelpModal';
+import { OversizeModal } from './components/OversizeModal';
 import { Toasts } from './components/Toasts';
 import { escapeTarget, handleShortcut, type ShortcutEvent } from './components/keyboard';
 import { decodeGraphFromHash } from './lib/shareLink';
@@ -69,6 +70,7 @@ export default function App() {
       <PreviewModal />
       <SettingsModal />
       <HelpModal />
+      <OversizeModal />
       <Toasts />
     </div>
   );

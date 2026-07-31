@@ -2,7 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { createImage } from './image';
 import {
   MAX_OUTPUT_PIXELS,
+  MAX_OVERSIZE_PIXELS,
+  OversizeOutputError,
   calibrationValues,
+  chunkCount,
+  chunkRows,
+  depthMapChunks,
+  drainSync,
+  interlaceChunks,
+  lenticularChunks,
   depthPreview,
   describeGeometry,
   heightForViewAngle,
@@ -15,6 +23,7 @@ import {
   switchFrames,
   withCalibrationValue,
   type CalibrationParam,
+  type ChunkProgress,
   type CalibrationSpec,
   type LenticularSettings,
   type RenderOptions,
@@ -277,6 +286,102 @@ describe('renderLenticular — interlacing', () => {
       /Interlaced artwork would be/,
     );
     expect(MAX_OUTPUT_PIXELS).toBeGreaterThan(30_000_000);
+  });
+
+  it('throws something the caller can put to the user, not just a string', () => {
+    let thrown: unknown;
+    try {
+      renderLenticular([RED, BLUE], settings({ widthMm: 254, ppi: 1440 }));
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(OversizeOutputError);
+    const err = thrown as OversizeOutputError;
+    expect(err.what).toBe('Depth map');
+    expect(err.pixels).toBe(err.width * err.height);
+    expect(err.pixels).toBeGreaterThan(MAX_OUTPUT_PIXELS);
+    expect(err.pixels).toBeLessThan(MAX_OVERSIZE_PIXELS);
+    // The number the prompt offers: how many chunks the work splits into.
+    expect(err.chunks).toBe(chunkCount(err.width, err.height));
+    expect(err.chunks).toBeGreaterThan(1);
+    expect(err.fix).toMatch(/Reduce Width/);
+    expect(err.message).toMatch(/run it anyway, in \d+ chunks/);
+  });
+
+  it('goes ahead once the caller says the user agreed', () => {
+    // Same sheet, consent given: no longer refused. Pulling the first chunk is
+    // enough to prove the budget let it through — this test has no interest in
+    // waiting for the other 200 MP.
+    const gen = depthMapChunks([RED, BLUE], settings({ widthMm: 254, ppi: 1440 }), {
+      allowOversize: true,
+    });
+    expect(() => gen.next()).not.toThrow();
+    gen.return(undefined as never);
+  });
+
+  it('refuses outright past what a browser can hold, consent or not', () => {
+    const huge = settings({ widthMm: 50_000, ppi: 1440 });
+    expect(() => renderDepthMap([RED, BLUE], huge, { allowOversize: true })).toThrow(
+      /past what a browser can hold at all/,
+    );
+    // Not an OversizeOutputError: there is nothing to consent to.
+    expect(() => renderDepthMap([RED, BLUE], huge, { allowOversize: true })).not.toThrow(OversizeOutputError);
+    expect(MAX_OVERSIZE_PIXELS).toBeGreaterThan(MAX_OUTPUT_PIXELS);
+  });
+});
+
+describe('chunked rendering', () => {
+  // The real chunk is 4 MP; these tests set a tiny one so the same code path
+  // splits a 100×100 render into bands, and the suite stays a suite.
+  const chunked: RenderOptions = { chunkPixels: 3000 };
+
+  const drain = <T>(gen: Generator<ChunkProgress, T>) => {
+    const seen: ChunkProgress[] = [];
+    let step = gen.next();
+    while (!step.done) {
+      seen.push(step.value);
+      step = gen.next();
+    }
+    return { seen, value: step.value };
+  };
+
+  it('splits a pass into whole bands of rows', () => {
+    expect(chunkRows(1000)).toBe(4000); // 4 MP a chunk at the default
+    expect(chunkCount(1000, 4000)).toBe(1);
+    expect(chunkCount(1000, 4001)).toBe(2);
+    expect(chunkCount(1000, 12_000)).toBe(3);
+    // Never zero rows, however wide the raster.
+    expect(chunkRows(10_000_000)).toBe(1);
+    // 30 rows a chunk at 100 px wide, so a 100-row raster takes four.
+    expect(chunkCount(100, 100, 3000)).toBe(4);
+  });
+
+  it('reports every chunk, in order, and ends on the last one', () => {
+    const s = settings();
+    const { seen, value } = drain(depthMapChunks([RED, BLUE], s, chunked));
+    expect(seen).toHaveLength(chunkCount(100, 100, 3000));
+    expect(seen.map((p) => p.done)).toEqual(seen.map((_, i) => i + 1));
+    expect(new Set(seen.map((p) => p.total))).toEqual(new Set([seen.length]));
+    expect(seen[0].what).toBe('Depth map');
+    // …and the raster it returns is the one the plain call gives.
+    expect(value.depth).toEqual(renderDepthMap([RED, BLUE], s).depth);
+  });
+
+  it('counts both halves of a whole print as one job', () => {
+    const { seen } = drain(lenticularChunks([RED, BLUE], settings(), chunked));
+    // One total across the run, counting up without resetting at the handover
+    // from artwork to depth map.
+    expect(new Set(seen.map((p) => p.total)).size).toBe(1);
+    expect(seen.map((p) => p.done)).toEqual(seen.map((_, i) => i + 1));
+    expect(seen[seen.length - 1].done).toBe(seen[0].total);
+    expect(new Set(seen.map((p) => p.what))).toEqual(new Set(['Interlaced artwork', 'Depth map']));
+  });
+
+  it('gives the same pixels chunked as in one pass', () => {
+    const s = settings();
+    expect(drainSync(interlaceChunks([RED, BLUE], s, chunked)).data).toEqual(
+      renderInterlaced([RED, BLUE], s).data,
+    );
   });
 });
 

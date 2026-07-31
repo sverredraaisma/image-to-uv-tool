@@ -6,11 +6,12 @@ import {
   depthPreview,
   describeGeometry,
   interlacedSize,
+  lenticularChunks,
   lensGeometry,
   outputSize,
-  renderLenticular,
   type LenticularSettings,
 } from '../lib/lenticular';
+import { runChunked } from '../lib/chunked';
 import { asImages, num } from './helpers';
 
 /** Read the seven print settings out of a node's config. */
@@ -121,7 +122,7 @@ export const lenticularNode: NodeDefinition = {
     // different viewing cones, and coarse bands may not focus at all.
     lpiAutoHeight: true,
   }),
-  compute: async ({ inputs, config, onProgress }) => {
+  compute: async ({ inputs, config, onProgress, signal, allowOversize }) => {
     const frames = asImages(inputs.frames);
     if (frames.length < 2) {
       throw new Error(`Lenticular print needs at least 2 images (got ${frames.length}).`);
@@ -130,10 +131,13 @@ export const lenticularNode: NodeDefinition = {
     const depthSize = outputSize(settings, frames[0]);
     const artSize = interlacedSize(settings, frames);
     onProgress?.(`Interlacing ${frames.length} frames, lens map at ${depthSize.width}×${depthSize.height}…`);
-    // Let the spinner paint before the render locks the main thread.
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const render = renderLenticular(frames, settings);
+    // Chunked: the run hands the UI back between bands of rows, so a big sheet
+    // shows a progress bar and can be cancelled instead of freezing the tab.
+    const render = await runChunked(lenticularChunks(frames, settings, { allowOversize }), {
+      onProgress,
+      signal,
+    });
     return {
       interlaced: render.interlaced,
       depth: depthPreview(render),

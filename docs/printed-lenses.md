@@ -27,6 +27,7 @@ licensing [at the end](#prior-art-and-licence).
 - [How wide the view is](#how-wide-the-view-is)
 - [Interlacing](#interlacing)
 - [Two rasters, two jobs](#two-rasters-two-jobs)
+- [How big is too big](#how-big-is-too-big)
 - [Why the relief needs 16 bits](#why-the-relief-needs-16-bits)
 - [Angle and phase](#angle-and-phase)
 - [The two-dimensional version](#the-two-dimensional-version)
@@ -269,23 +270,63 @@ It doesn't average out, either. Every lens down the sheet is misassigned in the 
 reads as a ragged edge with a long, regular period rather than as noise — and a strip under a lens is a
 whole view, so the reading eye gets the wrong one of them along that boundary.
 
-More pixels are the only cure, and there is exactly one sensible amount: **the printer's own raster**.
-That is as fine as the staircase can ever be made, because past it the extra pixels never reach the
-paper. So a sheet whose strips are diagonal ships its artwork at PPI, the same size as its relief; a
-sheet whose strips are axis-aligned keeps the small raster, where the saving is real and free.
+More pixels are the only cure, and there is exactly one amount past which they stop helping: **the
+printer's own raster**. Beyond it the extra pixels never reach the paper, so that is the ceiling —
+for a diagonal sheet and an axis-aligned one alike.
 
-| Sheet                                           | Artwork raster                |
-| ----------------------------------------------- | ----------------------------- |
-| Lenticular at 0° or 90°                         | minimal (1063 px at defaults) |
-| Lenticular at any other angle                   | PPI (5669 px)                 |
-| 2D grid, square packing, 0° or 90°              | minimal                       |
-| 2D grid, square packing, any other angle        | PPI                           |
-| 2D grid, [hexagonal packing](#packing-the-caps) | PPI, at any angle             |
+It is a ceiling and not a destination, though, and that distinction is the whole of the sizing rule:
 
-Hex is in that last row by construction: staggering every other row is what makes the packing dense,
-and it is also what puts the tile edges on diagonals. You don't get one without the other.
+```
+artwork width = min( PPI raster,  max( interlace floor,  sharpest source ) )
+```
 
-Both print nodes say which raster they chose, and why, in their geometry readout.
+So the artwork is as big as the interlace and your own images need, and never bigger than the press
+can print. A diagonal sheet is welcome to more pixels than that — its staircase is as fine as the
+raster it is drawn on — but it does not get them behind your back, because the difference between a
+1063-pixel artwork and a 5669-pixel one is a factor of 28 in memory, render time and file size, and
+that is a decision rather than a detail. **Artwork px per strip** (or per view tile) is the dial:
+raise it and the raster climbs, up to the cap.
+
+| Sheet                                            | Artwork raster at the defaults         |
+| ------------------------------------------------ | -------------------------------------- |
+| Lenticular, 3 views, any angle                   | 1063 px — every edge placed to ¼ strip |
+| …same, with Artwork px per strip at 8            | 4252 px — placed to a sixteenth        |
+| 2D grid, 3 × 3, square packing                   | 1063 px                                |
+| 2D grid, 3 × 3, [hex packing](#packing-the-caps) | 1228 px (the √3/2 row spacing)         |
+| 2D grid, 15 × 15, hex                            | 5669 px — the cap; it wanted 6138      |
+
+Both print nodes report which raster they landed on, whether that is the cap, and — when the edges
+are diagonal — that spending more would still buy something.
+
+The [radial array](#the-two-dimensional-version) is sized the same way, and it is the one where
+spending up to the cap is most often worth it. A wedge boundary is a radial line: there is no
+orientation at which it runs along the pixels and no raster at which it is free, and the wedges
+converge to a point at every lenslet centre. Its floor puts `Artwork px per wedge` across a wedge at
+the **rim**, where a wedge is widest — 26 px for a four-view ring at the test settings, against the
+100 px the press could print — so if the seams look stepped, that setting is the one to raise.
+
+### How big is too big
+
+Those rasters grow with the square of the sheet: a 100 mm print at 1440 PPI is 24 MP of relief, a
+300 mm one is 217 MP, and every pixel of artwork costs four bytes with two more for the relief. So
+there is a line, and it sits at **80 MP** per raster.
+
+The line is not a refusal, though. Over it the tool stops, says how big the raster would be and how
+many chunks the work divides into, and lets you decide — because "300 mm at 1440 PPI" is sometimes
+exactly what you meant. Say yes and the render runs a band of rows at a time: a progress bar counts
+the chunks off on the node, the tab stays responsive between them, and Cancel still works. What it
+cannot do is conjure memory, so there is a second line at 500 MP that nothing gets past — a raster
+that size is a two-gigabyte buffer, and the honest answer is a number rather than a dead tab.
+
+The same question comes up for the calibration sheets in the print editor, which are full-size prints
+in their own right, and it is asked the same way.
+
+Chunking is not only for the oversize case. Every print render runs in bands of rows whatever its
+size, and the two model renderers run **one view per chunk** — a 15 × 15 grid is 225 passes over the
+mesh, and at half a second each that is two minutes in which nothing would paint and Cancel would
+not work. A node mapped over an animation does the same, one frame per chunk. The rule throughout is
+that no single chunk holds the main thread for long, so the progress figure moves and the tab stays
+alive.
 
 ---
 
@@ -963,22 +1004,24 @@ Worth being straight about:
 
 ## Where the code is
 
-| Topic                    | Implementation                                                                            |
-| ------------------------ | ----------------------------------------------------------------------------------------- |
-| The lens solve           | `lensGeometry()`, `heightForViewAngle()` in `src/lib/lenticular.ts`                       |
-| Interlacing              | `renderInterlaced()`                                                                      |
-| The two rasters          | `interlacedSize()`, `outputSize()`                                                        |
-| The relief map           | `renderDepthMap()`                                                                        |
-| 16-bit PNG               | `encodeGray16Png()` in `src/lib/png16.ts`                                                 |
-| The 2D grid              | `renderGridInterlaced()`, `renderGridDepthMap()`, `gridCellLabel()`                       |
-| Square vs hex packing    | `latticeAt()`, `HEX_ROW_SPACING`, `packingFill()`                                         |
-| Calibration              | `calibrationValues()`, `withCalibrationValue()`, `switchFrames()`, `gridSwitchViews()`    |
-| Rendering from a model   | `src/lib/render3d.ts` — `projectToSheet()`, `eyeOffsetsMm()`, `disparityPerStep()`        |
-| The window               | `renderViewSequence()`, `disparityAtDepth()`, `prepareVertices()`'s `fitAtZMm`            |
-| Reading a mesh in        | `parseMesh()` in `mesh.ts` → `parseStl()` / `parseObj()`                                  |
-| The nodes                | `src/nodes/lenticular.ts`, `lensGrid.ts`, `radialGrid.ts`, `model3d.ts`, `modelStereo.ts` |
-| The numbers on this page | `src/lib/lenticular.test.ts`                                                              |
-| The figures              | `docs/figures.py` — run `python docs/figures.py` to redraw them                           |
+| Topic                    | Implementation                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| The lens solve           | `lensGeometry()`, `heightForViewAngle()` in `src/lib/lenticular.ts`                                |
+| Interlacing              | `renderInterlaced()`                                                                               |
+| The two rasters          | `interlacedSize()`, `outputSize()`                                                                 |
+| The relief map           | `renderDepthMap()`                                                                                 |
+| 16-bit PNG               | `encodeGray16Png()` in `src/lib/png16.ts`                                                          |
+| The 2D grid              | `renderGridInterlaced()`, `renderGridDepthMap()`, `gridCellLabel()`                                |
+| Grid size and its ports  | `MIN_GRID`/`MAX_GRID`/`clampGrid()`, `lensGridInputs()` in `src/engine/ports.ts`                   |
+| Oversize renders         | `MAX_OUTPUT_PIXELS`, `OversizeOutputError`, `*Chunks()` generators, `runChunked()` in `chunked.ts` |
+| Square vs hex packing    | `latticeAt()`, `HEX_ROW_SPACING`, `packingFill()`                                                  |
+| Calibration              | `calibrationValues()`, `withCalibrationValue()`, `switchFrames()`, `gridSwitchViews()`             |
+| Rendering from a model   | `src/lib/render3d.ts` — `projectToSheet()`, `eyeOffsetsMm()`, `disparityPerStep()`                 |
+| The window               | `renderViewGrid()`, `renderViewSequence()`, `disparityAtDepth()`, `fitAtZMm`                       |
+| Reading a mesh in        | `parseMesh()` in `mesh.ts` → `parseStl()` / `parseObj()`                                           |
+| The nodes                | `src/nodes/lenticular.ts`, `lensGrid.ts`, `radialGrid.ts`, `model3d.ts`, `modelStereo.ts`          |
+| The numbers on this page | `src/lib/lenticular.test.ts`                                                                       |
+| The figures              | `docs/figures.py` — run `python docs/figures.py` to redraw them                                    |
 
 ---
 

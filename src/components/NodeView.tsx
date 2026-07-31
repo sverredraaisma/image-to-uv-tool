@@ -272,7 +272,25 @@ export function NodeView({ id, selected }: NodeProps) {
             </button>
           ))}
 
-        {rt?.progress && <div className="node-progress">{rt.progress}</div>}
+        {rt?.progress && (
+          <div className="node-progress">
+            {rt.progress}
+            {rt.progressFraction != null && (
+              <div
+                className="node-progress-bar"
+                role="progressbar"
+                aria-valuenow={Math.round(rt.progressFraction * 100)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className="node-progress-fill"
+                  style={{ width: `${Math.min(100, Math.max(0, rt.progressFraction * 100))}%` }}
+                />
+              </div>
+            )}
+          </div>
+        )}
         {rt?.error && (
           <div className="node-error-msg" title={rt.error}>
             {rt.error}

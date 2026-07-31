@@ -125,8 +125,17 @@ export interface ComputeContext {
   openRouterKey: string | null;
   proxyUrl: string | null;
   signal?: AbortSignal;
-  /** Report human-readable progress (e.g. "polling prediction…"). */
-  onProgress?: (message: string) => void;
+  /**
+   * Report human-readable progress (e.g. "polling prediction…"), optionally
+   * with a 0–1 fraction of the whole job, which draws a bar on the node.
+   */
+  onProgress?: (message: string, fraction?: number) => void;
+  /**
+   * The user has been shown how big this node's output would be and has agreed
+   * to wait for it. Set for one run at a time by the oversize prompt; a node
+   * that can produce a raster over the usual limit passes it to its renderer.
+   */
+  allowOversize?: boolean;
 }
 
 /** Output values keyed by output port id. */
@@ -198,6 +207,8 @@ export interface NodeRuntime {
   outputs: ComputeResult;
   error?: string;
   progress?: string;
+  /** 0–1 through a chunked run, when the node knows how much is left. */
+  progressFraction?: number;
 }
 
 export interface SavedGraph {
