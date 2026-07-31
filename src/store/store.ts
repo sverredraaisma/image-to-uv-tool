@@ -31,6 +31,7 @@ import { cloneFragment } from '../engine/clone';
 import { autoLayout } from '../engine/autoLayout';
 import { bypassOutputs, findReadyAutoNodes, gatherInputs } from '../engine/schedule';
 import { computeMaybeMapped } from '../engine/sequenceMap';
+import { OversizeOutputError } from '../lib/lenticular';
 import { platform } from '../lib/platform';
 import { isBlobRef } from '../lib/blobStore';
 import { createSafeStorage } from './safeStorage';
@@ -80,6 +81,14 @@ let previewToken = 0;
 const runControllers = new Map<string, AbortController>();
 
 /**
+ * Nodes the user has agreed to render oversize. Module-scoped because it is
+ * consent, not state anyone should be able to save, share or undo into: it is
+ * dropped the moment the node's settings change, since the answer was about the
+ * size those settings produced and nothing else.
+ */
+const oversizeConsent = new Set<string>();
+
+/**
  * Abort and forget every in-flight run. Called whenever the whole graph is
  * swapped out (undo/redo/load/reset/clear). After this, a still-pending run is
  * no longer the "current" controller for its node, so its (now stale) result is
@@ -111,6 +120,28 @@ export interface PreviewState {
   loading?: boolean;
   /** Set if the preview could not be rendered (e.g. an unrun manual upstream). */
   error?: string;
+}
+
+/**
+ * A render the tool has stopped short of, because the raster it would build is
+ * over {@link MAX_OUTPUT_PIXELS} and the user might not have meant it. Holding
+ * `retry` here is what lets one dialog serve both a node run and an editor
+ * download: whoever asked the question knows how to do the work.
+ */
+export interface OversizeRequest {
+  nodeId: string;
+  /** Node label, for the dialog's title. */
+  label: string;
+  /** Which raster: 'Interlaced artwork' or 'Depth map'. */
+  what: string;
+  width: number;
+  height: number;
+  /** How many chunks the render will be split into. */
+  chunks: number;
+  /** What to change instead, if the answer is no. */
+  fix: string;
+  /** Do the work, now that consent has been given. */
+  retry: () => void;
 }
 
 export type ToastType = 'error' | 'success' | 'info';
@@ -236,6 +267,11 @@ export interface StoreState {
    */
   helpNodeType: string | null;
   preview: PreviewState | null;
+  /**
+   * The oversize prompt: a render whose output is over the "just do it" limit,
+   * waiting for the user to say whether to spend the time on it. Runtime-only.
+   */
+  oversize: OversizeRequest | null;
   toasts: Toast[];
   /** Bumped by autoFormat so the canvas can re-fit the view. Runtime-only. */
   arrangeNonce: number;
@@ -302,6 +338,16 @@ export interface StoreState {
    *  full resolution, reusing cached manual/up-to-date outputs. */
   renderNodeOutput: (id: string) => Promise<void>;
   closePreview: () => void;
+
+  // oversize consent
+  /** Put the "this is a big one" question to the user. */
+  requestOversize: (request: OversizeRequest) => void;
+  /** Agree: remember the consent for that node and start the work again. */
+  confirmOversize: () => void;
+  /** Decline: forget the question and leave the node as it was. */
+  dismissOversize: () => void;
+  /** Has this node been given the go-ahead for an oversize render? */
+  oversizeAllowed: (nodeId: string) => boolean;
 
   // toasts
   addToast: (type: ToastType, message: string) => void;
@@ -382,6 +428,7 @@ export const useStore = create<StoreState>()(
       editorNodeId: null,
       helpNodeType: null,
       preview: null,
+      oversize: null,
       toasts: [],
       arrangeNonce: 0,
       editStack: [],
@@ -593,6 +640,9 @@ export const useStore = create<StoreState>()(
       },
 
       updateNodeConfig: (id, patch) => {
+        // Consent was for the size the old settings produced. New settings, new
+        // question — otherwise one "yes" quietly covers every later change.
+        oversizeConsent.delete(id);
         set((s) => ({
           nodes: s.nodes.map((n) => (n.id === id ? { ...n, config: { ...n.config, ...patch } } : n)),
         }));
@@ -806,6 +856,20 @@ export const useStore = create<StoreState>()(
         set({ preview: null });
       },
 
+      requestOversize: (request) => set({ oversize: request }),
+
+      confirmOversize: () => {
+        const request = get().oversize;
+        if (!request) return;
+        oversizeConsent.add(request.nodeId);
+        set({ oversize: null });
+        request.retry();
+      },
+
+      dismissOversize: () => set({ oversize: null }),
+
+      oversizeAllowed: (nodeId) => oversizeConsent.has(nodeId),
+
       addToast: (type, message) =>
         // Keep only the most recent toasts so an error flood can't grow the
         // array (and the DOM) without bound.
@@ -872,13 +936,18 @@ export const useStore = create<StoreState>()(
               openRouterKey: get().openRouterKey || null,
               proxyUrl: get().proxyUrl || null,
               signal: controller.signal,
-              onProgress: (message) =>
+              onProgress: (message, fraction) =>
                 set((st) => ({
                   runtime: {
                     ...st.runtime,
-                    [id]: { ...(st.runtime[id] ?? defaultRuntime()), progress: message },
+                    [id]: {
+                      ...(st.runtime[id] ?? defaultRuntime()),
+                      progress: message,
+                      progressFraction: fraction,
+                    },
                   },
                 })),
+              allowOversize: oversizeConsent.has(id),
             };
             // Once per frame when a Sequence is wired into an image input, so
             // every ordinary image node works on an animation too.
@@ -898,7 +967,12 @@ export const useStore = create<StoreState>()(
             set((st) => ({
               runtime: {
                 ...st.runtime,
-                [id]: { ...(st.runtime[id] ?? defaultRuntime()), status: 'outOfDate', progress: undefined },
+                [id]: {
+                  ...(st.runtime[id] ?? defaultRuntime()),
+                  status: 'outOfDate',
+                  progress: undefined,
+                  progressFraction: undefined,
+                },
               },
             }));
             return;
@@ -941,9 +1015,26 @@ export const useStore = create<StoreState>()(
                 status: 'error',
                 error: message,
                 progress: undefined,
+                progressFraction: undefined,
               },
             },
           }));
+          // An output over the size limit is a question, not a failure: the node
+          // sits in error with the numbers on it, and the prompt offers to run
+          // it anyway in chunks. Only ask if the run was the current one.
+          if (err instanceof OversizeOutputError) {
+            get().requestOversize({
+              nodeId: id,
+              label: def.label,
+              what: err.what,
+              width: err.width,
+              height: err.height,
+              chunks: err.chunks,
+              fix: err.fix,
+              retry: () => void get().runNode(id),
+            });
+            return;
+          }
           get().addToast('error', `${def.label}: ${message}`);
         } finally {
           if (runControllers.get(id) === controller) runControllers.delete(id);

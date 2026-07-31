@@ -5,6 +5,8 @@
 import type { ComputeContext, NodeConfig, NodeDefinition, RasterImage } from '../types';
 import {
   DEFAULT_GRID,
+  MAX_GRID,
+  MIN_GRID,
   clampGrid,
   clampPacking,
   depthPreview,
@@ -12,11 +14,12 @@ import {
   gridCellCounts,
   gridInterlacedSize,
   lensGeometry,
+  lensGridChunks,
   outputSize,
-  renderLensGrid,
   type LensGridSettings,
 } from '../lib/lenticular';
-import { lensGridCellInputs, lensGridInputs } from '../engine/ports';
+import { runChunked } from '../lib/chunked';
+import { MAX_CELL_PORT_GRID, lensGridCellSlots, lensGridInputs, summariseMissing } from '../engine/ports';
 import { settingsFromConfig } from './lenticular';
 import { asImage, asImages, bool, num } from './helpers';
 
@@ -32,11 +35,12 @@ export function gridSettingsFromConfig(config: NodeConfig): LensGridSettings {
 }
 
 /**
- * Views in port order, or the labels of the cells still unconnected.
+ * Views in cell order, or the labels of the cells still unconnected.
  *
  * A Sequence on the `views` port supplies the whole grid at once — that is how
- * Model → Grid Views feeds this node, and dragging 36 edges for a 6×6 by hand
- * would be absurd. Individual cell ports win where both are present, so you can
+ * Model → Grid Views feeds this node, and dragging 225 edges for a 15×15 by
+ * hand would be absurd; past 4×4 the cell ports are not even offered. Where a
+ * cell does have a port and something is wired to it, that wins, so you can
  * wire the sequence and then override one view with a retouched image.
  */
 export function gatherViews(
@@ -46,7 +50,7 @@ export function gatherViews(
   const bundled = asImages(inputs.views);
   const missing: string[] = [];
   const views: RasterImage[] = [];
-  lensGridCellInputs(config).forEach((port, i) => {
+  lensGridCellSlots(config).forEach((port, i) => {
     const img = asImage(inputs[port.id]) ?? bundled[i];
     if (img) views.push(img);
     else missing.push(port.label);
@@ -62,7 +66,8 @@ export const lensGridNode: NodeDefinition = {
     'Interlace a grid of views under a 2D lens array (rows and columns of lenslets), so the print ' +
     'moves both left/right and up/down. Every input is named for where it is viewed from relative to ' +
     'head-on — Left · Up, Centre, Right · Down; or feed all of them down one wire from Model → Grid ' +
-    'Views. Same optics and calibration sheets as Lenticular Print; ' +
+    'Views. Grids up to 4×4 get a port per cell; bigger ones, up to 15×15, take the whole set on the ' +
+    'All views wire instead. Same optics and calibration sheets as Lenticular Print; ' +
     'a grid of N gives N² views, each resolving to one pixel per lenslet. Lenslets pack hexagonally by ' +
     'default (the densest arrangement, ~15% more lenses and less flat sheet than a square grid) — switch ' +
     'to Square grid to line them up in rows and columns instead. Manual: click Run.',
@@ -77,7 +82,7 @@ export const lensGridNode: NodeDefinition = {
     { id: 'info', label: 'Info', type: 'text' },
   ],
   configFields: [
-    { kind: 'number', key: 'grid', label: 'Grid (N × N views)', min: 2, max: 6, step: 1 },
+    { kind: 'number', key: 'grid', label: 'Grid (N × N views)', min: MIN_GRID, max: MAX_GRID, step: 1 },
     {
       kind: 'select',
       key: 'packing',
@@ -168,12 +173,15 @@ export const lensGridNode: NodeDefinition = {
     lpiMax: 50,
     lpiAutoHeight: true,
   }),
-  compute: async ({ inputs, config, onProgress }) => {
+  compute: async ({ inputs, config, onProgress, signal, allowOversize }) => {
     const gathered = gatherViews(inputs, config);
     if ('missing' in gathered) {
       const n = clampGrid(num(config.grid, DEFAULT_GRID));
       throw new Error(
-        `A ${n}×${n} lens grid needs all ${n * n} views. Missing: ${gathered.missing.join(', ')}.`,
+        `A ${n}×${n} lens grid needs all ${n * n} views. Missing: ${summariseMissing(gathered.missing)}.` +
+          (n > MAX_CELL_PORT_GRID
+            ? ` A grid this big has no per-cell inputs — feed all ${n * n} down the All views wire.`
+            : ''),
       );
     }
     const settings = gridSettingsFromConfig(config);
@@ -183,10 +191,12 @@ export const lensGridNode: NodeDefinition = {
       `Interlacing ${gathered.length} views at ${artSize.width}×${artSize.height}, ` +
         `lens map at ${depthSize.width}×${depthSize.height}…`,
     );
-    // Let the spinner paint before the render locks the main thread.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const render = renderLensGrid(gathered, settings);
+    // Chunked: the run hands the UI back between bands of rows, so a big sheet
+    // shows a progress bar and can be cancelled instead of freezing the tab.
+    const render = await runChunked(lensGridChunks(gathered, settings, { allowOversize }), {
+      onProgress,
+      signal,
+    });
     return {
       interlaced: render.interlaced,
       depth: depthPreview(render),

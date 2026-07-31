@@ -3,6 +3,7 @@ import { useStore } from './store';
 import { registerNode } from '../engine/registry';
 import { asText } from '../nodes/helpers';
 import { createImage } from '../lib/image';
+import { OversizeOutputError } from '../lib/lenticular';
 import type { NodeDefinition, RasterImage, SequenceValue } from '../types';
 
 // --- Synthetic test nodes (unique "test.*" types so they don't clash) -------
@@ -139,6 +140,28 @@ const shiftNode: NodeDefinition = {
   },
 };
 
+/**
+ * Stands in for a print node: it refuses to produce its oversize output until
+ * the run is told the user has agreed, and reports chunked progress when it does.
+ */
+const oversizeNode: NodeDefinition = {
+  type: 'test.oversize',
+  label: 'Huge',
+  category: 'test',
+  autoRun: false,
+  inputs: [],
+  outputs: [{ id: 'out', label: 'out', type: 'text' }],
+  defaultConfig: () => ({}),
+  compute: async ({ allowOversize, onProgress }) => {
+    bump('oversize');
+    if (!allowOversize) {
+      throw new OversizeOutputError('Depth map', 20_000, 20_000, 'Reduce Width (mm) or PPI', 100, 'too big');
+    }
+    onProgress?.('Depth map — chunk 50 of 100', 0.5);
+    return { out: { kind: 'text', text: 'rendered' } };
+  },
+};
+
 [
   constNode,
   passNode,
@@ -149,6 +172,7 @@ const shiftNode: NodeDefinition = {
   throwingNode,
   sequenceSourceNode,
   shiftNode,
+  oversizeNode,
 ].forEach(registerNode);
 
 const store = () => useStore.getState();
@@ -166,6 +190,7 @@ beforeEach(() => {
     selectedNodeId: null,
     editorNodeId: null,
     preview: null,
+    oversize: null,
     toasts: [],
     history: [],
     future: [],
@@ -756,5 +781,72 @@ describe('robustness (§2.3)', () => {
     expect(out.frames.map((f) => f.data[0])).toEqual([11, 21, 31]);
     expect(out.delaysMs).toEqual([40, 40, 40]);
     expect(runCounts.shift).toBe(3); // once per frame, not once for the first
+  });
+});
+
+describe('oversize consent', () => {
+  it('asks instead of just failing, with the numbers the user needs', async () => {
+    const id = store().addNode('test.oversize');
+    await store().runNode(id);
+    // Still an error on the node — nothing was produced — but the question is
+    // now on screen rather than only in a toast.
+    expect(store().runtime[id].status).toBe('error');
+    expect(store().oversize).toMatchObject({
+      nodeId: id,
+      label: 'Huge',
+      what: 'Depth map',
+      width: 20_000,
+      height: 20_000,
+      chunks: 100,
+    });
+    // …and it is a question, not a failure, so it does not also shout.
+    expect(store().toasts).toHaveLength(0);
+  });
+
+  it('runs the work again with consent when the user agrees', async () => {
+    const id = store().addNode('test.oversize');
+    await store().runNode(id);
+    expect(store().oversizeAllowed(id)).toBe(false);
+
+    store().confirmOversize();
+    expect(store().oversize).toBeNull();
+    expect(store().oversizeAllowed(id)).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(store().runtime[id].status).toBe('upToDate');
+    expect((store().runtime[id].outputs.out as { text: string }).text).toBe('rendered');
+    expect(runCounts.oversize).toBe(2); // refused once, then run
+  });
+
+  it('leaves the node alone when the user declines', async () => {
+    const id = store().addNode('test.oversize');
+    await store().runNode(id);
+    store().dismissOversize();
+    expect(store().oversize).toBeNull();
+    expect(store().oversizeAllowed(id)).toBe(false);
+    expect(store().runtime[id].status).toBe('error');
+    expect(runCounts.oversize).toBe(1);
+  });
+
+  it('forgets the consent when the settings that sized it change', async () => {
+    const id = store().addNode('test.oversize');
+    await store().runNode(id);
+    store().confirmOversize();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(store().oversizeAllowed(id)).toBe(true);
+
+    store().updateNodeConfig(id, { widthMm: 900 });
+    expect(store().oversizeAllowed(id)).toBe(false);
+  });
+
+  it('puts the chunk progress on the node, fraction and all', async () => {
+    const id = store().addNode('test.oversize');
+    await store().runNode(id);
+    store().confirmOversize();
+    // Caught mid-run: the node carries the message and how far along it is.
+    expect(store().runtime[id].progress).toBe('Depth map — chunk 50 of 100');
+    expect(store().runtime[id].progressFraction).toBe(0.5);
+    await new Promise((r) => setTimeout(r, 0));
+    // …and both are cleared once it finishes.
+    expect(store().runtime[id].progress).toBeUndefined();
   });
 });

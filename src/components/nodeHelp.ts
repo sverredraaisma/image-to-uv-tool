@@ -929,13 +929,14 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     ],
     tips: [
       'Frames must fit one lenticule: PPI ÷ LPI ÷ strip samples. At 1440 PPI and 45 LPI that is 32 frames at one sample each.',
-      'The depth map is on the PPI raster (it is the lens); the interlaced artwork ships at the smallest raster that keeps the interlace — scale it to the sheet at print time.',
+      'The depth map is on the PPI raster (it is the lens); the interlaced artwork ships at the smallest raster that keeps the interlace and your sources, and never more than the press can print — scale it to the sheet at print time. Turning the array puts the strip edges on diagonals, where more pixels do buy sharper edges: raise Artwork px per strip, up to that PPI cap.',
       'Manual node: a 100 mm sheet at 1440 PPI is a ~32 MP render, so it only runs when you press Run ▶.',
+      'A sheet whose raster comes out over 80 MP is not refused — the tool tells you how big it would be and how many chunks it would take, and you decide. Say yes and it renders a band of rows at a time, with a progress bar on the node and Cancel ✕ working between chunks. The same goes for the calibration sheets in the editor.',
     ],
   },
   lensGrid: {
     summary:
-      'The 2D sibling of Lenticular Print: rows *and* columns of lenslets, so the image moves left/right and up/down. A grid of N gives N² views, and the input ports appear and disappear with the grid setting.',
+      'The 2D sibling of Lenticular Print: rows *and* columns of lenslets, so the image moves left/right and up/down. A grid of N gives N² views, from 2×2 up to 15×15. Up to 4×4 the input ports appear and disappear with the grid setting; past that the whole set arrives on the All views wire.',
     uses: [
       {
         title: 'Look-around portrait',
@@ -948,8 +949,11 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       },
     ],
     tips: [
-      'Each view resolves to a single pixel per lenslet, so views cost resolution fast — start at grid 2 or 3.',
-      'Ports are named for where the view is seen from: Left · Up, Centre (neutral), Right · Down.',
+      'Each view resolves to a single pixel per lenslet whatever the grid size, so more views cost artwork raster and light per view rather than sharpness — start at grid 2 or 3 by hand, and go large only when a renderer is feeding the wire.',
+      'What caps the grid is the printed dot: the lenslet’s own pixels divide by N, and under about two dots per view tile the views bleed together at every angle instead of switching. Info warns when that happens — at 1440 PPI and 45 LPI a 15×15 is just inside it.',
+      'Ports are named for where the view is seen from: Left · Up, Centre (neutral), Right · Down — and Left 7 · Up 7 out at the corners of a big grid. Past 4×4 there are no per-cell ports at all; 25 handles on one node is not a way anyone would wire a print.',
+      'A big sheet is a big render: over 80 MP the node asks first, then runs in chunks with a progress bar, and Cancel ✕ works between them.',
+      'Hex packing needs ~15% more artwork than square (the closer rows), and puts every tile edge on a diagonal. The artwork is not silently promoted to the printer’s raster for it — raise Artwork px per view tile if those edges look stepped on your press, up to the PPI cap.',
       'Hexagonal packing (the default) offsets every other row and pulls the rows √3/2 as far apart: the densest way to pack equal circles, so ~15% more lenslets fit and only 9% of the sheet is left flat instead of 21%. Switch to Square grid if you are laminating a ready-made square lens array.',
       'Wire Model → Grid Views into the All views input and the whole grid arrives on one edge, in order. A cell port wired individually overrides its view, so you can retouch just one.',
     ],
@@ -980,7 +984,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       'A view owns a bearing, not a distance: its wedge runs from the lenslet centre to the rim, so it holds from just off head-on all the way to the edge of the lens cone.',
       'Wedges get thinner towards the centre of every lenslet, which is what makes the merge happen — but it also means the print blurs between views near head-on rather than switching cleanly. That is the effect, not a fault.',
       'Info reports how wide a wedge is at the rim of a lenslet. Under about 2 printed pixels and the views bleed into each other everywhere, not just head-on: use fewer views, lower LPI, or raise PPI.',
-      'The artwork always ships on the full PPI raster, because a wedge edge is a radial line and no orientation makes those run along the pixels.',
+      'A wedge edge is a radial line, so no orientation makes those run along the pixels — every radial sheet is a diagonal one, and every pixel of artwork up to the PPI cap buys a straighter seam. The artwork is still sized by what the wedges need (two pixels across a wedge at the rim) rather than jumping to that cap: raise Artwork px per wedge if the seams look stepped.',
     ],
   },
 
@@ -1027,15 +1031,16 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     tips: [
       'Everything behind the plate is the point. Nothing floats in front of the paper, so nothing can be cut off by the sheet edge while appearing to be nearer than it — the contradiction that makes a stereo print uncomfortable to look at.',
       'Because the subject is behind the window it projects smaller by D/(D+Z), so the node scales the fit up by the reciprocal — measured at the near face, so the subject fills the frame without any of it spilling past the aperture.',
+      'Setback can go negative, which brings the front of the subject out through the plate while the rest stays inside it — a nose in front of the glass on a head that is still in the box. 1–2 mm of it is plenty to read as a pop-out. The only rule is that the part in front must not touch the sheet edge, or the paper is cutting off something that looks nearer than the paper.',
       'Views cost nothing but render time here: a 1D print spends resolution on one axis only, so 12–24 views is normal, and every extra view buys depth by shrinking the step between eyes.',
-      'Watch the parallax figure in Info. More than ~1.5 lenticules per step and the far face ghosts instead of gliding; under 0.15 and the print is flat.',
+      'Watch the parallax figure in Info. Past ~1.5 lenticules per step the far face stops resolving — but it degrades into a soft veil that deepens with distance, which is exactly what haze does, so a mild overshoot often reads as more depth rather than less. It becomes visible doubling past ~4. Under 0.15 the print is flat.',
       'The views go out right-eye-first, because a lenticule shows its leftmost strip to an eye on the right and Lenticular Print interlaces in the order frames arrive. Turn off *Order for the lens* under Advanced if you ever need the raw left-to-right run.',
     ],
   },
 
   modelViews: {
     summary:
-      'Renders a mesh from every eye position of a lens grid and puts the whole set on one wire, in the order Lens Grid Print names its cells — connect it to All views. The eye shifts but never rotates, so the sheet plane stays sharp in every view and only depth moves.',
+      'Renders a mesh standing behind the print, from every eye position of a lens grid, and puts the whole set on one wire, in the order Lens Grid Print names its cells — connect it to All views. The sheet is a window: the subject sits entirely behind it and recedes into the paper, with the edges of the sheet occluding it — sideways and vertically both — as you move.',
     uses: [
       {
         title: 'Look-around object',
@@ -1051,9 +1056,14 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       },
     ],
     tips: [
-      'Subject depth is the whole game. Info reports the parallax in lenslets per view step: past ~1.5 the print ghosts instead of reading as depth, under ~0.15 it looks flat. Change depth, not the grid, first.',
+      'Subject depth is the whole game. Info reports the parallax in lenslets per view step, measured at whichever face moves most: past ~1.5 that face stops resolving, under ~0.15 the print looks flat. Change depth first — but a bigger grid is what actually buys depth, since it divides the same cone into smaller steps: 1 mm at 3×3 against 7 mm at 15×15.',
+      'Overshooting is not simply a fault. The blur grows with distance from the sheet, so between ~1.5 and ~4 lenslets per step the back of the subject reads as haze — aerial perspective, one of the strongest depth cues there is — while the sheet plane stays sharp. Put the detail that matters near the plane and let the distance go soft. Past ~4 it separates into visible double edges, and Info says so.',
+      'Setback can go negative, which brings the front of the subject out through the plate while the rest stays inside it — 1–2 mm out of a 20–30 mm subject is the useful case. Keep the part in front clear of the sheet edges: the paper cutting off something that appears nearer than the paper is the one thing that reads as broken.',
+      'Grids run to 15×15 = 225 views, rendered one per chunk: the node counts them off and Cancel ✕ works between them. They are all held in memory at once, though, so raise the grid before the view pixels and expect a large one to take a while.',
       'Leave View cone on “From the lens” so the views span exactly what the lens can show — the same LPI, gloss height and RI you set on the print node.',
-      'The sheet plane is where the print is sharp, and the model straddles it. Anything you want pin-sharp should sit at mid-depth.',
+      'Everything behind the plate is the point. Nothing floats in front of the paper, so nothing can be cut off by the sheet edge while appearing to be nearer than it — the contradiction that makes a stereo print uncomfortable to look at.',
+      'The sheet plane is where the print is sharp, and the subject’s near face sits on it at a setback of zero. Push the Setback back and the whole subject softens as it recedes — which is also what buys the parallax.',
+      'Because the subject is behind the window it projects smaller by D/(D+Z), so the node scales the fit up by the reciprocal — measured at the near face, so the subject fills the frame without any of it spilling past the aperture.',
       'Rotate to frame the subject; the fit is recomputed from the rotated silhouette, so nothing falls off the sheet.',
       'Colour comes from the Texture input if the mesh has UVs, else the mesh’s own vertex colours, else the flat material colour. A texture replaces that colour rather than tinting it. Info says which one a render actually used.',
     ],

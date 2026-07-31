@@ -1,16 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import '../nodes'; // register built-ins
 import { lensGridNode, gridSettingsFromConfig } from './lensGrid';
-import { lensGridCellInputs, lensGridInputs, nodePorts } from '../engine/ports';
+import {
+  lensGridCellInputs,
+  lensGridCellSlots,
+  lensGridInputs,
+  nodePorts,
+  summariseMissing,
+} from '../engine/ports';
 import { getNodeDef } from '../engine/registry';
 import { EXAMPLES } from '../components/examples';
 import { createImage } from '../lib/image';
 import {
+  describeGridGeometry,
   gridAxisLabel,
+  gridCellCounts,
   gridCellLabel,
   gridCells,
   gridInterlacedSize,
   gridSwitchViews,
+  lensGeometry,
+  outputSize,
   renderGridDepthMap,
   renderGridInterlaced,
   type LensGridSettings,
@@ -106,7 +116,15 @@ describe('grid cell naming', () => {
 
   it('clamps the grid to a printable range', () => {
     expect(gridCells(1)).toHaveLength(4); // floor of 2×2
-    expect(gridCells(99)).toHaveLength(36); // ceiling of 6×6
+    expect(gridCells(99)).toHaveLength(225); // ceiling of 15×15
+  });
+
+  it('numbers the ranks once a grid is too wide for words', () => {
+    // Left/Right and Far left/Far right run out at 5 across; beyond that the
+    // distance from head-on is a number, and the middle is still the neutral.
+    expect(gridCellLabel(0, 0, 15)).toBe('Left 7 · Up 7');
+    expect(gridCellLabel(7, 7, 15)).toBe('Centre (neutral)');
+    expect(gridCellLabel(8, 7, 15)).toBe('Right 1');
   });
 });
 
@@ -126,6 +144,23 @@ describe('Lens Grid node ports', () => {
     expect(lensGridCellInputs({})).toHaveLength(9); // default 3×3
     expect(lensGridCellInputs({ grid: '2' })).toHaveLength(4); // config values can be strings
     expect(lensGridInputs({ grid: 2 })).toHaveLength(5);
+  });
+
+  it('stops offering a port per cell past 4×4, leaving the sequence alone', () => {
+    // 25 handles on one node is not a way anyone would wire a print; 225 is not
+    // a node at all. The whole set comes down the one wire instead.
+    expect(lensGridCellInputs({ grid: 5 })).toHaveLength(0);
+    expect(lensGridInputs({ grid: 15 })).toEqual([
+      { id: 'views', label: 'All views (sequence)', type: 'sequence' },
+    ]);
+    // …but every cell still exists, in order, for the sequence to fill.
+    expect(lensGridCellSlots({ grid: 15 })).toHaveLength(225);
+    expect(lensGridCellSlots({ grid: 15 })[0].label).toBe('Left 7 · Up 7');
+  });
+
+  it('keeps a missing-view list readable', () => {
+    expect(summariseMissing(['a', 'b'])).toBe('a, b');
+    expect(summariseMissing(['a', 'b', 'c'], 2)).toBe('a, b … and 1 more');
   });
 });
 
@@ -186,29 +221,39 @@ describe('gridInterlacedSize', () => {
   });
 
   it('adds the hex row spacing back, so a tile keeps its samples down too', () => {
-    // 40 ÷ √3/2: without it the closer rows would only get 1.7 px per tile. Well
-    // under the PPI raster this sheet is really printed on, though — see below.
-    const s = settings({ ppi: 1 });
+    // 40 ÷ √3/2: without it the closer rows would only get 1.7 px per tile.
+    const s = settings({ ppi: 1000 }); // clear of the cap, so the floor shows
     expect(gridInterlacedSize(s, QUAD).width).toBe(47);
     expect(gridInterlacedSize({ ...s, grid: 3 }, QUAD).width).toBe(70);
   });
 
-  it('rasters diagonal tile edges at the printer’s own PPI', () => {
-    // 25.4 mm at 100 PPI: the artwork lands on the lens map's raster, because
-    // staggered rows leave no tile edge on a pixel boundary to aim at.
-    expect(gridInterlacedSize(settings(), QUAD).width).toBe(100);
-    // A turned square array is just as diagonal, so it gets the same treatment…
-    expect(gridInterlacedSize(square({ orientationDeg: 23 }), QUAD).width).toBe(100);
-    // …while one on the axes keeps the minimal raster, where every tile edge
-    // already falls on a whole pixel and more of them would buy nothing.
+  it('leaves diagonal tile edges on the small raster rather than jumping to PPI', () => {
+    // Staggered rows put every tile edge on a diagonal, which more pixels would
+    // place better — but that is a choice (raise the samples), not a jump from
+    // 47 px to the 100 px lens raster behind the user's back.
+    expect(gridInterlacedSize(settings(), QUAD).width).toBe(47);
+    expect(gridInterlacedSize(settings({ stripSamples: 4 }), QUAD).width).toBe(93);
+    // A turned square array is just as diagonal, and treated the same way.
+    expect(gridInterlacedSize(square({ orientationDeg: 23 }), QUAD).width).toBe(40);
+    // …as is one on the axes, where every tile edge already lands on a pixel.
     expect(gridInterlacedSize(square(), QUAD).width).toBe(40);
     expect(gridInterlacedSize(square({ orientationDeg: -90 }), QUAD).width).toBe(40);
   });
 
-  it('still keeps the highest-resolution view', () => {
+  it('caps the artwork at the raster the press can actually print', () => {
+    // A grid runs into the ceiling quickly: 10 cells × 6 tiles × 2 samples is
+    // 120 px of interlace on a sheet the press prints 100 px wide.
+    expect(gridInterlacedSize(square({ grid: 6 }), Array(36).fill(LU)).width).toBe(100);
+    // …and a source finer than the press is capped just the same.
     const big = solid([0, 0, 0], 500, 500);
-    expect(gridInterlacedSize(square(), [big, RU, LD, RD]).width).toBe(500);
-    expect(gridInterlacedSize(settings(), [big, RU, LD, RD]).width).toBe(500);
+    expect(gridInterlacedSize(square(), [big, RU, LD, RD]).width).toBe(100);
+  });
+
+  it('still keeps the highest-resolution view, up to that cap', () => {
+    const big = solid([0, 0, 0], 500, 500);
+    const s = { ppi: 1000 }; // a 1000 px sheet: room for the 500 px source
+    expect(gridInterlacedSize(square(s), [big, RU, LD, RD]).width).toBe(500);
+    expect(gridInterlacedSize(settings(s), [big, RU, LD, RD]).width).toBe(500);
   });
 });
 
@@ -291,13 +336,14 @@ describe('Lens Grid node', () => {
   it('interlaces the grid and reports both rasters', async () => {
     const out = await lensGridNode.compute(ctx(fourInputs, config()));
     const interlaced = out.interlaced as RasterImage;
-    // Hex tile edges are diagonal, so the artwork shares the lens map's raster.
-    expect(interlaced.width).toBe(100);
+    // The interlace needs 47 px; the lens map is on the printer's own 100.
+    expect(interlaced.width).toBe(47);
     expect((out.depth as RasterImage).width).toBe(100);
     if (out.info?.kind === 'text') {
       expect(out.info.text).toContain('2×2 grid = 4 views');
       expect(out.info.text).toContain('Hexagonal lenslet packing — 90.7% of the sheet under a cap');
-      expect(out.info.text).toContain('Artwork on the full 100 PPI raster: staggered rows');
+      expect(out.info.text).toContain('Artwork on the minimal raster: 47 px of the 100 px');
+      expect(out.info.text).toContain('staggered view-tile edges');
       // Closer rows, so a hex sheet fits 12 rows of lenslets where it fits 10
       // columns — the packing gain, spent on vertical resolution.
       expect(out.info.text).toContain('Each view resolves to 10×12 px');
@@ -318,6 +364,62 @@ describe('Lens Grid node', () => {
     await expect(lensGridNode.compute(ctx({ c0r0: LU, c1r1: RD }, config()))).rejects.toThrow(
       /Missing: Right · Up, Left · Down/,
     );
+  });
+
+  it('prints a big grid off the sequence alone', async () => {
+    // 6×6 = 36 views, none of which has a port to wire.
+    const frames = Array.from({ length: 36 }, (_, i) => solid([i * 7, 0, 255 - i * 7]));
+    const out = await lensGridNode.compute(
+      ctx({ views: { kind: 'sequence', frames } }, config({ grid: 6, packing: 'square' })),
+    );
+    // 10 cells × 6 tiles × 2 px wants 120, which a 100 px press cannot print.
+    expect((out.interlaced as RasterImage).width).toBe(100);
+    if (out.info?.kind === 'text') expect(out.info.text).toContain('6×6 grid = 36 views');
+    else throw new Error('expected a text info output');
+  });
+
+  it('says so when the artwork lands at the PPI cap', async () => {
+    // A 6×6 hex grid wants 10 cells × 6 tiles × 2 samples ÷ √3/2 = 139 px on a
+    // sheet the press prints 100 px wide, so the cap is what decides it.
+    const frames = Array.from({ length: 36 }, () => solid([9, 9, 9], 4, 4));
+    const out = await lensGridNode.compute(ctx({ views: { kind: 'sequence', frames } }, config({ grid: 6 })));
+    expect((out.interlaced as RasterImage).width).toBe(100);
+    if (out.info?.kind === 'text') {
+      expect(out.info.text).toContain('Artwork at the 100 PPI cap: 100 px is every dot the press can place');
+      expect(out.info.text).toContain('within one printed dot');
+    } else throw new Error('expected a text info output');
+  });
+
+  it('says where the views have to come from when the grid has no cell ports', async () => {
+    await expect(lensGridNode.compute(ctx({}, config({ grid: 15 })))).rejects.toThrow(
+      /needs all 225 views.*and 219 more\. A grid this big has no per-cell inputs/s,
+    );
+  });
+
+  it('warns when the view tiles are finer than the print can lay down', async () => {
+    // 15 tiles across a lenslet that is only 10 printed dots wide: 0.67 dots
+    // each, so nothing switches. At the node's real defaults — 1440 PPI, 45 LPI,
+    // 32 dots to a lenslet — the same 15×15 sits just over two dots and passes.
+    const frames = Array.from({ length: 225 }, () => solid([10, 20, 30], 4, 4));
+    const out = await lensGridNode.compute(
+      ctx({ views: { kind: 'sequence', frames } }, config({ grid: 15, packing: 'square' })),
+    );
+    if (out.info?.kind === 'text') {
+      expect(out.info.text).toMatch(/⚠ A view tile lands on only 0\.\d+ printed dots/);
+    } else throw new Error('expected a text info output');
+  });
+
+  it('passes a 15×15 at the node’s own defaults — which is what caps it there', () => {
+    const s = gridSettingsFromConfig({ ...lensGridNode.defaultConfig(), grid: 15 });
+    const view = solid([0, 0, 0], 8, 8);
+    const text = describeGridGeometry(
+      s,
+      lensGeometry(s),
+      outputSize(s, view),
+      gridInterlacedSize(s, [view]),
+      gridCellCounts(s, view),
+    );
+    expect(text).not.toContain('printed dots');
   });
 
   it('reads the grid-only settings out of config', () => {
@@ -454,9 +556,9 @@ describe('the loading-spinner example', () => {
     );
     const interlaced = result.interlaced as RasterImage;
     expect((result.depth as RasterImage).width).toBe(1181); // 50 mm at 600 PPI
-    // Both sheets on the print raster: the hex array's tile edges are diagonal,
-    // so the interlace is worth more than the 512 px sources carry on their own.
-    expect(interlaced.width).toBe(1181);
+    // The artwork sizes itself: the 512 px sources and the interlace floor are
+    // both under the 1181 px the press can print, so that is what it ships at.
+    expect(interlaced.width).toBe(512);
     if (result.info?.kind === 'text') expect(result.info.text).not.toContain('⚠');
     else throw new Error('expected a text info output');
   });

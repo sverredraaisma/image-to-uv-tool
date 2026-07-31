@@ -537,6 +537,25 @@ textarea {
   font-size: 11px;
   color: var(--accent);
 }
+/* Chunked runs know how far along they are, so they get a bar as well as a line. */
+.node-progress-bar {
+  height: 4px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.node-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+.oversize-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
 .node-error-msg {
   font-size: 11px;
   color: var(--error);

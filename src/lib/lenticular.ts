@@ -25,9 +25,64 @@
 
 import type { RasterImage } from '../types';
 import { createImage } from './image';
+import type { ChunkProgress } from './chunked';
 
-/** Guard against a settings typo asking for a hundred-gigapixel raster. */
+/**
+ * How big a raster either half of a print may be before the tool stops and
+ * asks. This is not a hard limit — it is the line between "just render it" and
+ * "this will take a while, are you sure?"; past it a render needs the caller's
+ * consent (`RenderOptions.allowOversize`) and runs in chunks with progress.
+ */
 export const MAX_OUTPUT_PIXELS = 80_000_000;
+
+/**
+ * …and this one *is* hard. Every pixel of the artwork costs 4 bytes and every
+ * pixel of the relief 2, so 500 MP is already a 2 GB buffer, which is about
+ * what a browser tab can hold at all. Past this there is nothing to consent to:
+ * the allocation itself would fail, and failing early with a number is kinder
+ * than a dead tab.
+ */
+export const MAX_OVERSIZE_PIXELS = 500_000_000;
+
+/**
+ * Pixels per chunk of a chunked render. Small enough that the gap between
+ * chunks — where the UI paints, the progress bar moves and a cancel is noticed —
+ * comes round every fraction of a second, big enough that the per-chunk
+ * overhead is nothing against the per-pixel work.
+ */
+export const CHUNK_PIXELS = 4_000_000;
+
+/** A render that needs the caller's consent before it runs. */
+export class OversizeOutputError extends Error {
+  constructor(
+    /** Which raster: 'Interlaced artwork' or 'Depth map'. */
+    readonly what: string,
+    readonly width: number,
+    readonly height: number,
+    /** How to make it smaller instead, if that is what the user would rather. */
+    readonly fix: string,
+    /** Chunks the render would be split into once allowed. */
+    readonly chunks: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'OversizeOutputError';
+  }
+
+  get pixels(): number {
+    return this.width * this.height;
+  }
+}
+
+export type { ChunkProgress };
+
+/** Rows of a `width`-wide raster that fit in one chunk. */
+export const chunkRows = (width: number, chunkPixels = CHUNK_PIXELS): number =>
+  Math.max(1, Math.floor(Math.max(1, chunkPixels) / Math.max(1, width)));
+
+/** Chunks a `width` × `height` pass will be split into. */
+export const chunkCount = (width: number, height: number, chunkPixels = CHUNK_PIXELS): number =>
+  Math.max(1, Math.ceil(Math.max(1, height) / chunkRows(width, chunkPixels)));
 
 export interface LenticularSettings {
   /** Printed width in millimetres; height follows the first frame's aspect. */
@@ -243,29 +298,52 @@ const turnedOffAxis = (orientationDeg: number): boolean => Math.abs(orientationD
  * Sampling density is orientation-independent — the pixels are square, so a
  * strip wide enough along x is wide enough at any angle — but *placement* is
  * not. Turn the array and every boundary between two frames becomes a diagonal,
- * and a diagonal is the one thing a raster this coarse cannot draw: a pixel
+ * and a diagonal is the one thing a raster cannot draw exactly: a pixel
  * straddling one belongs to two frames and gets whichever one its centre lands
- * in, so the edge comes out as a staircase with steps a whole strip wide.
- * See {@link interlacedSize}; {@link gridTilesOffPixelGrid} is the 2D case.
+ * in, so the edge comes out as a staircase — with steps a whole strip wide on
+ * the minimal raster, down to one printed dot at the PPI cap. More pixels are
+ * the only cure, up to that cap; see {@link interlacedSize} for why they are
+ * offered rather than imposed. {@link gridTilesOffPixelGrid} is the 2D case.
  */
 export function stripsOffPixelGrid(settings: LenticularSettings): boolean {
   return turnedOffAxis(settings.orientationDeg);
 }
 
 /**
+ * The printer's raster as a *ceiling* on a piece of artwork.
+ *
+ * Nothing is gained by a pixel the press cannot place: the sheet is printed at
+ * `ppi`, so a pixel finer than that raster is resampled away on its way to the
+ * paper, having cost memory and render time to make. Whatever the interlace and
+ * the sources ask for, this is where it stops.
+ *
+ * Note which way round it works. The PPI raster is not a floor — a sheet that
+ * needs fewer pixels ships fewer, and only artwork that would otherwise come out
+ * *larger* than the press can print is brought down to it.
+ */
+const cappedAtPpi = (needed: number, ppiWidth: number): number =>
+  Math.max(1, Math.min(Math.max(1, Math.round(needed)), Math.max(1, ppiWidth)));
+
+/**
  * Smallest raster that still holds everything the interlaced sheet knows.
  *
  * The interlaced artwork carries no lens geometry — it is flat ink that the
- * printing tool scales onto the sheet — so as long as its strips run along the
- * raster it has no reason to sit on the printer's PPI raster. Three things bound
- * it from below:
+ * printing tool scales onto the sheet — so it has no reason to sit on the
+ * printer's PPI raster. Two things bound it from below:
  *
  *   • the interlace itself: `stripSamples` pixels for every frame strip of
  *     every lenticule, so no strip can be skipped by an unlucky phase;
- *   • the artwork: never resample the highest-resolution frame downwards;
- *   • the strip edges, if they are diagonal ({@link stripsOffPixelGrid}): those
- *     need the printer's own raster, because that is the finest the staircase
- *     along them can ever be made — one printed dot instead of one strip.
+ *   • the artwork: never resample the highest-resolution frame downwards.
+ *
+ * …and {@link cappedAtPpi} bounds it from above.
+ *
+ * Diagonal strip edges ({@link stripsOffPixelGrid}) are the one thing more
+ * pixels would still buy, since the staircase along them is only as fine as the
+ * raster: they are placed to within half a pixel whatever the raster, so it is
+ * *strip* accuracy at the minimal size and *printed dot* accuracy at the cap.
+ * That is a matter of degree, not of correctness, so it is left as a choice —
+ * raise Artwork px per strip and the raster climbs towards the cap — rather
+ * than a hidden jump to a raster twenty times the size.
  *
  * The aspect ratio is the first frame's, as everywhere else.
  */
@@ -275,8 +353,7 @@ export function interlacedSize(settings: LenticularSettings, frames: RasterImage
   const samples = Math.max(1, settings.stripSamples);
   const forStrips = Math.ceil(lenticules * frames.length * samples);
   const forArtwork = Math.max(...frames.map((f) => f.width));
-  const forDiagonals = stripsOffPixelGrid(settings) ? outputSize(settings, first).width : 0;
-  const width = Math.max(1, forStrips, forArtwork, forDiagonals);
+  const width = cappedAtPpi(Math.max(forStrips, forArtwork), outputSize(settings, first).width);
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -305,6 +382,18 @@ export interface RenderOptions {
    * artwork it accompanies, whatever resolution its own frames have.
    */
   interlacedSize?: OutputSize;
+  /**
+   * Go ahead with a raster over {@link MAX_OUTPUT_PIXELS}. The caller is saying
+   * the user has been told how big it is and has agreed to wait; the render
+   * still runs in chunks, and {@link MAX_OVERSIZE_PIXELS} still applies.
+   */
+  allowOversize?: boolean;
+  /**
+   * Pixels per chunk, overriding {@link CHUNK_PIXELS}. Smaller chunks hand the
+   * UI back more often at a little more overhead; tests use it to exercise the
+   * chunking without rendering megapixels.
+   */
+  chunkPixels?: number;
 }
 
 interface Band {
@@ -386,12 +475,93 @@ function bandAt(s: Sheet, xMm: number, yMm: number): Band | null {
   return s.bands[slot];
 }
 
-function checkBudget(width: number, height: number, what: string, fix: string): void {
-  if (width * height <= MAX_OUTPUT_PIXELS) return;
-  throw new Error(
-    `${what} would be ${width}×${height} px (${Math.round((width * height) / 1e6)} MP). ` +
-      `${fix} — the limit is ${MAX_OUTPUT_PIXELS / 1e6} MP.`,
+/**
+ * Stop before allocating a raster that is bigger than the caller has agreed to.
+ *
+ * Under {@link MAX_OUTPUT_PIXELS} this does nothing. Over it the caller is
+ * asked: without `options.allowOversize` it throws an {@link OversizeOutputError}
+ * carrying everything needed to put the question to a user — how big, how many
+ * chunks it would take, and what to change instead. With consent it goes ahead,
+ * up to {@link MAX_OVERSIZE_PIXELS}, which nothing gets past.
+ */
+function checkBudget(
+  width: number,
+  height: number,
+  what: string,
+  fix: string,
+  options: RenderOptions = {},
+): void {
+  const pixels = width * height;
+  if (pixels <= MAX_OUTPUT_PIXELS) return;
+  const mp = (pixels / 1e6).toFixed(pixels < 1e8 ? 1 : 0);
+  if (pixels > MAX_OVERSIZE_PIXELS) {
+    throw new Error(
+      `${what} would be ${width}×${height} px (${mp} MP) — past what a browser can hold at all. ` +
+        `${fix} — the ceiling is ${MAX_OVERSIZE_PIXELS / 1e6} MP.`,
+    );
+  }
+  if (options.allowOversize) return;
+  throw new OversizeOutputError(
+    what,
+    width,
+    height,
+    fix,
+    chunkCount(width, height),
+    `${what} would be ${width}×${height} px (${mp} MP), over the ${MAX_OUTPUT_PIXELS / 1e6} MP ` +
+      `this renders without asking. ${fix} — or run it anyway, in ` +
+      `${chunkCount(width, height)} chunks.`,
   );
+}
+
+/**
+ * Run a row-wise pass in chunks, yielding after each one.
+ *
+ * The pixel loops below are all the same shape — one pass over the rows of one
+ * output raster — and all of them can run long enough to freeze a tab. Driving
+ * them a band of rows at a time gives the caller somewhere to stand between
+ * chunks: paint a progress bar, notice a cancel, let the event loop breathe.
+ * {@link drainSync} is the other caller, for everything that just wants the
+ * whole raster and doesn't care.
+ */
+function* byRows(
+  width: number,
+  height: number,
+  what: string,
+  options: RenderOptions,
+  pass: (fromY: number, toY: number) => void,
+): Generator<ChunkProgress, void> {
+  const rows = chunkRows(width, options.chunkPixels);
+  const total = chunkCount(width, height, options.chunkPixels);
+  for (let chunk = 0; chunk < total; chunk++) {
+    const fromY = chunk * rows;
+    pass(fromY, Math.min(height, fromY + rows));
+    yield { done: chunk + 1, total, what };
+  }
+}
+
+/**
+ * Re-emit another chunked render's progress as part of a bigger job: `base`
+ * chunks are already done and `total` are expected overall. Returns whatever
+ * the inner generator returned.
+ */
+function* asPartOf<T>(
+  gen: Generator<ChunkProgress, T>,
+  base: number,
+  total: number,
+): Generator<ChunkProgress, T> {
+  let step = gen.next();
+  while (!step.done) {
+    yield { done: base + step.value.done, total, what: step.value.what };
+    step = gen.next();
+  }
+  return step.value;
+}
+
+/** Run a chunked render straight through, ignoring the progress. */
+export function drainSync<T>(gen: Generator<ChunkProgress, T>): T {
+  let step = gen.next();
+  while (!step.done) step = gen.next();
+  return step.value;
 }
 
 /**
@@ -408,40 +578,57 @@ export function renderInterlaced(
   settings: LenticularSettings,
   options: RenderOptions = {},
 ): RasterImage {
+  return drainSync(interlaceChunks(frames, settings, options));
+}
+
+/** {@link renderInterlaced}, a band of rows at a time. */
+export function* interlaceChunks(
+  frames: RasterImage[],
+  settings: LenticularSettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, RasterImage> {
   if (frames.length < 2) throw new Error('Lenticular print needs at least 2 images');
   const size = options.interlacedSize ?? interlacedSize(settings, frames);
   const width = Math.max(1, Math.round(size.width));
   const height = Math.max(1, Math.round(size.height));
-  checkBudget(width, height, 'Interlaced artwork', 'Reduce Width (mm), LPI or the source resolution');
+  checkBudget(
+    width,
+    height,
+    'Interlaced artwork',
+    'Reduce Width (mm), LPI or the source resolution',
+    options,
+  );
 
   const s = sheet(frames, settings, options);
   const frameCount = frames.length;
   const mmPerPx = s.widthMm / width;
   const out = createImage(width, height, [255, 255, 255, 255]);
 
-  for (let y = 0; y < height; y++) {
-    const yMm = (y + 0.5) * mmPerPx;
-    for (let x = 0; x < width; x++) {
-      const xMm = (x + 0.5) * mmPerPx;
-      const band = bandAt(s, xMm, yMm);
-      if (!band) continue; // gutter between calibration bands stays white
+  yield* byRows(width, height, 'Interlaced artwork', options, (fromY, toY) => {
+    for (let y = fromY; y < toY; y++) {
+      const yMm = (y + 0.5) * mmPerPx;
+      for (let x = 0; x < width; x++) {
+        const xMm = (x + 0.5) * mmPerPx;
+        const band = bandAt(s, xMm, yMm);
+        if (!band) continue; // gutter between calibration bands stays white
 
-      const u = xMm * s.cos + yMm * s.sin;
-      const pitchMm = band.geometry.pitchMm;
-      const cell = Math.floor(u / pitchMm + s.phase);
-      const t = u / pitchMm + s.phase - cell;
+        const u = xMm * s.cos + yMm * s.sin;
+        const pitchMm = band.geometry.pitchMm;
+        const cell = Math.floor(u / pitchMm + s.phase);
+        const t = u / pitchMm + s.phase - cell;
 
-      const frame = Math.min(frameCount - 1, Math.floor(t * frameCount));
-      const shift = (cell + 0.5 - s.phase) * pitchMm - u;
-      sampleNormalized(
-        frames[frame],
-        (xMm + shift * s.cos) / s.widthMm,
-        (yMm + shift * s.sin) / s.heightMm,
-        out.data,
-        (y * width + x) * 4,
-      );
+        const frame = Math.min(frameCount - 1, Math.floor(t * frameCount));
+        const shift = (cell + 0.5 - s.phase) * pitchMm - u;
+        sampleNormalized(
+          frames[frame],
+          (xMm + shift * s.cos) / s.widthMm,
+          (yMm + shift * s.sin) / s.heightMm,
+          out.data,
+          (y * width + x) * 4,
+        );
+      }
     }
-  }
+  });
   return out;
 }
 
@@ -464,33 +651,44 @@ export function renderDepthMap(
   settings: LenticularSettings,
   options: RenderOptions = {},
 ): DepthMapResult {
+  return drainSync(depthMapChunks(frames, settings, options));
+}
+
+/** {@link renderDepthMap}, a band of rows at a time. */
+export function* depthMapChunks(
+  frames: RasterImage[],
+  settings: LenticularSettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, DepthMapResult> {
   if (frames.length < 2) throw new Error('Lenticular print needs at least 2 images');
   const size = outputSize(settings, frames[0]);
   const { width, height } = size;
-  checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI');
+  checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI', options);
 
   const s = sheet(frames, settings, options);
   const mmPerPx = s.widthMm / width;
   const depth = new Uint16Array(width * height);
 
-  for (let y = 0; y < height; y++) {
-    const yMm = (y + 0.5) * mmPerPx;
-    for (let x = 0; x < width; x++) {
-      const xMm = (x + 0.5) * mmPerPx;
-      const band = bandAt(s, xMm, yMm);
-      if (!band) continue; // gutter between calibration bands prints no gloss
+  yield* byRows(width, height, 'Depth map', options, (fromY, toY) => {
+    for (let y = fromY; y < toY; y++) {
+      const yMm = (y + 0.5) * mmPerPx;
+      for (let x = 0; x < width; x++) {
+        const xMm = (x + 0.5) * mmPerPx;
+        const band = bandAt(s, xMm, yMm);
+        if (!band) continue; // gutter between calibration bands prints no gloss
 
-      const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
-      const u = xMm * s.cos + yMm * s.sin;
-      const t = u / pitchMm + s.phase - Math.floor(u / pitchMm + s.phase);
+        const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
+        const u = xMm * s.cos + yMm * s.sin;
+        const t = u / pitchMm + s.phase - Math.floor(u / pitchMm + s.phase);
 
-      // Lens profile: circular arc of radius R and sag `sagMm`, on the base.
-      const offset = (t - 0.5) * pitchMm;
-      const arc = Math.sqrt(Math.max(0, radiusMm * radiusMm - offset * offset)) - (radiusMm - sagMm);
-      const mm = baseMm + Math.max(0, arc);
-      depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
+        // Lens profile: circular arc of radius R and sag `sagMm`, on the base.
+        const offset = (t - 0.5) * pitchMm;
+        const arc = Math.sqrt(Math.max(0, radiusMm * radiusMm - offset * offset)) - (radiusMm - sagMm);
+        const mm = baseMm + Math.max(0, arc);
+        depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
+      }
     }
-  }
+  });
   return { depth, width, height, scaleMm: s.depthScaleMm, bands: s.bands };
 }
 
@@ -504,16 +702,35 @@ export function renderLenticular(
   settings: LenticularSettings,
   options: RenderOptions = {},
 ): LenticularRender {
+  return drainSync(lenticularChunks(frames, settings, options));
+}
+
+/** {@link renderLenticular}, chunk by chunk across both halves. */
+export function* lenticularChunks(
+  frames: RasterImage[],
+  settings: LenticularSettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, LenticularRender> {
   if (frames.length < 2) throw new Error('Lenticular print needs at least 2 images');
   // Budget both halves before rendering either: a sheet too big for the depth
-  // map must fail now, not after a multi-megapixel artwork pass.
+  // map must stop now, not after a multi-megapixel artwork pass.
   const art = options.interlacedSize ?? interlacedSize(settings, frames);
   const map = outputSize(settings, frames[0]);
-  checkBudget(art.width, art.height, 'Interlaced artwork', 'Reduce Width (mm), LPI or the source resolution');
-  checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI');
+  checkBudget(
+    art.width,
+    art.height,
+    'Interlaced artwork',
+    'Reduce Width (mm), LPI or the source resolution',
+    options,
+  );
+  checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI', options);
 
-  const interlaced = renderInterlaced(frames, settings, options);
-  const depth = renderDepthMap(frames, settings, options);
+  // One count across both passes, so the progress bar runs 0→1 over the job the
+  // user actually asked for rather than resetting halfway.
+  const artChunks = chunkCount(art.width, art.height, options.chunkPixels);
+  const total = artChunks + chunkCount(map.width, map.height, options.chunkPixels);
+  const interlaced = yield* asPartOf(interlaceChunks(frames, settings, options), 0, total);
+  const depth = yield* asPartOf(depthMapChunks(frames, settings, options), artChunks, total);
   return {
     interlaced,
     depth: depth.depth,
@@ -572,7 +789,13 @@ export interface LensGridSettings extends CapArraySettings {
 }
 
 export const MIN_GRID = 2;
-export const MAX_GRID = 6;
+/**
+ * 15×15 — 225 views. Past this the view tile under a lenslet is thinner than a
+ * printed dot at any sane PPI (see the warning in {@link describeGridGeometry}),
+ * and the artwork raster and the render time have both grown by N² for parallax
+ * the lens can no longer resolve.
+ */
+export const MAX_GRID = 15;
 /** 3×3 — nine views, the smallest grid with a true head-on centre. */
 export const DEFAULT_GRID = 3;
 
@@ -705,23 +928,30 @@ export function gridCells(grid: number): { col: number; row: number; id: string;
  * {@link stripsOffPixelGrid}, with one extra way to get there.
  *
  * A square array at 0° (or any multiple of 90°) tiles the artwork in rectangles
- * whose edges are horizontal and vertical, so the minimal raster of
- * {@link gridInterlacedSize} places every edge exactly. Stagger the rows for hex
- * packing, or turn the array off the axes, and the tile edges go diagonal.
+ * whose edges are horizontal and vertical, so the raster of
+ * {@link gridInterlacedSize} places every edge exactly, however small it is.
+ * Stagger the rows for hex packing, or turn the array off the axes, and the tile
+ * edges go diagonal — placed to half a pixel, which is a fraction of a view tile
+ * on a small raster and a fraction of a printed dot at the PPI cap. Reported, so
+ * the choice of raster is an informed one.
  */
 export function gridTilesOffPixelGrid(settings: LensGridSettings): boolean {
   return clampPacking(settings.packing) === 'hex' || stripsOffPixelGrid(settings);
 }
 
 /**
- * {@link interlacedSize} for a grid: every cell needs `grid` views across.
+ * {@link interlacedSize} for a grid: every cell needs `grid` views across, and
+ * the printer's PPI raster is the ceiling here too.
  *
- * Sheets whose tiles are axis-aligned ship at the smallest raster that resolves
- * them, as the 1D interlace does. Sheets with diagonal tile edges
- * ({@link gridTilesOffPixelGrid}) instead ship on the printer's own PPI raster —
- * the same one the lens map is on. That is the finest the print can be, so it is
- * the most that spending pixels here can buy, and those extra pixels go
- * straight into the diagonals: the staircase steps down to one printed dot.
+ * A grid reaches that ceiling far sooner than a 1D sheet — `grid` tiles across
+ * a cell instead of `frames` strips, and hex packing needs another 1/0.866 on
+ * top — so a big grid ships at the cap and a small one does not, which is
+ * exactly the intent: pay for pixels the press can print, and no more.
+ *
+ * Diagonal tile edges ({@link gridTilesOffPixelGrid}) — every hex sheet, and any
+ * turned array — are placed to half a pixel whatever the raster, so they are
+ * worth spending towards the cap on but are not a reason to jump to it. See
+ * {@link interlacedSize}.
  */
 export function gridInterlacedSize(settings: LensGridSettings, views: RasterImage[]): OutputSize {
   const first = views[0];
@@ -733,8 +963,7 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
     (cells * clampGrid(settings.grid) * samples) / rowScaleOf(clampPacking(settings.packing)),
   );
   const forArtwork = Math.max(...views.map((v) => v.width));
-  const forDiagonals = gridTilesOffPixelGrid(settings) ? outputSize(settings, first).width : 0;
-  const width = Math.max(1, forViews, forArtwork, forDiagonals);
+  const width = cappedAtPpi(Math.max(forViews, forArtwork), outputSize(settings, first).width);
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -759,6 +988,15 @@ export function renderGridInterlaced(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): RasterImage {
+  return drainSync(gridInterlaceChunks(views, settings, options));
+}
+
+/** {@link renderGridInterlaced}, a band of rows at a time. */
+export function* gridInterlaceChunks(
+  views: RasterImage[],
+  settings: LensGridSettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, RasterImage> {
   const grid = requireGridViews(views, settings.grid);
   const size = options.interlacedSize ?? gridInterlacedSize(settings, views);
   const width = Math.max(1, Math.round(size.width));
@@ -768,6 +1006,7 @@ export function renderGridInterlaced(
     height,
     'Interlaced artwork',
     'Reduce Width (mm), PPI, LPI, the grid or the source size',
+    options,
   );
 
   const s = sheet(views, settings, options);
@@ -777,45 +1016,47 @@ export function renderGridInterlaced(
   const mmPerPx = s.widthMm / width;
   const out = createImage(width, height, [255, 255, 255, 255]);
 
-  for (let y = 0; y < height; y++) {
-    const yMm = (y + 0.5) * mmPerPx;
-    for (let x = 0; x < width; x++) {
-      const xMm = (x + 0.5) * mmPerPx;
-      const band = bandAt(s, xMm, yMm);
-      if (!band) continue;
+  yield* byRows(width, height, 'Interlaced artwork', options, (fromY, toY) => {
+    for (let y = fromY; y < toY; y++) {
+      const yMm = (y + 0.5) * mmPerPx;
+      for (let x = 0; x < width; x++) {
+        const xMm = (x + 0.5) * mmPerPx;
+        const band = bandAt(s, xMm, yMm);
+        if (!band) continue;
 
-      const pitchMm = band.geometry.pitchMm;
-      const u = xMm * s.cos + yMm * s.sin;
-      const v = -xMm * s.sin + yMm * s.cos;
-      const su = u / pitchMm + s.phase;
-      const sv = v / (pitchMm * rowScale) + phaseY;
-      const cell = latticeAt(su, sv, packing);
+        const pitchMm = band.geometry.pitchMm;
+        const u = xMm * s.cos + yMm * s.sin;
+        const v = -xMm * s.sin + yMm * s.cos;
+        const su = u / pitchMm + s.phase;
+        const sv = v / (pitchMm * rowScale) + phaseY;
+        const cell = latticeAt(su, sv, packing);
 
-      // Tiles are square in millimetres on both axes, so a view subtends the
-      // same angle horizontally and vertically. A hex cell reaches past a pitch
-      // at its two tips, which clamp into the outermost tiles.
-      const fu = Math.min(0.999999, Math.max(0, cell.du + 0.5));
-      const fv = Math.min(0.999999, Math.max(0, cell.dv + 0.5));
-      const col = Math.floor(fu * grid);
-      const row = Math.floor(fv * grid);
+        // Tiles are square in millimetres on both axes, so a view subtends the
+        // same angle horizontally and vertically. A hex cell reaches past a
+        // pitch at its two tips, which clamp into the outermost tiles.
+        const fu = Math.min(0.999999, Math.max(0, cell.du + 0.5));
+        const fv = Math.min(0.999999, Math.max(0, cell.dv + 0.5));
+        const col = Math.floor(fu * grid);
+        const row = Math.floor(fv * grid);
 
-      // The lens inverts: the tile on the left of a cell is what an eye to the
-      // *right* sees, so a view named "Left" belongs on the right.
-      const viewCol = settings.mirrorViews ? grid - 1 - col : col;
-      const viewRow = settings.mirrorViews ? grid - 1 - row : row;
+        // The lens inverts: the tile on the left of a cell is what an eye to the
+        // *right* sees, so a view named "Left" belongs on the right.
+        const viewCol = settings.mirrorViews ? grid - 1 - col : col;
+        const viewRow = settings.mirrorViews ? grid - 1 - row : row;
 
-      // Sample at the cell centre, rotated back into sheet coordinates.
-      const uc = (cell.cu - s.phase) * pitchMm;
-      const vc = (cell.cv - phaseY) * pitchMm * rowScale;
-      sampleNormalized(
-        views[viewRow * grid + viewCol],
-        (uc * s.cos - vc * s.sin) / s.widthMm,
-        (uc * s.sin + vc * s.cos) / s.heightMm,
-        out.data,
-        (y * width + x) * 4,
-      );
+        // Sample at the cell centre, rotated back into sheet coordinates.
+        const uc = (cell.cu - s.phase) * pitchMm;
+        const vc = (cell.cv - phaseY) * pitchMm * rowScale;
+        sampleNormalized(
+          views[viewRow * grid + viewCol],
+          (uc * s.cos - vc * s.sin) / s.widthMm,
+          (uc * s.sin + vc * s.cos) / s.heightMm,
+          out.data,
+          (y * width + x) * 4,
+        );
+      }
     }
-  }
+  });
   return out;
 }
 
@@ -829,8 +1070,17 @@ export function renderGridDepthMap(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): DepthMapResult {
+  return drainSync(gridDepthMapChunks(views, settings, options));
+}
+
+/** {@link renderGridDepthMap}, a band of rows at a time. */
+export function* gridDepthMapChunks(
+  views: RasterImage[],
+  settings: LensGridSettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, DepthMapResult> {
   requireGridViews(views, settings.grid);
-  return renderCapDepthMap(views, settings, options);
+  return yield* capDepthMapChunks(views, settings, options);
 }
 
 /**
@@ -843,9 +1093,18 @@ export function renderCapDepthMap(
   settings: CapArraySettings,
   options: RenderOptions = {},
 ): DepthMapResult {
+  return drainSync(capDepthMapChunks(views, settings, options));
+}
+
+/** {@link renderCapDepthMap}, a band of rows at a time. */
+export function* capDepthMapChunks(
+  views: RasterImage[],
+  settings: CapArraySettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, DepthMapResult> {
   const size = outputSize(settings, views[0]);
   const { width, height } = size;
-  checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI');
+  checkBudget(width, height, 'Depth map', 'Reduce Width (mm) or PPI', options);
 
   const s = sheet(views, settings, options);
   const packing = clampPacking(settings.packing);
@@ -854,31 +1113,33 @@ export function renderCapDepthMap(
   const mmPerPx = s.widthMm / width;
   const depth = new Uint16Array(width * height);
 
-  for (let y = 0; y < height; y++) {
-    const yMm = (y + 0.5) * mmPerPx;
-    for (let x = 0; x < width; x++) {
-      const xMm = (x + 0.5) * mmPerPx;
-      const band = bandAt(s, xMm, yMm);
-      if (!band) continue;
+  yield* byRows(width, height, 'Depth map', options, (fromY, toY) => {
+    for (let y = fromY; y < toY; y++) {
+      const yMm = (y + 0.5) * mmPerPx;
+      for (let x = 0; x < width; x++) {
+        const xMm = (x + 0.5) * mmPerPx;
+        const band = bandAt(s, xMm, yMm);
+        if (!band) continue;
 
-      const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
-      const u = xMm * s.cos + yMm * s.sin;
-      const v = -xMm * s.sin + yMm * s.cos;
-      const su = u / pitchMm + s.phase;
-      const sv = v / (pitchMm * rowScale) + phaseY;
-      const cell = latticeAt(su, sv, packing);
-      const du = cell.du * pitchMm;
-      const dv = cell.dv * pitchMm;
+        const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
+        const u = xMm * s.cos + yMm * s.sin;
+        const v = -xMm * s.sin + yMm * s.cos;
+        const su = u / pitchMm + s.phase;
+        const sv = v / (pitchMm * rowScale) + phaseY;
+        const cell = latticeAt(su, sv, packing);
+        const du = cell.du * pitchMm;
+        const dv = cell.dv * pitchMm;
 
-      // A cap of diameter one pitch around the nearest centre; outside it, flat
-      // base. In a hex array that circle is tangent to all six neighbours.
-      const r = Math.hypot(du, dv);
-      const arc =
-        r <= pitchMm / 2 ? Math.sqrt(Math.max(0, radiusMm * radiusMm - r * r)) - (radiusMm - sagMm) : 0;
-      const mm = baseMm + Math.max(0, arc);
-      depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
+        // A cap of diameter one pitch around the nearest centre; outside it,
+        // flat base. In a hex array that circle touches all six neighbours.
+        const r = Math.hypot(du, dv);
+        const arc =
+          r <= pitchMm / 2 ? Math.sqrt(Math.max(0, radiusMm * radiusMm - r * r)) - (radiusMm - sagMm) : 0;
+        const mm = baseMm + Math.max(0, arc);
+        depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
+      }
     }
-  }
+  });
   return { depth, width, height, scaleMm: s.depthScaleMm, bands: s.bands };
 }
 
@@ -888,6 +1149,15 @@ export function renderLensGrid(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): LenticularRender {
+  return drainSync(lensGridChunks(views, settings, options));
+}
+
+/** {@link renderLensGrid}, chunk by chunk across both halves. */
+export function* lensGridChunks(
+  views: RasterImage[],
+  settings: LensGridSettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, LenticularRender> {
   const grid = requireGridViews(views, settings.grid);
   const art = options.interlacedSize ?? gridInterlacedSize(settings, views);
   const map = outputSize(settings, views[0]);
@@ -896,11 +1166,14 @@ export function renderLensGrid(
     art.height,
     'Interlaced artwork',
     'Reduce Width (mm), PPI, LPI, the grid or the source size',
+    options,
   );
-  checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI');
+  checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI', options);
 
-  const interlaced = renderGridInterlaced(views, { ...settings, grid }, options);
-  const depth = renderGridDepthMap(views, { ...settings, grid }, options);
+  const artChunks = chunkCount(art.width, art.height, options.chunkPixels);
+  const total = artChunks + chunkCount(map.width, map.height, options.chunkPixels);
+  const interlaced = yield* asPartOf(gridInterlaceChunks(views, { ...settings, grid }, options), 0, total);
+  const depth = yield* asPartOf(gridDepthMapChunks(views, { ...settings, grid }, options), artChunks, total);
   return {
     interlaced,
     depth: depth.depth,
@@ -1013,11 +1286,19 @@ function requireRadialViews(views: RasterImage[], count: number): number {
 /**
  * {@link gridInterlacedSize} for a ring of wedges.
  *
- * Always the printer's own raster, and not as a fallback: a wedge boundary is a
- * *radial line*, so unlike a grid's tile edges there is no orientation at which
- * they run along the pixels. They also converge — near the centre of a cell the
- * wedges are finer than any raster can hold, which is exactly why the views
- * merge there — so the sensible target is the finest raster the print has.
+ * Sized like the others: enough pixels for the wedges and the sources, capped at
+ * the printer's own raster.
+ *
+ * A wedge boundary is a *radial line*, so unlike a 1D sheet's strips or a
+ * square grid's tile edges there is no orientation at which they run along the
+ * pixels — every radial sheet is a diagonal one, and every pixel of artwork up
+ * to the cap buys a straighter seam. They also converge: near the centre of a
+ * cell the wedges are finer than any raster can hold, which is exactly why the
+ * views merge there, so it is the rim that the floor below is measured at.
+ *
+ * That makes the PPI cap worth more here than anywhere else, and reaching for
+ * it is one setting away (Artwork px per wedge) — but it is still the caller's
+ * call, not a silent twentyfold jump in the size of the file.
  */
 export function radialInterlacedSize(settings: RadialSettings, views: RasterImage[]): OutputSize {
   const first = views[0];
@@ -1027,7 +1308,7 @@ export function radialInterlacedSize(settings: RadialSettings, views: RasterImag
   // the rim, where it subtends (π/N) of a cell diameter.
   const forWedges = Math.ceil((cells * clampRadialViews(settings.views) * samples) / Math.PI);
   const forArtwork = Math.max(...views.map((v) => v.width));
-  const width = Math.max(1, forWedges, forArtwork, outputSize(settings, first).width);
+  const width = cappedAtPpi(Math.max(forWedges, forArtwork), outputSize(settings, first).width);
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -1076,11 +1357,20 @@ export function renderRadialInterlaced(
   settings: RadialSettings,
   options: RenderOptions = {},
 ): RasterImage {
+  return drainSync(radialInterlaceChunks(views, settings, options));
+}
+
+/** {@link renderRadialInterlaced}, a band of rows at a time. */
+export function* radialInterlaceChunks(
+  views: RasterImage[],
+  settings: RadialSettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, RasterImage> {
   const n = requireRadialViews(views, settings.views);
   const size = options.interlacedSize ?? radialInterlacedSize(settings, views);
   const width = Math.max(1, Math.round(size.width));
   const height = Math.max(1, Math.round(size.height));
-  checkBudget(width, height, 'Interlaced artwork', 'Reduce Width (mm), PPI, LPI or the source size');
+  checkBudget(width, height, 'Interlaced artwork', 'Reduce Width (mm), PPI, LPI or the source size', options);
 
   const s = sheet(views, settings, options);
   const packing = clampPacking(settings.packing);
@@ -1089,34 +1379,36 @@ export function renderRadialInterlaced(
   const mmPerPx = s.widthMm / width;
   const out = createImage(width, height, [255, 255, 255, 255]);
 
-  for (let y = 0; y < height; y++) {
-    const yMm = (y + 0.5) * mmPerPx;
-    for (let x = 0; x < width; x++) {
-      const xMm = (x + 0.5) * mmPerPx;
-      const band = bandAt(s, xMm, yMm);
-      if (!band) continue;
+  yield* byRows(width, height, 'Interlaced artwork', options, (fromY, toY) => {
+    for (let y = fromY; y < toY; y++) {
+      const yMm = (y + 0.5) * mmPerPx;
+      for (let x = 0; x < width; x++) {
+        const xMm = (x + 0.5) * mmPerPx;
+        const band = bandAt(s, xMm, yMm);
+        if (!band) continue;
 
-      const pitchMm = band.geometry.pitchMm;
-      const u = xMm * s.cos + yMm * s.sin;
-      const v = -xMm * s.sin + yMm * s.cos;
-      const su = u / pitchMm + s.phase;
-      const sv = v / (pitchMm * rowScale) + phaseY;
-      const cell = latticeAt(su, sv, packing);
-      const view = radialViewAt(cell.du, cell.dv, n, settings);
+        const pitchMm = band.geometry.pitchMm;
+        const u = xMm * s.cos + yMm * s.sin;
+        const v = -xMm * s.sin + yMm * s.cos;
+        const su = u / pitchMm + s.phase;
+        const sv = v / (pitchMm * rowScale) + phaseY;
+        const cell = latticeAt(su, sv, packing);
+        const view = radialViewAt(cell.du, cell.dv, n, settings);
 
-      // Sample at the cell centre, as the grid does: every wedge of a cell
-      // shows the same spot of the picture, from its own view.
-      const uc = (cell.cu - s.phase) * pitchMm;
-      const vc = (cell.cv - phaseY) * pitchMm * rowScale;
-      sampleNormalized(
-        views[view],
-        (uc * s.cos - vc * s.sin) / s.widthMm,
-        (uc * s.sin + vc * s.cos) / s.heightMm,
-        out.data,
-        (y * width + x) * 4,
-      );
+        // Sample at the cell centre, as the grid does: every wedge of a cell
+        // shows the same spot of the picture, from its own view.
+        const uc = (cell.cu - s.phase) * pitchMm;
+        const vc = (cell.cv - phaseY) * pitchMm * rowScale;
+        sampleNormalized(
+          views[view],
+          (uc * s.cos - vc * s.sin) / s.widthMm,
+          (uc * s.sin + vc * s.cos) / s.heightMm,
+          out.data,
+          (y * width + x) * 4,
+        );
+      }
     }
-  }
+  });
   return out;
 }
 
@@ -1126,8 +1418,17 @@ export function renderRadialDepthMap(
   settings: RadialSettings,
   options: RenderOptions = {},
 ): DepthMapResult {
+  return drainSync(radialDepthMapChunks(views, settings, options));
+}
+
+/** {@link renderRadialDepthMap}, a band of rows at a time. */
+export function* radialDepthMapChunks(
+  views: RasterImage[],
+  settings: RadialSettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, DepthMapResult> {
   requireRadialViews(views, settings.views);
-  return renderCapDepthMap(views, settings, options);
+  return yield* capDepthMapChunks(views, settings, options);
 }
 
 /** Both halves of a radial print. See {@link renderLenticular}. */
@@ -1136,14 +1437,31 @@ export function renderRadial(
   settings: RadialSettings,
   options: RenderOptions = {},
 ): LenticularRender {
+  return drainSync(radialChunks(views, settings, options));
+}
+
+/** {@link renderRadial}, chunk by chunk across both halves. */
+export function* radialChunks(
+  views: RasterImage[],
+  settings: RadialSettings,
+  options: RenderOptions = {},
+): Generator<ChunkProgress, LenticularRender> {
   requireRadialViews(views, settings.views);
   const art = options.interlacedSize ?? radialInterlacedSize(settings, views);
   const map = outputSize(settings, views[0]);
-  checkBudget(art.width, art.height, 'Interlaced artwork', 'Reduce Width (mm), PPI, LPI or the source size');
-  checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI');
+  checkBudget(
+    art.width,
+    art.height,
+    'Interlaced artwork',
+    'Reduce Width (mm), PPI, LPI or the source size',
+    options,
+  );
+  checkBudget(map.width, map.height, 'Depth map', 'Reduce Width (mm) or PPI', options);
 
-  const interlaced = renderRadialInterlaced(views, settings, options);
-  const depth = renderRadialDepthMap(views, settings, options);
+  const artChunks = chunkCount(art.width, art.height, options.chunkPixels);
+  const total = artChunks + chunkCount(map.width, map.height, options.chunkPixels);
+  const interlaced = yield* asPartOf(radialInterlaceChunks(views, settings, options), 0, total);
+  const depth = yield* asPartOf(radialDepthMapChunks(views, settings, options), artChunks, total);
   return {
     interlaced,
     depth: depth.depth,
@@ -1171,6 +1489,36 @@ export function radialSwitchViews(count: number): RasterImage[] {
 /** Fewer pixels than this across a lenticule and the lens profile is terraced. */
 const MIN_LENS_PX = 8;
 
+/**
+ * The line that explains which raster the artwork landed on.
+ *
+ * The printer's raster is a ceiling rather than a destination, so the question
+ * is no longer "minimal or PPI" but "did this reach the cap, and if not, would
+ * more pixels still buy anything". Diagonal edges are the only thing that would
+ * — hence `diagonal`, which names them and the setting that pays for them.
+ */
+function describeArtRaster(
+  ppi: number,
+  artSize: OutputSize,
+  ppiSize: OutputSize,
+  diagonal: { edges: string; setting: string } | null,
+): string {
+  if (artSize.width >= ppiSize.width) {
+    return (
+      `Artwork at the ${ppi} PPI cap: ${artSize.width} px is every dot the press can place` +
+      (diagonal ? `, so the diagonal ${diagonal.edges} come out to within one printed dot` : '')
+    );
+  }
+  return (
+    `Artwork on the minimal raster: ${artSize.width} px of the ${ppiSize.width} px the press could ` +
+    `print — all the interlace and your sources need` +
+    (diagonal
+      ? `. The ${diagonal.edges} run diagonally, so they are placed to half a pixel *of this raster*; ` +
+        `raise ${diagonal.setting} to spend up to the cap if the staircase shows`
+      : `, and the edges land on whole pixels`)
+  );
+}
+
 /** Human-readable geometry report for the node's Info output and its editor. */
 export function describeGeometry(
   settings: LenticularSettings,
@@ -1184,10 +1532,12 @@ export function describeGeometry(
     `${frameCount} frames · ${settings.widthMm} mm wide`,
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
-    stripsOffPixelGrid(settings)
-      ? `Artwork on the full ${settings.ppi} PPI raster: a ${settings.orientationDeg}° array puts the ` +
-        `strip edges on diagonals, which need every printable dot to come out straight`
-      : `Artwork on the minimal raster: at ${settings.orientationDeg}° the strips run along the pixels`,
+    describeArtRaster(
+      settings.ppi,
+      artSize,
+      depthSize,
+      stripsOffPixelGrid(settings) ? { edges: 'strip edges', setting: 'Artwork px per strip' } : null,
+    ),
     `Lenticule pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / frameCount).toFixed(2)} px per frame strip`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
@@ -1242,8 +1592,10 @@ export function describeRadialGeometry(
       `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
-    `Artwork on the full ${settings.ppi} PPI raster: wedge edges are radial lines, so no orientation ` +
-      `makes them run along the pixels, and they converge to a point at every lenslet centre`,
+    describeArtRaster(settings.ppi, artSize, depthSize, {
+      edges: 'wedge seams',
+      setting: 'Artwork px per wedge',
+    }),
     `Lenslet pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${((artSize.width / ((settings.widthMm * settings.lpi) / 25.4)) * (Math.PI / n)).toFixed(2)} px ` +
       `across a wedge at the rim`,
@@ -1293,11 +1645,17 @@ export function describeGridGeometry(
       `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
-    gridTilesOffPixelGrid(settings)
-      ? `Artwork on the full ${settings.ppi} PPI raster: ${
-          packing === 'hex' ? 'staggered rows' : `a ${settings.orientationDeg}° array`
-        } put the view-tile edges on diagonals, which need every printable dot to come out straight`
-      : `Artwork on the minimal raster: square, axis-aligned tiles land on whole pixels`,
+    describeArtRaster(
+      settings.ppi,
+      artSize,
+      depthSize,
+      gridTilesOffPixelGrid(settings)
+        ? {
+            edges: packing === 'hex' ? 'staggered view-tile edges' : 'view-tile edges',
+            setting: 'Artwork px per view tile',
+          }
+        : null,
+    ),
     `Lenslet pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / grid).toFixed(2)} px per view tile`,
     // The lens count *is* the per-view resolution: one lenslet shows one pixel
@@ -1316,6 +1674,19 @@ export function describeGridGeometry(
     lines.push(
       `⚠ Only ${geometry.pitchPx.toFixed(2)} px across a lenslet — the printed lens will be terraced. ` +
         `Raise PPI or lower LPI.`,
+    );
+  }
+  // What a view tile is worth once the artwork is scaled onto the sheet. The
+  // artwork raster always carries `stripSamples` px per tile — it grows to
+  // guarantee it — but the printer has only the lenslet's own dots to spend and
+  // they divide by the grid. Under about two, neighbouring views bleed together
+  // everywhere rather than switching, and that is what finally caps the grid.
+  const printedTilePx = geometry.pitchPx / grid;
+  if (printedTilePx < 2) {
+    lines.push(
+      `⚠ A view tile lands on only ${printedTilePx.toFixed(2)} printed dots at ${settings.ppi} PPI — ` +
+        `the views will bleed into each other at every angle rather than switching. Use a smaller grid, ` +
+        `lower LPI, or raise PPI.`,
     );
   }
   return lines.join('\n');

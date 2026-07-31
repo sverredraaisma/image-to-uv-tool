@@ -15,10 +15,11 @@ import {
   gridCellCounts,
   lensGeometry,
   outputSize,
+  radialChunks,
   radialInterlacedSize,
-  renderRadial,
   type RadialSettings,
 } from '../lib/lenticular';
+import { runChunked } from '../lib/chunked';
 import { radialInputs, radialViewInputs } from '../engine/ports';
 import { settingsFromConfig } from './lenticular';
 import { asImage, asImages, bool, num } from './helpers';
@@ -175,7 +176,7 @@ export const radialGridNode: NodeDefinition = {
     lpiMax: 50,
     lpiAutoHeight: true,
   }),
-  compute: async ({ inputs, config, onProgress }) => {
+  compute: async ({ inputs, config, onProgress, signal, allowOversize }) => {
     const gathered = gatherRadialViews(inputs, config);
     if ('missing' in gathered) {
       const n = clampRadialViews(num(config.views, DEFAULT_RADIAL_VIEWS));
@@ -190,10 +191,12 @@ export const radialGridNode: NodeDefinition = {
       `Interlacing ${gathered.length} views at ${artSize.width}×${artSize.height}, ` +
         `lens map at ${depthSize.width}×${depthSize.height}…`,
     );
-    // Let the spinner paint before the render locks the main thread.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const render = renderRadial(gathered, settings);
+    // Chunked: the run hands the UI back between bands of rows, so a big sheet
+    // shows a progress bar and can be cancelled instead of freezing the tab.
+    const render = await runChunked(radialChunks(gathered, settings, { allowOversize }), {
+      onProgress,
+      signal,
+    });
     return {
       interlaced: render.interlaced,
       depth: depthPreview(render),

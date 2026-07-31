@@ -2,7 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { createImage } from './image';
 import {
   MAX_OUTPUT_PIXELS,
+  MAX_OVERSIZE_PIXELS,
+  OversizeOutputError,
   calibrationValues,
+  chunkCount,
+  chunkRows,
+  depthMapChunks,
+  drainSync,
+  interlaceChunks,
+  lenticularChunks,
   depthPreview,
   describeGeometry,
   heightForViewAngle,
@@ -15,6 +23,7 @@ import {
   switchFrames,
   withCalibrationValue,
   type CalibrationParam,
+  type ChunkProgress,
   type CalibrationSpec,
   type LenticularSettings,
   type RenderOptions,
@@ -146,16 +155,32 @@ describe('interlacedSize', () => {
 
   it('keeps the highest-resolution frame instead of downsampling it', () => {
     const big = solid([1, 2, 3], 900, 900);
-    expect(interlacedSize(settings(), [RED, big]).width).toBe(900);
+    // 25.4 mm at 1000 PPI is a 1000 px sheet, so the 900 px source fits under
+    // the cap and is kept whole.
+    expect(interlacedSize(settings({ ppi: 1000 }), [RED, big]).width).toBe(900);
     // …but never drops below the interlace floor for it: 500 lenticules × 2
     // frames × 2 samples outvotes the 900 px source.
-    expect(interlacedSize(settings({ lpi: 500 }), [RED, big]).width).toBe(2000);
+    expect(interlacedSize(settings({ ppi: 5000, lpi: 500 }), [RED, big]).width).toBe(2000);
+  });
+
+  it('never asks for more pixels than the press can place', () => {
+    const big = solid([1, 2, 3], 900, 900);
+    // The same 900 px source on a 100 px sheet: everything past the printer's
+    // own raster would be resampled away on the way to the paper.
+    expect(interlacedSize(settings(), [RED, big]).width).toBe(100);
+    // The interlace floor is capped too — 500 LPI × 2 frames × 2 samples wants
+    // 2000 px, which a 100 PPI press cannot print. (That is the same condition
+    // as "too many frames for one lenticule", which the node warns about.)
+    expect(interlacedSize(settings({ lpi: 500 }), [RED, BLUE]).width).toBe(100);
+    // Raise the press and the cap rises with it.
+    expect(interlacedSize(settings({ ppi: 2000 }), [RED, big]).width).toBe(900);
   });
 
   it('takes its aspect ratio from the first frame only', () => {
     const wide = solid([0, 0, 0], 400, 100);
-    expect(interlacedSize(settings(), [wide, RED])).toEqual({ width: 400, height: 100 });
-    expect(interlacedSize(settings(), [RED, wide])).toEqual({ width: 400, height: 400 });
+    const s = settings({ ppi: 1000 }); // room under the cap for a 400 px source
+    expect(interlacedSize(s, [wide, RED])).toEqual({ width: 400, height: 100 });
+    expect(interlacedSize(s, [RED, wide])).toEqual({ width: 400, height: 400 });
   });
 
   it('ignores PPI while the strips run along the pixels', () => {
@@ -168,14 +193,16 @@ describe('interlacedSize', () => {
     expect(interlacedSize(settings({ orientationDeg: -180 }), [RED, BLUE])).toEqual(a);
   });
 
-  it('takes the printer’s raster once the strip edges are diagonal', () => {
-    // Off the axes, a strip edge falls between pixels, and the staircase along
-    // it can only be filed down with more pixels — up to one printed dot.
+  it('leaves diagonal strip edges on the small raster rather than jumping to PPI', () => {
+    // Off the axes a strip edge falls between pixels, and more pixels are the
+    // only cure — but they are offered, not imposed: a 9× bigger artwork for a
+    // finer staircase is the user's call, made by raising the samples.
     const s = settings({ orientationDeg: 23, ppi: 300 });
-    expect(interlacedSize(s, [RED, BLUE])).toEqual(outputSize(s, RED)); // 300 px, not 40
-    expect(interlacedSize({ ...s, ppi: 5000 }, [RED, BLUE]).width).toBe(5000);
-    // Still never below the interlace floor: 500 LPI × 2 × 2 beats 300 PPI.
-    expect(interlacedSize({ ...s, lpi: 500 }, [RED, BLUE]).width).toBe(2000);
+    expect(interlacedSize(s, [RED, BLUE]).width).toBe(40);
+    expect(interlacedSize({ ...s, stripSamples: 8 }, [RED, BLUE]).width).toBe(160);
+    // …and spending past the press is what the cap stops: at 40 samples the
+    // interlace floor asks for 800 px on a 300 px sheet.
+    expect(interlacedSize({ ...s, stripSamples: 40 }, [RED, BLUE]).width).toBe(300);
   });
 
   it('is what renderLenticular actually rasters the artwork at', () => {
@@ -266,10 +293,11 @@ describe('renderLenticular — interlacing', () => {
     expect(() => renderDepthMap([RED], settings())).toThrow(/at least 2 images/);
   });
 
-  it('refuses a render above the pixel budget, before rendering anything', () => {
-    // The depth raster blows the budget while the artwork alone would not, so
-    // this only returns promptly if both are checked up front.
-    expect(() => renderLenticular([RED, BLUE], settings({ widthMm: 5000, ppi: 1440 }))).toThrow(
+  it('stops above the pixel budget and asks, before rendering anything', () => {
+    // 254 mm at 1440 PPI on a square frame is 14400², over 200 MP: big enough
+    // to be worth a question, small enough to be worth answering yes to.
+    const big = settings({ widthMm: 254, ppi: 1440 });
+    expect(() => renderLenticular([RED, BLUE], big)).toThrow(
       /Depth map would be .* Reduce Width \(mm\) or PPI/s,
     );
     // …and an artwork too big in its own right is caught on its own terms.
@@ -277,6 +305,102 @@ describe('renderLenticular — interlacing', () => {
       /Interlaced artwork would be/,
     );
     expect(MAX_OUTPUT_PIXELS).toBeGreaterThan(30_000_000);
+  });
+
+  it('throws something the caller can put to the user, not just a string', () => {
+    let thrown: unknown;
+    try {
+      renderLenticular([RED, BLUE], settings({ widthMm: 254, ppi: 1440 }));
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(OversizeOutputError);
+    const err = thrown as OversizeOutputError;
+    expect(err.what).toBe('Depth map');
+    expect(err.pixels).toBe(err.width * err.height);
+    expect(err.pixels).toBeGreaterThan(MAX_OUTPUT_PIXELS);
+    expect(err.pixels).toBeLessThan(MAX_OVERSIZE_PIXELS);
+    // The number the prompt offers: how many chunks the work splits into.
+    expect(err.chunks).toBe(chunkCount(err.width, err.height));
+    expect(err.chunks).toBeGreaterThan(1);
+    expect(err.fix).toMatch(/Reduce Width/);
+    expect(err.message).toMatch(/run it anyway, in \d+ chunks/);
+  });
+
+  it('goes ahead once the caller says the user agreed', () => {
+    // Same sheet, consent given: no longer refused. Pulling the first chunk is
+    // enough to prove the budget let it through — this test has no interest in
+    // waiting for the other 200 MP.
+    const gen = depthMapChunks([RED, BLUE], settings({ widthMm: 254, ppi: 1440 }), {
+      allowOversize: true,
+    });
+    expect(() => gen.next()).not.toThrow();
+    gen.return(undefined as never);
+  });
+
+  it('refuses outright past what a browser can hold, consent or not', () => {
+    const huge = settings({ widthMm: 50_000, ppi: 1440 });
+    expect(() => renderDepthMap([RED, BLUE], huge, { allowOversize: true })).toThrow(
+      /past what a browser can hold at all/,
+    );
+    // Not an OversizeOutputError: there is nothing to consent to.
+    expect(() => renderDepthMap([RED, BLUE], huge, { allowOversize: true })).not.toThrow(OversizeOutputError);
+    expect(MAX_OVERSIZE_PIXELS).toBeGreaterThan(MAX_OUTPUT_PIXELS);
+  });
+});
+
+describe('chunked rendering', () => {
+  // The real chunk is 4 MP; these tests set a tiny one so the same code path
+  // splits a 100×100 render into bands, and the suite stays a suite.
+  const chunked: RenderOptions = { chunkPixels: 3000 };
+
+  const drain = <T>(gen: Generator<ChunkProgress, T>) => {
+    const seen: ChunkProgress[] = [];
+    let step = gen.next();
+    while (!step.done) {
+      seen.push(step.value);
+      step = gen.next();
+    }
+    return { seen, value: step.value };
+  };
+
+  it('splits a pass into whole bands of rows', () => {
+    expect(chunkRows(1000)).toBe(4000); // 4 MP a chunk at the default
+    expect(chunkCount(1000, 4000)).toBe(1);
+    expect(chunkCount(1000, 4001)).toBe(2);
+    expect(chunkCount(1000, 12_000)).toBe(3);
+    // Never zero rows, however wide the raster.
+    expect(chunkRows(10_000_000)).toBe(1);
+    // 30 rows a chunk at 100 px wide, so a 100-row raster takes four.
+    expect(chunkCount(100, 100, 3000)).toBe(4);
+  });
+
+  it('reports every chunk, in order, and ends on the last one', () => {
+    const s = settings();
+    const { seen, value } = drain(depthMapChunks([RED, BLUE], s, chunked));
+    expect(seen).toHaveLength(chunkCount(100, 100, 3000));
+    expect(seen.map((p) => p.done)).toEqual(seen.map((_, i) => i + 1));
+    expect(new Set(seen.map((p) => p.total))).toEqual(new Set([seen.length]));
+    expect(seen[0].what).toBe('Depth map');
+    // …and the raster it returns is the one the plain call gives.
+    expect(value.depth).toEqual(renderDepthMap([RED, BLUE], s).depth);
+  });
+
+  it('counts both halves of a whole print as one job', () => {
+    const { seen } = drain(lenticularChunks([RED, BLUE], settings(), chunked));
+    // One total across the run, counting up without resetting at the handover
+    // from artwork to depth map.
+    expect(new Set(seen.map((p) => p.total)).size).toBe(1);
+    expect(seen.map((p) => p.done)).toEqual(seen.map((_, i) => i + 1));
+    expect(seen[seen.length - 1].done).toBe(seen[0].total);
+    expect(new Set(seen.map((p) => p.what))).toEqual(new Set(['Interlaced artwork', 'Depth map']));
+  });
+
+  it('gives the same pixels chunked as in one pass', () => {
+    const s = settings();
+    expect(drainSync(interlaceChunks([RED, BLUE], s, chunked)).data).toEqual(
+      renderInterlaced([RED, BLUE], s).data,
+    );
   });
 });
 
@@ -479,7 +603,7 @@ describe('switchFrames', () => {
     // The 1×1 switch frames carry no aspect of their own, so the artwork's
     // raster is handed in — that is what makes the two sheets overlay.
     const artwork = createImage(400, 100, [12, 34, 56, 255]);
-    const size = interlacedSize(s, [artwork, artwork]);
+    const size = interlacedSize(settings({ ppi: 1000 }), [artwork, artwork]);
     const img = renderInterlaced(switchFrames(2), s, { interlacedSize: size });
     expect(img.width).toBe(size.width);
     expect(img.height).toBe(size.height);

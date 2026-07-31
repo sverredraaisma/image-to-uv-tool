@@ -189,8 +189,9 @@ describe('LensGridEditor', () => {
     expect(screen.getByText(/Hexagonal \(offset rows\) — 90\.7% under a cap/)).toBeInTheDocument();
     expect(screen.getByText('10 × 12 px (one per lenslet)')).toBeInTheDocument();
     expect(screen.getByText('100 × 100 px @ 100 PPI')).toBeInTheDocument(); // the lens
-    // Diagonal tile edges, so the artwork rides the lens map's own raster.
-    expect(screen.getByText('100 × 100 px')).toBeInTheDocument();
+    // The artwork sizes itself and stops there: 47 px of interlace, well under
+    // the 100 px the press could print.
+    expect(screen.getByText('47 × 47 px')).toBeInTheDocument();
     expect(screen.getByText(/edges between view tiles on diagonals/)).toBeInTheDocument();
     for (const button of screen.getAllByRole('button')) expect(button).toBeEnabled();
   });

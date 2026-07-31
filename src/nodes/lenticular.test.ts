@@ -80,10 +80,21 @@ describe('Lenticular Print node', () => {
 
   it('sizes the artwork off the source resolution when that is the larger', async () => {
     const big = createImage(600, 600, [1, 2, 3, 255]);
-    const out = await lenticularNode.compute(ctx({ frames: [big, BLUE] }, config()));
+    // 25.4 mm at 1000 PPI: a 1000 px sheet, so the 600 px source is kept whole.
+    const out = await lenticularNode.compute(ctx({ frames: [big, BLUE] }, config({ ppi: 1000 })));
     expect((out.interlaced as RasterImage).width).toBe(600);
-    // …and the depth map is unmoved by it.
+    expect((out.depth as RasterImage).width).toBe(1000);
+  });
+
+  it('caps the artwork at the raster the press can print', async () => {
+    const big = createImage(600, 600, [1, 2, 3, 255]);
+    // The same source on a 100 PPI sheet: 600 px of artwork for a print that
+    // resolves 100 is 600 px the paper never sees.
+    const out = await lenticularNode.compute(ctx({ frames: [big, BLUE] }, config()));
+    expect((out.interlaced as RasterImage).width).toBe(100);
     expect((out.depth as RasterImage).width).toBe(100);
+    if (out.info?.kind === 'text') expect(out.info.text).toContain('Artwork at the 100 PPI cap');
+    else throw new Error('expected a text info output');
   });
 
   it('ignores PPI when sizing the artwork, but not when sizing the lens', async () => {

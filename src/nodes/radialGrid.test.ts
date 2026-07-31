@@ -130,9 +130,13 @@ describe('which view owns a bearing', () => {
   });
 });
 
+// The wedge-placement tests below sample a lenslet 10 px across, so they pin
+// the artwork to the lens map's raster; the sizing rule is its own test.
+const ART = { width: 100, height: 100 };
+
 describe('radial interlace', () => {
   it('gives every view the wedge at its own bearing', () => {
-    const art = renderRadialInterlaced(RING, settings({ mirrorViews: false }), {});
+    const art = renderRadialInterlaced(RING, settings({ mirrorViews: false }), { interlacedSize: ART });
     // One lenslet is 10 px across at these settings; sample around a centre.
     const cx = 15;
     const cy = 15;
@@ -143,7 +147,7 @@ describe('radial interlace', () => {
   });
 
   it('mirrors the ring when the lens inverts, which is the default', () => {
-    const art = renderRadialInterlaced(RING, settings({ mirrorViews: true }), {});
+    const art = renderRadialInterlaced(RING, settings({ mirrorViews: true }), { interlacedSize: ART });
     const cx = 15;
     const cy = 15;
     // The view named 0° is now on the left of the cell, so that an eye to the
@@ -153,7 +157,7 @@ describe('radial interlace', () => {
   });
 
   it('carries every view somewhere on the sheet', () => {
-    const art = renderRadialInterlaced(RING, settings(), {});
+    const art = renderRadialInterlaced(RING, settings(), { interlacedSize: ART });
     const seen = new Set<string>();
     for (let i = 0; i < art.width * art.height; i++) {
       seen.add(`${art.data[i * 4]},${art.data[i * 4 + 1]},${art.data[i * 4 + 2]}`);
@@ -165,14 +169,18 @@ describe('radial interlace', () => {
     expect(() => renderRadialInterlaced([RIGHT, UP], settings({ views: 4 }), {})).toThrow(/needs 4 images/);
   });
 
-  it('always ships the artwork on the printer raster — wedge edges are radial', () => {
+  it('sizes the artwork for the wedges, capped at what the press can print', () => {
     const s = settings();
-    // Even at 0° with square packing, where a *grid* would use its minimal
-    // raster, there is no orientation that puts a radial edge on the pixels.
-    expect(radialInterlacedSize(s, RING).width).toBeGreaterThanOrEqual(100);
+    // 10 cells × 4 views × 2 samples ÷ π: enough that a wedge is two pixels
+    // wide at the rim, which is where a wedge is widest.
+    expect(radialInterlacedSize(s, RING).width).toBe(26);
+    // No orientation helps a radial edge, so none of them changes the size…
     expect(radialInterlacedSize({ ...s, orientationDeg: 0 }, RING).width).toBe(
       radialInterlacedSize({ ...s, orientationDeg: 23 }, RING).width,
     );
+    // …but more samples do, and they stop at the 100 px the press can print.
+    expect(radialInterlacedSize({ ...s, stripSamples: 8 }, RING).width).toBe(100); // capped, wanted 102
+    expect(radialInterlacedSize({ ...s, stripSamples: 4 }, RING).width).toBe(51);
   });
 
   it('prints the same lens array as the grid does', () => {
@@ -230,12 +238,14 @@ describe('radial node', () => {
 
   it('renders both halves and reports the geometry', async () => {
     const out = await radialGridNode.compute(ctx(fourInputs, config()));
-    expect((out.interlaced as RasterImage).width).toBe(100);
+    // The artwork is sized by the wedges; the lens map keeps the PPI raster.
+    expect((out.interlaced as RasterImage).width).toBe(26);
     expect((out.depth as RasterImage).width).toBe(100);
     const info = (out.info as TextValue).text;
     expect(info).toContain('4 views around the circle, one every 90.0°');
     expect(info).toContain('Head-on all 4 merge');
-    expect(info).toContain('wedge edges are radial lines');
+    expect(info).toContain('Artwork on the minimal raster: 26 px of the 100 px');
+    expect(info).toContain('wedge seams');
   });
 
   it('warns when the wedges are too fine to print at all', async () => {
