@@ -871,9 +871,13 @@ disagree, the answer is to frame wider, or to let the far half of the scene go t
    whole run travels on one wire and interlaces in the order it arrives, which is the order the sweep
    was walked: left eye first, reversed by the print node for the lens.
 
-The GIF is written at one pixel per lenslet by default — 177 px at the defaults — because that is
-everything the print can resolve. `--width` raises it if you want something to look at rather than to
-print. Cropping defaults to the widest 4:3 rectangle the recording holds; `--aspect`, `--zoom` and
+The GIF keeps the recording's own resolution: the frames are cropped and nothing is resampled.
+**Lenticular Print does the reduction itself** — it knows the sheet resolves 177 px per view at the
+defaults and that a strip of artwork is worth `stripSamples` printed dots, and it sizes the interlace
+from that. Throwing the pixels away here would only cost a re-crop or a regrade later, and buy
+nothing at the press. `--width` is there for when a smaller GIF is the point rather than the print.
+
+Cropping defaults to the widest 4:3 rectangle the recording holds; `--aspect`, `--zoom` and
 `--offset` place it, and the sheet takes its proportions from whatever comes out.
 
 Neither script needs to know the recording's resolution: the crop is written as an ffmpeg expression

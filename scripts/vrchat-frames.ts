@@ -9,6 +9,10 @@
 // Print** — the whole animation travels on one wire, and the print interlaces
 // the frames in the order they arrive.
 //
+// Nothing is resampled on the way: the frames keep the recording's resolution
+// and the print node reduces them when it interlaces, which is the end that
+// knows how many pixels the sheet actually resolves.
+//
 // ffmpeg does the work; this decides what to ask it for. `--dry-run` prints the
 // commands instead of running them, which is also the answer if ffmpeg lives on
 // a different machine to this one.
@@ -36,8 +40,9 @@ The crop
   --aspect W:H       shape of the printed sheet                  (default 4:3)
   --zoom F           crop in by this factor, 1 = as wide as it goes (default 1)
   --offset X,Y       move the crop, in fractions of the frame     (default 0,0)
-  --width PX         output width; the default is one pixel per lenslet, which
-                     is all a print can resolve — more is only for looking at
+  --width PX         resample to this width; by default nothing is resampled and
+                     the frames keep the recording's own resolution, which is
+                     what Lenticular Print wants — it reduces them itself
 
 The GIF
   --out FILE         where to write it                       (default views.gif)
@@ -77,6 +82,20 @@ const num = (args: Args, key: string, fallback: number): number => {
 
 const str = (args: Args, key: string): string | undefined =>
   typeof args[key] === 'string' ? (args[key] as string) : undefined;
+
+/**
+ * A PNG's dimensions, straight out of its header — the frames are already on
+ * disk, so this beats asking ffprobe (or the user) how big the recording was.
+ */
+function pngSize(file: string): { width: number; height: number } | null {
+  try {
+    const header = readFileSync(file).subarray(0, 24);
+    if (header.length < 24 || header.toString('latin1', 12, 16) !== 'IHDR') return null;
+    return { width: header.readUInt32BE(16), height: header.readUInt32BE(20) };
+  } catch {
+    return null;
+  }
+}
 
 interface Plan {
   views: number;
@@ -144,11 +163,12 @@ function main(argv: string[]): void {
   const offsetRaw = (str(args, 'offset') ?? '0,0').split(',').map(Number);
   const offset = { x: offsetRaw[0] || 0, y: offsetRaw[1] || 0 };
 
-  // One pixel per lenslet is everything the print can resolve; anything past
-  // that is for looking at on screen, not for the sheet.
-  const lensletWidth = Math.round(((plan.printWidthMm ?? 100) * (plan.lpi ?? 45)) / 25.4);
-  const width = Math.max(16, Math.round(num(args, 'width', lensletWidth)));
-  const height = Math.max(16, Math.round(width / aspect));
+  // No resampling by default: the frames come out at whatever the crop of the
+  // recording gives, and Lenticular Print does its own reduction from there —
+  // it knows how many pixels the sheet resolves and this does not. Scaling
+  // here would only throw away detail that the print, a re-crop or a regrade
+  // might still want. `--width` is for when a smaller GIF is the point.
+  const width = args.width !== undefined ? Math.max(16, Math.round(num(args, 'width', 0))) : null;
   const outPath = str(args, 'out') ?? 'views.gif';
   const delayMs = Math.max(10, num(args, 'delay', 100));
   const ffmpeg = str(args, 'ffmpeg') ?? 'ffmpeg';
@@ -158,7 +178,10 @@ function main(argv: string[]): void {
   if (keepDir) mkdirSync(keepDir, { recursive: true });
   const workDir = keepDir ?? (dryRun ? '<tmp>' : mkdtempSync(join(tmpdir(), 'lenticular-')));
 
-  const filters = `${cropFilter(aspect, zoom, offset)},scale=${width}:${height}:flags=lanczos`;
+  const filters =
+    width === null
+      ? cropFilter(aspect, zoom, offset)
+      : `${cropFilter(aspect, zoom, offset)},scale=${width}:${Math.round(width / aspect)}:flags=lanczos`;
   const pad = String(times.length).length;
   const framePath = (i: number) => join(workDir, `view-${String(i + 1).padStart(pad, '0')}.png`);
 
