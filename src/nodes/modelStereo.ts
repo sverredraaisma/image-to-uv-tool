@@ -11,11 +11,12 @@ import {
   describePlacement,
   disparityAtDepth,
   eyeOffsetsMm,
-  renderViewSequence,
+  viewSequenceChunks,
   worstDisparity,
   type ViewSequenceOptions,
   type ViewSequenceRender,
 } from '../lib/render3d';
+import { runChunked } from '../lib/chunked';
 import { MAX_HAZE_LENSLETS } from './model3d';
 import { coneFromConfig } from './model3d';
 import { asImage, bool, num, str } from './helpers';
@@ -280,7 +281,7 @@ export const modelStereoNode: NodeDefinition = {
     supersample: 2,
     flipDepth: false,
   }),
-  compute: async ({ inputs, config, onProgress }) => {
+  compute: async ({ inputs, config, onProgress, signal }) => {
     const stl = gatherMesh(inputs);
     if (!stl) throw new Error('Connect a mesh to the Mesh input (3D Model Input).');
     if (stl.triangleCount > MAX_IMPORT_TRIANGLES) {
@@ -288,10 +289,9 @@ export const modelStereoNode: NodeDefinition = {
     }
     const o = { ...viewSequenceOptionsFromConfig(config), texture: asImage(inputs.texture) };
     onProgress?.(`Rendering ${o.views} views at ${o.widthPx} px…`);
-    // Let the spinner paint before the render locks the main thread.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const render = renderViewSequence(stl, o);
+    // One chunk per view, so the run reports its way through the cone and can
+    // be cancelled between passes rather than only at the end.
+    const render = await runChunked(viewSequenceChunks(stl, o), { onProgress, signal });
     // The renderer hands them back left eye first, which is honest but not what
     // gets printed: a lenticule shows its leftmost strip to an eye on the
     // *right*, and Lenticular Print interlaces frames in the order they arrive.

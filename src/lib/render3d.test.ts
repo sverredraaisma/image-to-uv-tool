@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   clampSetbackMm,
+  viewGridChunks,
+  viewSequenceChunks,
   disparityPerStep,
   eyeOffsetsMm,
   prepareVertices,
@@ -287,6 +289,41 @@ describe('renderViewGrid', () => {
     const r = renderViewGrid(mesh(quad(-1, 1, -1, 1, 0)), o);
     expect(r.views[0].width).toBe(24);
     expect(r.views[0].height).toBe(24);
+  });
+});
+
+describe('chunked view rendering', () => {
+  const quadMesh = () => mesh(quad(-1, 1, -1, 1, 1));
+
+  it('renders one view per chunk, counting them off', () => {
+    const gen = viewGridChunks(quadMesh(), options({ grid: 3, widthPx: 16 }));
+    const seen: { done: number; total: number; what: string }[] = [];
+    let step = gen.next();
+    while (!step.done) {
+      seen.push(step.value);
+      step = gen.next();
+    }
+    expect(seen).toHaveLength(9);
+    expect(seen.map((p) => p.done)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(seen.every((p) => p.total === 9 && p.what === 'Views')).toBe(true);
+    // …and what comes back is exactly what the plain call gives.
+    expect(step.value.views).toHaveLength(9);
+    expect(step.value.views[4].data).toEqual(
+      renderViewGrid(quadMesh(), options({ grid: 3, widthPx: 16 })).views[4].data,
+    );
+  });
+
+  it('does the same for a 1D run', () => {
+    const { grid: _grid, ...shared } = options({ widthPx: 16 });
+    const gen = viewSequenceChunks(quadMesh(), { ...shared, views: 5 });
+    let count = 0;
+    let step = gen.next();
+    while (!step.done) {
+      count++;
+      step = gen.next();
+    }
+    expect(count).toBe(5);
+    expect(step.value.views).toHaveLength(5);
   });
 });
 

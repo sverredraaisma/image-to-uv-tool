@@ -16,9 +16,10 @@ import {
   disparityAtDepth,
   disparityPerStep,
   eyeOffsetsMm,
-  renderViewGrid,
+  viewGridChunks,
   type ViewGridOptions,
 } from '../lib/render3d';
+import { runChunked } from '../lib/chunked';
 import { isBlobRef } from '../lib/blobStore';
 import { platform } from '../lib/platform';
 import { asImage, bool, num, str } from './helpers';
@@ -413,7 +414,7 @@ export const modelViewsNode: NodeDefinition = {
     supersample: 2,
     flipDepth: false,
   }),
-  compute: async ({ inputs, config, onProgress }) => {
+  compute: async ({ inputs, config, onProgress, signal }) => {
     const stl = gatherMesh(inputs);
     if (!stl) throw new Error('Connect a mesh to the Mesh input (3D Model Input).');
     if (stl.triangleCount > MAX_IMPORT_TRIANGLES) {
@@ -421,10 +422,9 @@ export const modelViewsNode: NodeDefinition = {
     }
     const o = { ...viewGridOptionsFromConfig(config), texture: asImage(inputs.texture) };
     onProgress?.(`Rendering ${o.grid * o.grid} views at ${o.widthPx} px…`);
-    // Let the spinner paint before the render locks the main thread.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const render = renderViewGrid(stl, o);
+    // One chunk per view: a 15×15 is 225 passes over the mesh, and the run
+    // hands the UI back between them so the count moves and Cancel works.
+    const render = await runChunked(viewGridChunks(stl, o), { onProgress, signal });
     // Row-major from `Left · Up`, which is the order the print node reads a
     // sequence in — the two are the same gridCells() list.
     return {

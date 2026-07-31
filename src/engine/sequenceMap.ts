@@ -23,6 +23,7 @@
 //   • Anything a node definition opts out of, which is how the paid AI nodes
 //     make a 30× fan-out a decision rather than a default.
 
+import { yieldToUi } from '../lib/chunked';
 import type {
   ComputeContext,
   ComputeResult,
@@ -127,7 +128,13 @@ export async function computeMaybeMapped(
   for (let i = 0; i < frames; i++) {
     if (ctx.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     const label = `Frame ${i + 1}/${frames}`;
-    ctx.onProgress?.(label);
+    ctx.onProgress?.(label, i / frames);
+    // A frame is this loop's chunk: hand the event loop back before each one so
+    // the count paints and a Cancel is noticed, exactly as a chunked render
+    // does between bands of rows. A node whose own compute is synchronous —
+    // most of the pixel ops are — would otherwise run the whole animation
+    // without the browser drawing a thing.
+    await yieldToUi();
 
     const inputs: ComputeContext['inputs'] = {};
     for (const [key, value] of Object.entries(ctx.inputs)) inputs[key] = valueAtFrame(value, i);
@@ -136,7 +143,10 @@ export async function computeMaybeMapped(
       inputs,
       // The node's own progress messages still get through, behind the count —
       // a slow per-frame node should say what it is doing *and* where it is.
-      onProgress: (message) => ctx.onProgress?.(`${label} · ${message}`),
+      // Its fraction is folded into the run as a whole, so a bar over a mapped
+      // sequence measures the whole animation rather than restarting per frame.
+      onProgress: (message, fraction) =>
+        ctx.onProgress?.(`${label} · ${message}`, (i + (fraction ?? 0)) / frames),
     });
 
     for (const [key, value] of Object.entries(result)) {

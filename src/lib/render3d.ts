@@ -34,6 +34,7 @@
 // positive z. Millimetres throughout, so every setting is a physical one.
 
 import type { RasterImage, StlValue } from '../types';
+import type { ChunkProgress } from './chunked';
 import { createImage } from './image';
 import { meshBounds } from './stl';
 
@@ -136,6 +137,13 @@ export interface PreparedMesh {
   /** Carried straight through from the mesh — the fit never reorders triangles. */
   uvs?: Float32Array;
   colours?: Uint8Array;
+}
+
+/** Run a chunked view render straight through, ignoring the progress. */
+function drainViews<T>(gen: Generator<ChunkProgress, T>): T {
+  let step = gen.next();
+  while (!step.done) step = gen.next();
+  return step.value;
 }
 
 export const MIN_VIEW_PX = 16;
@@ -570,6 +578,18 @@ export interface ViewGridRender {
  * sees. The print node inverts them, because the *lens* is what inverts them.
  */
 export function renderViewGrid(stl: StlValue, o: ViewGridOptions): ViewGridRender {
+  return drainViews(viewGridChunks(stl, o));
+}
+
+/**
+ * {@link renderViewGrid}, one view at a time.
+ *
+ * A view is the natural chunk here: it is one whole pass over the mesh, it is
+ * the unit the progress is worth counting in ("view 37 of 225"), and a 15×15
+ * grid is 225 of them — which at half a second each is two minutes of frozen
+ * tab if nobody hands the event loop back in between.
+ */
+export function* viewGridChunks(stl: StlValue, o: ViewGridOptions): Generator<ChunkProgress, ViewGridRender> {
   const grid = Math.max(1, Math.round(o.grid));
   const depthMm = Math.max(0, o.depthMm);
   const setbackMm = clampSetbackMm(o.setbackMm, o.viewDistanceMm);
@@ -591,6 +611,7 @@ export function renderViewGrid(stl: StlValue, o: ViewGridOptions): ViewGridRende
   // The view nearest head-on; for an even grid, one of the middle four.
   const mid = grid >> 1;
   const views: RasterImage[] = [];
+  const total = grid * grid;
   let centre: ReturnType<typeof renderOne> | undefined;
   for (let row = 0; row < grid; row++) {
     for (let col = 0; col < grid; col++) {
@@ -598,6 +619,7 @@ export function renderViewGrid(stl: StlValue, o: ViewGridOptions): ViewGridRende
       const rendered = renderOne(mesh, stl.triangleCount, placed, offsets[col], -offsets[row]);
       views.push(downsample(rendered.rgb, rendered.w, rendered.h, rendered.ss));
       if (col === mid && row === mid) centre = rendered;
+      yield { done: views.length, total, what: 'Views' };
     }
   }
 
@@ -759,6 +781,14 @@ export interface ViewSequenceRender {
  * whatever prints them has to account for that (the node does).
  */
 export function renderViewSequence(stl: StlValue, o: ViewSequenceOptions): ViewSequenceRender {
+  return drainViews(viewSequenceChunks(stl, o));
+}
+
+/** {@link renderViewSequence}, one view at a time. See {@link viewGridChunks}. */
+export function* viewSequenceChunks(
+  stl: StlValue,
+  o: ViewSequenceOptions,
+): Generator<ChunkProgress, ViewSequenceRender> {
   const count = Math.max(1, Math.round(o.views));
   const depthMm = Math.max(0, o.depthMm);
   const setbackMm = clampSetbackMm(o.setbackMm, o.viewDistanceMm);
@@ -783,6 +813,7 @@ export function renderViewSequence(stl: StlValue, o: ViewSequenceOptions): ViewS
     const rendered = renderOne(mesh, stl.triangleCount, placed, offsetsMm[i], 0);
     views.push(downsample(rendered.rgb, rendered.w, rendered.h, rendered.ss));
     if (i === mid) centre = rendered;
+    yield { done: views.length, total: count, what: 'Views' };
   }
 
   const { depth, coverage } = depthOf(centre ?? renderOne(mesh, stl.triangleCount, placed, 0, 0));
