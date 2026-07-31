@@ -19,7 +19,8 @@
     "format:check": "prettier --check .",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "dolly": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-node.mjs scripts/vrchat-dolly.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.3.5",

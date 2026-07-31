@@ -32,6 +32,7 @@ licensing [at the end](#prior-art-and-licence).
 - [Angle and phase](#angle-and-phase)
 - [The two-dimensional version](#the-two-dimensional-version)
 - [Rendering the views from a model](#rendering-the-views-from-a-model)
+- [Shooting the views in a game world](#shooting-the-views-in-a-game-world)
 - [Calibrating](#calibrating)
 - [The numbers, at the defaults](#the-numbers-at-the-defaults)
 - [Doing it yourself](#doing-it-yourself)
@@ -761,6 +762,90 @@ before sending it. Get this backwards and the print is _pseudoscopic_: the paral
 way, near things move like far ones, and the whole picture turns inside out. The switch is under
 Advanced (_Order for the lens_) precisely because the only way to be certain which way your own
 press ends up is to print one and look at it.
+
+---
+
+## Shooting the views in a game world
+
+A rendered mesh is not the only source of views. Anything that can be photographed from a chosen
+position can be photographed from N of them — and a game with a free camera is a rig you already own.
+VRChat is the case this repository has a tool for, because its camera can be driven along a **dolly
+path** read from a JSON file, which is exactly the shape of the problem: a list of positions and
+rotations, walked in order.
+
+```bash
+npm run dolly -- --grid 3 --distance 4 --heading 180 --anchor 0,1.2,0 --out cube.json
+npm run dolly -- --help
+```
+
+The script writes the path and then tells you what it is worth as a print. Both halves matter, and
+the second one more than people expect.
+
+### The one rule the path exists to enforce
+
+Everything in [rendering from a model](#rendering-the-views-from-a-model) applies here, and the first
+bullet is the reason to generate a path at all rather than fly the camera by hand:
+
+> **The camera translates. It never rotates.**
+
+Every stop shares one rotation, so every shot is a shear of one projection and the plane through the
+anchor prints sharp. Point the camera at your subject for each shot instead — which is what anyone
+flying by hand naturally does, and what VRChat's own _LookAtMe_ does automatically — and each frame
+is keystoned differently. Under the lens that reads as a wobble as your head moves, and nothing in
+the print can take it out again. The generated path sets `LookAtMe: false` on every point for the
+same reason.
+
+The stops themselves are the same tan-spaced positions `eyeOffsetsMm()` gives the mesh renderer,
+spanning the same cone `lensGeometry()` solves from your LPI, gloss height and RI. A path and a print
+made from the same numbers agree because they are computed by the same functions.
+
+### What a metre of world is worth on the sheet
+
+This is the part that decides whether a scene can be printed at all, and it is a different question
+from the mesh case, where the tool scales the model to fit.
+
+The print resolves **one sample per lenslet per view** — 177 across a 100 mm sheet at 45 LPI. Your
+camera frames `2·D·tan(fov/2)` metres of world at the focal plane. Divide, and you have the exchange
+rate:
+
+```
+metres of subject per lenslet  =  2·D·tan(fov/2) / (print width × LPI / 25.4)
+```
+
+At 4 m with a 60° frame that is 4.62 m across 177 lenslets: **26 mm of world per lenslet**. Anything
+that shifts more than 26 mm between neighbouring shots has crossed a lenslet, and the
+[depth budget](#the-depth-budget-which-is-smaller-than-you-think) applies from there exactly as it
+does to a rendered subject: crisp under one lenslet, haze to about four, doubling past that.
+
+Two consequences worth having in mind before you walk a path:
+
+- **A wider frame is the forgiving one.** Each lenslet covers more world, so the same camera step
+  crosses fewer of them. Zooming in tightens the budget in proportion to `tan(fov/2)`. You pay for
+  the wider frame in subject size, which is the trade the shot is really about.
+- **Standing further back barely helps by itself.** The viewing distance nearly cancels: it survives
+  only as `Z/(D + Z)`, so doubling the distance buys almost nothing unless you also re-frame.
+
+`--depth M` puts the question the other way round and answers it: _for this much scene behind the
+plane, how many shots do I actually need?_ Expect the answer to be larger than the number you had in
+mind — a 3 m room at a 60° frame wants dozens of stops, which is why the tool says so before you
+spend an evening walking one.
+
+### Taking the shots
+
+1. Generate the path and load it in the in-game camera's **Dolly** mode.
+2. Set the camera to the field of view you told the script about, and check the reported frame width
+   against what you actually see. That number is the one assumption the script cannot verify for you.
+3. Walk the path, taking one photo at each stop. `--hold` sets how long the client spends on each
+   leg, so there is time to take the shot; `--shot-list` writes the stops out as text to tick off.
+4. Feed the photos into **Lenticular Print** (a 1D run) or **Lens Grid Print** (a grid) in the order
+   the script listed them — a grid runs row-major from `Left · Up`, which is the order the print node
+   names its cells, and a 1D run goes left eye first, which is the order it expects before it
+   reverses the frames for the lens.
+
+The file itself is the only part of this that depends on somebody else's format rather than on
+optics. If a client update ever changes the fields, export any path from the camera yourself and pass
+it as `--template`: every field it carries is copied onto each point, and only the geometry is
+overwritten.
 
 ---
 
