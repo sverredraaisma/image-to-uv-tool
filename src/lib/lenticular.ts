@@ -298,29 +298,52 @@ const turnedOffAxis = (orientationDeg: number): boolean => Math.abs(orientationD
  * Sampling density is orientation-independent — the pixels are square, so a
  * strip wide enough along x is wide enough at any angle — but *placement* is
  * not. Turn the array and every boundary between two frames becomes a diagonal,
- * and a diagonal is the one thing a raster this coarse cannot draw: a pixel
+ * and a diagonal is the one thing a raster cannot draw exactly: a pixel
  * straddling one belongs to two frames and gets whichever one its centre lands
- * in, so the edge comes out as a staircase with steps a whole strip wide.
- * See {@link interlacedSize}; {@link gridTilesOffPixelGrid} is the 2D case.
+ * in, so the edge comes out as a staircase — with steps a whole strip wide on
+ * the minimal raster, down to one printed dot at the PPI cap. More pixels are
+ * the only cure, up to that cap; see {@link interlacedSize} for why they are
+ * offered rather than imposed. {@link gridTilesOffPixelGrid} is the 2D case.
  */
 export function stripsOffPixelGrid(settings: LenticularSettings): boolean {
   return turnedOffAxis(settings.orientationDeg);
 }
 
 /**
+ * The printer's raster as a *ceiling* on a piece of artwork.
+ *
+ * Nothing is gained by a pixel the press cannot place: the sheet is printed at
+ * `ppi`, so a pixel finer than that raster is resampled away on its way to the
+ * paper, having cost memory and render time to make. Whatever the interlace and
+ * the sources ask for, this is where it stops.
+ *
+ * Note which way round it works. The PPI raster is not a floor — a sheet that
+ * needs fewer pixels ships fewer, and only artwork that would otherwise come out
+ * *larger* than the press can print is brought down to it.
+ */
+const cappedAtPpi = (needed: number, ppiWidth: number): number =>
+  Math.max(1, Math.min(Math.max(1, Math.round(needed)), Math.max(1, ppiWidth)));
+
+/**
  * Smallest raster that still holds everything the interlaced sheet knows.
  *
  * The interlaced artwork carries no lens geometry — it is flat ink that the
- * printing tool scales onto the sheet — so as long as its strips run along the
- * raster it has no reason to sit on the printer's PPI raster. Three things bound
- * it from below:
+ * printing tool scales onto the sheet — so it has no reason to sit on the
+ * printer's PPI raster. Two things bound it from below:
  *
  *   • the interlace itself: `stripSamples` pixels for every frame strip of
  *     every lenticule, so no strip can be skipped by an unlucky phase;
- *   • the artwork: never resample the highest-resolution frame downwards;
- *   • the strip edges, if they are diagonal ({@link stripsOffPixelGrid}): those
- *     need the printer's own raster, because that is the finest the staircase
- *     along them can ever be made — one printed dot instead of one strip.
+ *   • the artwork: never resample the highest-resolution frame downwards.
+ *
+ * …and {@link cappedAtPpi} bounds it from above.
+ *
+ * Diagonal strip edges ({@link stripsOffPixelGrid}) are the one thing more
+ * pixels would still buy, since the staircase along them is only as fine as the
+ * raster: they are placed to within half a pixel whatever the raster, so it is
+ * *strip* accuracy at the minimal size and *printed dot* accuracy at the cap.
+ * That is a matter of degree, not of correctness, so it is left as a choice —
+ * raise Artwork px per strip and the raster climbs towards the cap — rather
+ * than a hidden jump to a raster twenty times the size.
  *
  * The aspect ratio is the first frame's, as everywhere else.
  */
@@ -330,8 +353,7 @@ export function interlacedSize(settings: LenticularSettings, frames: RasterImage
   const samples = Math.max(1, settings.stripSamples);
   const forStrips = Math.ceil(lenticules * frames.length * samples);
   const forArtwork = Math.max(...frames.map((f) => f.width));
-  const forDiagonals = stripsOffPixelGrid(settings) ? outputSize(settings, first).width : 0;
-  const width = Math.max(1, forStrips, forArtwork, forDiagonals);
+  const width = cappedAtPpi(Math.max(forStrips, forArtwork), outputSize(settings, first).width);
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -906,23 +928,30 @@ export function gridCells(grid: number): { col: number; row: number; id: string;
  * {@link stripsOffPixelGrid}, with one extra way to get there.
  *
  * A square array at 0° (or any multiple of 90°) tiles the artwork in rectangles
- * whose edges are horizontal and vertical, so the minimal raster of
- * {@link gridInterlacedSize} places every edge exactly. Stagger the rows for hex
- * packing, or turn the array off the axes, and the tile edges go diagonal.
+ * whose edges are horizontal and vertical, so the raster of
+ * {@link gridInterlacedSize} places every edge exactly, however small it is.
+ * Stagger the rows for hex packing, or turn the array off the axes, and the tile
+ * edges go diagonal — placed to half a pixel, which is a fraction of a view tile
+ * on a small raster and a fraction of a printed dot at the PPI cap. Reported, so
+ * the choice of raster is an informed one.
  */
 export function gridTilesOffPixelGrid(settings: LensGridSettings): boolean {
   return clampPacking(settings.packing) === 'hex' || stripsOffPixelGrid(settings);
 }
 
 /**
- * {@link interlacedSize} for a grid: every cell needs `grid` views across.
+ * {@link interlacedSize} for a grid: every cell needs `grid` views across, and
+ * the printer's PPI raster is the ceiling here too.
  *
- * Sheets whose tiles are axis-aligned ship at the smallest raster that resolves
- * them, as the 1D interlace does. Sheets with diagonal tile edges
- * ({@link gridTilesOffPixelGrid}) instead ship on the printer's own PPI raster —
- * the same one the lens map is on. That is the finest the print can be, so it is
- * the most that spending pixels here can buy, and those extra pixels go
- * straight into the diagonals: the staircase steps down to one printed dot.
+ * A grid reaches that ceiling far sooner than a 1D sheet — `grid` tiles across
+ * a cell instead of `frames` strips, and hex packing needs another 1/0.866 on
+ * top — so a big grid ships at the cap and a small one does not, which is
+ * exactly the intent: pay for pixels the press can print, and no more.
+ *
+ * Diagonal tile edges ({@link gridTilesOffPixelGrid}) — every hex sheet, and any
+ * turned array — are placed to half a pixel whatever the raster, so they are
+ * worth spending towards the cap on but are not a reason to jump to it. See
+ * {@link interlacedSize}.
  */
 export function gridInterlacedSize(settings: LensGridSettings, views: RasterImage[]): OutputSize {
   const first = views[0];
@@ -934,8 +963,7 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
     (cells * clampGrid(settings.grid) * samples) / rowScaleOf(clampPacking(settings.packing)),
   );
   const forArtwork = Math.max(...views.map((v) => v.width));
-  const forDiagonals = gridTilesOffPixelGrid(settings) ? outputSize(settings, first).width : 0;
-  const width = Math.max(1, forViews, forArtwork, forDiagonals);
+  const width = cappedAtPpi(Math.max(forViews, forArtwork), outputSize(settings, first).width);
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -978,6 +1006,7 @@ export function* gridInterlaceChunks(
     height,
     'Interlaced artwork',
     'Reduce Width (mm), PPI, LPI, the grid or the source size',
+    options,
   );
 
   const s = sheet(views, settings, options);
@@ -1257,11 +1286,19 @@ function requireRadialViews(views: RasterImage[], count: number): number {
 /**
  * {@link gridInterlacedSize} for a ring of wedges.
  *
- * Always the printer's own raster, and not as a fallback: a wedge boundary is a
- * *radial line*, so unlike a grid's tile edges there is no orientation at which
- * they run along the pixels. They also converge — near the centre of a cell the
- * wedges are finer than any raster can hold, which is exactly why the views
- * merge there — so the sensible target is the finest raster the print has.
+ * Sized like the others: enough pixels for the wedges and the sources, capped at
+ * the printer's own raster.
+ *
+ * A wedge boundary is a *radial line*, so unlike a 1D sheet's strips or a
+ * square grid's tile edges there is no orientation at which they run along the
+ * pixels — every radial sheet is a diagonal one, and every pixel of artwork up
+ * to the cap buys a straighter seam. They also converge: near the centre of a
+ * cell the wedges are finer than any raster can hold, which is exactly why the
+ * views merge there, so it is the rim that the floor below is measured at.
+ *
+ * That makes the PPI cap worth more here than anywhere else, and reaching for
+ * it is one setting away (Artwork px per wedge) — but it is still the caller's
+ * call, not a silent twentyfold jump in the size of the file.
  */
 export function radialInterlacedSize(settings: RadialSettings, views: RasterImage[]): OutputSize {
   const first = views[0];
@@ -1271,7 +1308,7 @@ export function radialInterlacedSize(settings: RadialSettings, views: RasterImag
   // the rim, where it subtends (π/N) of a cell diameter.
   const forWedges = Math.ceil((cells * clampRadialViews(settings.views) * samples) / Math.PI);
   const forArtwork = Math.max(...views.map((v) => v.width));
-  const width = Math.max(1, forWedges, forArtwork, outputSize(settings, first).width);
+  const width = cappedAtPpi(Math.max(forWedges, forArtwork), outputSize(settings, first).width);
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -1452,6 +1489,36 @@ export function radialSwitchViews(count: number): RasterImage[] {
 /** Fewer pixels than this across a lenticule and the lens profile is terraced. */
 const MIN_LENS_PX = 8;
 
+/**
+ * The line that explains which raster the artwork landed on.
+ *
+ * The printer's raster is a ceiling rather than a destination, so the question
+ * is no longer "minimal or PPI" but "did this reach the cap, and if not, would
+ * more pixels still buy anything". Diagonal edges are the only thing that would
+ * — hence `diagonal`, which names them and the setting that pays for them.
+ */
+function describeArtRaster(
+  ppi: number,
+  artSize: OutputSize,
+  ppiSize: OutputSize,
+  diagonal: { edges: string; setting: string } | null,
+): string {
+  if (artSize.width >= ppiSize.width) {
+    return (
+      `Artwork at the ${ppi} PPI cap: ${artSize.width} px is every dot the press can place` +
+      (diagonal ? `, so the diagonal ${diagonal.edges} come out to within one printed dot` : '')
+    );
+  }
+  return (
+    `Artwork on the minimal raster: ${artSize.width} px of the ${ppiSize.width} px the press could ` +
+    `print — all the interlace and your sources need` +
+    (diagonal
+      ? `. The ${diagonal.edges} run diagonally, so they are placed to half a pixel *of this raster*; ` +
+        `raise ${diagonal.setting} to spend up to the cap if the staircase shows`
+      : `, and the edges land on whole pixels`)
+  );
+}
+
 /** Human-readable geometry report for the node's Info output and its editor. */
 export function describeGeometry(
   settings: LenticularSettings,
@@ -1465,10 +1532,12 @@ export function describeGeometry(
     `${frameCount} frames · ${settings.widthMm} mm wide`,
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
-    stripsOffPixelGrid(settings)
-      ? `Artwork on the full ${settings.ppi} PPI raster: a ${settings.orientationDeg}° array puts the ` +
-        `strip edges on diagonals, which need every printable dot to come out straight`
-      : `Artwork on the minimal raster: at ${settings.orientationDeg}° the strips run along the pixels`,
+    describeArtRaster(
+      settings.ppi,
+      artSize,
+      depthSize,
+      stripsOffPixelGrid(settings) ? { edges: 'strip edges', setting: 'Artwork px per strip' } : null,
+    ),
     `Lenticule pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / frameCount).toFixed(2)} px per frame strip`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
@@ -1523,8 +1592,10 @@ export function describeRadialGeometry(
       `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
-    `Artwork on the full ${settings.ppi} PPI raster: wedge edges are radial lines, so no orientation ` +
-      `makes them run along the pixels, and they converge to a point at every lenslet centre`,
+    describeArtRaster(settings.ppi, artSize, depthSize, {
+      edges: 'wedge seams',
+      setting: 'Artwork px per wedge',
+    }),
     `Lenslet pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${((artSize.width / ((settings.widthMm * settings.lpi) / 25.4)) * (Math.PI / n)).toFixed(2)} px ` +
       `across a wedge at the rim`,
@@ -1574,11 +1645,17 @@ export function describeGridGeometry(
       `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
-    gridTilesOffPixelGrid(settings)
-      ? `Artwork on the full ${settings.ppi} PPI raster: ${
-          packing === 'hex' ? 'staggered rows' : `a ${settings.orientationDeg}° array`
-        } put the view-tile edges on diagonals, which need every printable dot to come out straight`
-      : `Artwork on the minimal raster: square, axis-aligned tiles land on whole pixels`,
+    describeArtRaster(
+      settings.ppi,
+      artSize,
+      depthSize,
+      gridTilesOffPixelGrid(settings)
+        ? {
+            edges: packing === 'hex' ? 'staggered view-tile edges' : 'view-tile edges',
+            setting: 'Artwork px per view tile',
+          }
+        : null,
+    ),
     `Lenslet pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / grid).toFixed(2)} px per view tile`,
     // The lens count *is* the per-view resolution: one lenslet shows one pixel

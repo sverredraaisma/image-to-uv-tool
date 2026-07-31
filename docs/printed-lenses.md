@@ -404,11 +404,12 @@ hollows, so rows sit `√3/2 ≈ 0.866` of a pitch apart instead of a full one. 
 - **~15% more lenslets** in the same area (`1 / 0.866`), all of it in the vertical direction — a
   100 mm × 75 mm sheet at 45 LPI carries 177 × 153 lenslets instead of 177 × 133, so each view
   resolves that much taller.
-- **A bigger artwork file.** Staggered rows mean the tile edges no longer run along the pixel grid, so
-  the minimal raster can't place them (see [two rasters](#two-rasters-two-jobs)). A hex sheet's
-  interlace ships on the printer's own PPI raster instead — 5669 × 4252 at the defaults rather than
-  1228 × 921, the same size as the relief, and the diagonals come out at one printed dot instead of one
-  view tile.
+- **A slightly bigger artwork file, and diagonal tile edges.** The closer rows need `1/(√3/2)` more
+  pixels to keep two per tile vertically — 1228 px against 1063 at a 3 × 3 — and, more importantly,
+  staggered rows put every tile edge on a diagonal, which no raster places exactly (see
+  [two rasters](#two-rasters-two-jobs)). The artwork is not silently promoted to the printer's raster
+  for it: 5669 px would place those edges to a printed dot rather than a fraction of a tile, and
+  **Artwork px per view tile** is how you buy that if the staircase shows on your press.
 
 Nothing else moves: the pitch, sag, radius, base and viewing cone are the same lens either way, and
 the caps still touch (in hex they touch six neighbours instead of four). Reach for the square grid
@@ -684,7 +685,8 @@ A subject that never crosses the plane cannot commit it.
 **The frame occludes, exactly as a real window does.** Off-axis, the subject shifts behind a fixed
 aperture, so the edges of the sheet cover and uncover it as you move. That is a strong depth cue —
 arguably the strongest in the picture — and it costs nothing to have: it is what the paper's own
-edges do once the geometry is right.
+edges do once the geometry is right. A grid gets it in both axes at once, top and bottom edges
+included, which is the one thing it can do that a 1D print cannot.
 
 **Disparity is gentler for the same depth.** Reuse ∂X/∂eₓ = 1 − t with `t = D/(D − z)`. A point in
 front of the sheet at `z = +Z` moves `s·Z/(D − Z)` per eye step; a point behind at `z = −Z` moves
@@ -907,10 +909,9 @@ b      = max(0, H - s)
 # ---- interlaced artwork ---------------------------------------------
 cells      = width_mm / p
 map_w      = round(width_mm / 25.4 * PPI)        # the printer's own raster
-diagonal   = abs(orientation_deg % 90) > 0       # strip edges off the pixels?
-art_w      = max(ceil(cells * N * q),
-                 max(view.width for view in views),
-                 map_w if diagonal else 0)       # diagonals need every dot
+art_w      = min(map_w,                          # never finer than the press
+                 max(ceil(cells * N * q),        # every strip of every lens
+                     max(view.width for view in views)))   # keep the sources
 art_h      = round(art_w * views[0].height / views[0].width)
 mm_per_px  = width_mm / art_w
 

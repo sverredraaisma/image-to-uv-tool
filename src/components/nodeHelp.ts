@@ -984,7 +984,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       'A view owns a bearing, not a distance: its wedge runs from the lenslet centre to the rim, so it holds from just off head-on all the way to the edge of the lens cone.',
       'Wedges get thinner towards the centre of every lenslet, which is what makes the merge happen — but it also means the print blurs between views near head-on rather than switching cleanly. That is the effect, not a fault.',
       'Info reports how wide a wedge is at the rim of a lenslet. Under about 2 printed pixels and the views bleed into each other everywhere, not just head-on: use fewer views, lower LPI, or raise PPI.',
-      'The artwork always ships on the full PPI raster, because a wedge edge is a radial line and no orientation makes those run along the pixels.',
+      'A wedge edge is a radial line, so no orientation makes those run along the pixels — every radial sheet is a diagonal one, and every pixel of artwork up to the PPI cap buys a straighter seam. The artwork is still sized by what the wedges need (two pixels across a wedge at the rim) rather than jumping to that cap: raise Artwork px per wedge if the seams look stepped.',
     ],
   },
 

@@ -336,11 +336,12 @@ export function LenticularEditor({ nodeId }: { nodeId: string }) {
         missing: 'Connect at least 2 images to the Frames input — they interlace in connection order.',
         artNote: stripsOffPixelGrid(settings) ? (
           <p className="lenticular-note">
-            At {settings.orientationDeg}° the edges between frame strips are diagonals, which no coarse raster
-            can place — a pixel straddling two frames takes whichever one its centre lands in, and the
-            boundary steps a whole strip at a time. So this sheet ignores the minimal raster and goes out on
-            the printer&apos;s own {settings.ppi} PPI raster, the same one as the depth map. Straighten the
-            array to 0° or 90° and it drops back to the small one.
+            At {settings.orientationDeg}° the edges between frame strips are diagonals, which no raster places
+            exactly — a pixel straddling two frames takes whichever one its centre lands in, so the boundary
+            steps. How coarse those steps are is the size of this artwork: a quarter of a strip at two
+            samples, a fraction of a printed dot at the {settings.ppi} PPI cap. Raise{' '}
+            <em>Artwork px per strip</em> under Advanced to spend towards that cap, or straighten the array to
+            0° or 90° and the question goes away.
           </p>
         ) : null,
         bandGapMm: BAND_GAP_MM,
@@ -493,10 +494,11 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
         artNote: offGrid ? (
           <p className="lenticular-note">
             {settings.packing === 'hex' ? 'Staggered rows' : `A ${settings.orientationDeg}° array`} put the
-            edges between view tiles on diagonals, which no coarse raster can place — a pixel straddling two
-            views takes whichever one its centre lands in, and the boundary steps a whole tile at a time. So
-            this sheet ignores the minimal raster and goes out on the printer&apos;s own {settings.ppi} PPI
-            raster, the same one as the depth map: the finest the print can resolve, spent where it shows.
+            edges between view tiles on diagonals, which no raster places exactly — a pixel straddling two
+            views takes whichever one its centre lands in, so the boundary steps. How coarse those steps are
+            is the size of this artwork, and the ceiling is the printer&apos;s own {settings.ppi} PPI raster,
+            where they come out at one printed dot. Raise <em>Artwork px per view tile</em> under Advanced to
+            spend towards it.
           </p>
         ) : (
           <p className="lenticular-note">
