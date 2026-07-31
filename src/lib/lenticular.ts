@@ -572,7 +572,13 @@ export interface LensGridSettings extends CapArraySettings {
 }
 
 export const MIN_GRID = 2;
-export const MAX_GRID = 6;
+/**
+ * 15×15 — 225 views. Past this the view tile under a lenslet is thinner than a
+ * printed dot at any sane PPI (see the warning in {@link describeGridGeometry}),
+ * and the artwork raster and the render time have both grown by N² for parallax
+ * the lens can no longer resolve.
+ */
+export const MAX_GRID = 15;
 /** 3×3 — nine views, the smallest grid with a true head-on centre. */
 export const DEFAULT_GRID = 3;
 
@@ -1316,6 +1322,19 @@ export function describeGridGeometry(
     lines.push(
       `⚠ Only ${geometry.pitchPx.toFixed(2)} px across a lenslet — the printed lens will be terraced. ` +
         `Raise PPI or lower LPI.`,
+    );
+  }
+  // What a view tile is worth once the artwork is scaled onto the sheet. The
+  // artwork raster always carries `stripSamples` px per tile — it grows to
+  // guarantee it — but the printer has only the lenslet's own dots to spend and
+  // they divide by the grid. Under about two, neighbouring views bleed together
+  // everywhere rather than switching, and that is what finally caps the grid.
+  const printedTilePx = geometry.pitchPx / grid;
+  if (printedTilePx < 2) {
+    lines.push(
+      `⚠ A view tile lands on only ${printedTilePx.toFixed(2)} printed dots at ${settings.ppi} PPI — ` +
+        `the views will bleed into each other at every angle rather than switching. Use a smaller grid, ` +
+        `lower LPI, or raise PPI.`,
     );
   }
   return lines.join('\n');

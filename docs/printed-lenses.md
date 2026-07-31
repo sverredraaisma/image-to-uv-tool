@@ -382,9 +382,20 @@ outermost tiles.
 
 ### Naming the views
 
-Every input is named for **where you stand to see it**:
+Every view is named for **where you stand to see it**:
 
 ![The nine view names](images/13-view-names.png)
+
+Words run out quickly. `Left`/`Right` covers a 3-wide grid, `Far left`/`Far right` a 4 or 5-wide one,
+and past that the rank is simply numbered — the corner of a 15 × 15 is `Left 7 · Up 7`, and the middle
+of any odd grid is `Centre (neutral)`.
+
+The ports run out sooner than the names. Up to **4 × 4** the print node grows one input per cell, so
+you can wire sixteen images by hand and let the node place them. Beyond that it doesn't: 25 handles on
+one node is not a way anyone would wire a print, and 225 is not a node anyone can read. A bigger grid
+takes the whole set on the single **All views** input, in the row-major order above, which is exactly
+what **Model → Grid Views** puts on the wire. Where a cell does have a port, wiring it overrides that
+one view, so you can feed the sequence and then retouch a single cell.
 
 ### The bit that will catch you out
 
@@ -409,8 +420,9 @@ cut down to one sample per lens in each direction:
 | 1D, N = 3         | 3     | 1063 × 797 px                        | 177 × 797             |
 | 2D, 2 × 2, square | 4     | 709 × 532 px                         | 177 × 133             |
 | 2D, 3 × 3, square | 9     | 1063 × 797 px                        | 177 × 133             |
-| 2D, 2 × 2, hex    | 4     | 5669 × 4252 px (PPI raster)          | 177 × 153             |
-| 2D, 3 × 3, hex    | 9     | 5669 × 4252 px (PPI raster)          | 177 × 153             |
+| 2D, 2 × 2, hex    | 4     | 819 × 614 px                         | 177 × 153             |
+| 2D, 3 × 3, hex    | 9     | 1228 × 921 px                        | 177 × 153             |
+| 2D, 15 × 15, hex  | 225   | 5669 × 4252 px (at the PPI cap)      | 177 × 153             |
 
 That's a 6× loss vertically at a square 3×3 grid — 5× at a hex one, which is what the closer rows buy
 you — and it's why detail that survives a lenticular can vanish in a grid. In practice you want a
@@ -418,9 +430,13 @@ you — and it's why detail that survives a lenticular can vanish in a grid. In 
 constraints pull the same way for once.
 
 Note what does _not_ change with N: **each view still resolves to one pixel per lenslet whatever the
-grid size**, so 177 × 153 is the answer for a 2 × 2 and for a 6 × 6 alike. More views cost you artwork
-raster and light per view, not sharpness. Hold on to that — it is what makes the depth budget below
-affordable.
+grid size**, so 177 × 153 is the answer for a 2 × 2 and for a 15 × 15 alike. More views cost you
+artwork raster and light per view, not sharpness. Hold on to that — it is what makes the depth budget
+below affordable, and it is why the tool goes as far as **15 × 15 = 225 views**.
+
+What does change is the artwork under each lenslet, which is cut into N² tiles: at N = 15 a tile is a
+fifteenth of the pitch on each axis, about 2.1 of the printer's dots at 1440 PPI. That is the real
+ceiling, and the print node warns when a setting falls under two dots a tile.
 
 ---
 
@@ -472,41 +488,111 @@ one lenslet between adjacent views is never recorded in between: instead of glid
 lens blur turns the jump into a double image. That gives a hard ceiling on usable depth.
 
 Take it from the projection. The eye step between adjacent views is `s = 2D·tan(cone/2)/(N−1)`, and
-∂X/∂eₓ = 1 − t, so a point `z` off the sheet moves `s·z/(D − z)` per step. Set that to one pitch and
-solve, and for the usual case of `D ≫ z` the whole thing collapses:
+∂X/∂eₓ = 1 − t, so a point `Z` behind the sheet moves `s·Z/(D + Z)` per step. The extreme is the
+subject's **far face**, at `Z = setback + depth`. Set that movement to one pitch and solve, and for
+the usual case of `D ≫ Z` the whole thing collapses:
 
 ```
-usable depth (front to back)  ≈  p · (N − 1) / tan(cone/2)
+usable depth behind the sheet  ≈  p · (N − 1) / (2·tan(cone/2))
 ```
 
-**The viewing distance cancels out.** Depth is set by the pitch, the cone and the grid — nothing else.
-At the defaults (45 LPI, 0.9 mm, RI 1.5, so a 53.3° cone) that is:
+**The viewing distance very nearly cancels out.** Depth is set by the pitch, the cone and the grid —
+nothing else. At the defaults (45 LPI, 0.9 mm, RI 1.5, so a 53.3° cone, viewed from 400 mm) the
+implementation gives:
 
-| Grid  | Printable subject depth |
-| ----- | ----------------------- |
-| 2 × 2 | 1.1 mm                  |
-| 3 × 3 | 2.2 mm                  |
-| 4 × 4 | 3.4 mm                  |
-| 6 × 6 | 5.6 mm                  |
+| Grid    | Printable subject depth | Widest eye step |
+| ------- | ----------------------- | --------------- |
+| 2 × 2   | 0.56 mm                 | 402 mm          |
+| 3 × 3   | 1.13 mm                 | 201 mm          |
+| 4 × 4   | 1.64 mm                 | 138 mm          |
+| 6 × 6   | 2.64 mm                 | 86 mm           |
+| 10 × 10 | 4.62 mm                 | 49 mm           |
+| 15 × 15 | 7.12 mm                 | 32 mm           |
 
-Two millimetres, for a 100 mm print. That is the single most surprising number in this document, and
+Those come out slightly under the closed form above at the larger grids — 7.12 mm against the 7.9 mm
+it predicts for a 15 × 15 — and the reason is worth knowing. The views are spread evenly in _angle_
+across the cone, so their eye positions land at `D·tan(θ)`, which is not evenly spaced on the plane:
+the outermost pair sits further apart than the middle ones. The step that decides whether the print
+ghosts is the widest one, so the honest figure is a little below the average-step estimate, and the
+gap grows with the grid.
+
+(The factor of two against the older, straddling arrangement is real and is the price of the window:
+a subject that straddles the plane is only ever half a depth off it, while one standing behind it is
+a whole depth off at the back. What the window buys back — occlusion by the sheet's own edges, and no
+window violations — is worth more than the millimetre. See [The window](#the-window-a-subject-behind-the-sheet).)
+
+One millimetre, for a 100 mm print. That is the single most surprising number in this document, and
 it is not a limitation of the implementation — it is what one sample per lenslet per view means. Three
 ways to buy more, in order of how much they cost you:
 
 1. **A bigger grid.** Depth grows with `N − 1` and per-view resolution doesn't change at all, so this
-   is nearly free — you pay in artwork raster and in light split more ways.
+   is nearly free — you pay in artwork raster, in render time, and in light split more ways. It is
+   also the one with a hard stop, and it is not a matter of taste: the artwork under a lenslet is
+   divided into N² tiles, so each tile gets `pitch_px / N` of the printer's own dots. Under about two
+   dots the tiles bleed into each other and the print stops switching at all. At 1440 PPI and 45 LPI
+   a lenslet is 32 dots across, so **15 × 15 is the ceiling** — which is where the tool caps it, and
+   where the depth table above stops.
 2. **A coarser pitch.** Depth grows with `p`, but coarse lenses need
    [thick ink](#when-it-cant-work) and you lose resolution one-for-one.
 3. **A narrower cone.** Fewer degrees to look around in, but every degree carries more depth.
 
+And one that costs nothing at all: **keep the setback near zero.** What the ceiling measures is a
+face's distance from the sheet plane, so every millimetre of gap behind the glass is a millimetre the
+subject cannot use — and a negative setback spends the budget from the other end, since the part in
+front moves faster than the same distance behind would. See
+[Breaking the window on purpose](#breaking-the-window-on-purpose).
+
 The render node reports the parallax per view step in lenslets and warns past 1.5 of them, with the
-depth it suggests instead. Treat that line as the one to satisfy before printing anything.
+depth it suggests instead. Treat that line as the one to satisfy before printing anything — and then
+read the next section, because the failure is more interesting than a failure usually is.
+
+### Overshooting on purpose: the depth haze
+
+The warning says the print will ghost. That is true, but it undersells what actually happens, and the
+difference is worth knowing before you obey it.
+
+When a feature moves more than a lenslet between adjacent views, the lens has no sample for where it
+was in between, and it shows you a blend of the two positions instead — the same feature, twice,
+softly. What matters is that **the amount of it grows with depth**: disparity is `s·Z/(D + Z)`, so the
+near face barely blurs while the far face blurs the most, smoothly and monotonically in between.
+
+That is precisely the profile of atmospheric haze. Aerial perspective — distant things paler, softer
+and lower in contrast than near ones — is one of the oldest depth cues in painting, and one of the
+strongest the eye has. A print that overshoots its parallax budget produces it for free and in the
+right direction: **the deeper something sits in the window, the mistier it reads.** Rather than
+looking broken, a mild overshoot often looks like air.
+
+So the budget is a guideline with a usable soft edge:
+
+| Parallax at the far face | What it looks like                                                             |
+| ------------------------ | ------------------------------------------------------------------------------ |
+| under ~1 lenslet         | crisp everywhere — every plane resolves                                        |
+| ~1 – 2.5 lenslets        | a soft veil that deepens with distance; reads as haze, and as _more_ depth     |
+| ~2.5 – 4 lenslets        | visibly soft at the back; fine detail there is gone, silhouettes still hold    |
+| beyond that              | discrete doubling — two copies of an edge, not a veil, and it reads as a fault |
+
+Three things decide which side of that line you land on:
+
+- **Contrast and edges.** A smooth, low-contrast, textured surface hazes gracefully. A hard black
+  line on white at the far face doubles visibly at a fraction of the same disparity, because the eye
+  is reading one edge as two rather than one soft one.
+- **Where the detail is.** The window fits the subject at its **near face**, which sits on or near
+  the sheet plane and therefore prints sharp. Put what the picture is about there — a face, a
+  product, a logo — and let the haze fall on what is behind it. That is exactly how a photograph with
+  a hazy background is composed, and it is why the arrangement holds up.
+- **How far past you are.** The near face is unaffected no matter how deep the box is, so a subject
+  can be several times the "printable" depth and still have a sharp front. What you lose is the back.
+
+None of this is a licence to ignore the figure — it is the figure that tells you which row of that
+table you are in. But if you have a scene rather than an object, deliberately overshooting by two or
+three times and letting the distance go soft will usually read deeper than a scene compressed to
+stay crisp.
 
 ### Compress the projection, not the model
 
-Fitting a solid to 2 mm of depth by squashing its geometry ruins it: squashed geometry has squashed
-_normals_, so a cube flattened to 2 mm shades exactly like the 2 mm slab it has become — three faces
-at one flat grey, no solidity at all.
+Fitting a solid to a millimetre of depth by squashing its geometry ruins it: squashed geometry has
+squashed _normals_, so a cube flattened to a millimetre shades exactly like the slab it has become —
+three faces at one flat grey, no solidity at all.
 
 So the renderer fits the model to the sheet with its proportions intact, computes shading from that
 true shape, and compresses z **only when projecting**. Shading cues stay at full strength while the
@@ -532,17 +618,18 @@ perspective-correctly, so a texture doesn't swim across a face tilted away from 
 
 ### Nothing needs to be rendered large
 
-One pixel per lenslet per view means 177 × 133 at the defaults. The node renders 512 wide out of the
-box, which is already generous, and warns if you go below what the print resolves. A 3D package
-rendering nine 4K views for this is wasting nine tenths of the pixels.
+One pixel per lenslet per view means 177 × 133 at the defaults, whatever the grid size. The node
+renders 512 wide out of the box, which is already generous, and warns if you go below what the print
+resolves. A 3D package rendering 4K views for this is wasting nine tenths of the pixels — and that
+waste is multiplied by N², which is what makes a 15 × 15 affordable here and painful anywhere else.
 
 ### The window: a subject behind the sheet
 
-Everything above lets the subject straddle the sheet plane: half of it in front, half behind. That is
-the arrangement that squeezes the most depth out of a given parallax budget, and for a lens grid it
-is the right default. For a 1D print there is a better one, and **Model → Stereo Views** builds it:
-put the subject **entirely behind the plane**, so the sheet is a window you look into rather than a
-surface things float in front of.
+The obvious arrangement is to let the subject straddle the sheet plane — half of it in front, half
+behind — and that does squeeze the most depth out of a given parallax budget. Both renderers do
+something else: they put the subject **entirely behind the plane**, so the sheet is a window you look
+into rather than a surface things float in front of. **Model → Stereo Views** does it over one axis,
+**Model → Grid Views** over two.
 
 That is not a stylistic preference. Three things follow from it, and the third is the one that costs
 something.
@@ -699,6 +786,17 @@ of the reference implementation.
 | Artwork raster, 3 views | 1063 × 797 px — 0.85 MP                 |
 | 16-bit height step      | 0.0137 µm                               |
 
+And for the 2D grid at those same defaults, where the numbers stop being about the lens and start
+being about how many views it is asked to carry:
+
+| Quantity                                     | 3 × 3   | 15 × 15 (the ceiling) |
+| -------------------------------------------- | ------- | --------------------- |
+| Views                                        | 9       | 225                   |
+| Each view resolves to (hex)                  | 177×153 | 177×153               |
+| Printer dots per view tile                   | 10.67   | 2.13                  |
+| Widest eye step, viewed from 400 mm          | 201 mm  | 32 mm                 |
+| Subject depth behind the sheet, at 1 lenslet | 1.13 mm | 7.12 mm               |
+
 A quick consistency check on the two ways of writing the radius: `H(n−1)/n = 0.9 × 0.5 / 1.5 =
 0.300000`, and from the solved sag via the chord, `0.300000`. They agree to six decimals, as they
 have to.
@@ -726,15 +824,19 @@ have to.
    decoded animation down one wire.
 2. Connect them. For the lenticular node connection order is viewing order. For the grid node each
    port is named for the direction it's viewed from — connect by name and let the node handle the
-   mirroring.
-3. Set width, PPI, LPI, height and RI. On the grid node also pick **Lenslet packing** — leave it
+   mirroring. Above a 4 × 4 there are no per-cell ports: feed the whole grid into **All views** from
+   **Model → Grid Views**, or from anything else that produces a sequence in row-major order.
+3. If the subject is a mesh rather than a set of photographs, use **Model → Stereo Views** (1D) or
+   **Model → Grid Views** (2D) to render it, and read the parallax figure in that node's Info before
+   anything else — see [rendering from a model](#rendering-the-views-from-a-model).
+4. Set width, PPI, LPI, height and RI. On the grid node also pick **Lenslet packing** — leave it
    hexagonal unless you are lining the print up with an existing square array. Watch the **Info**
    output: it reports the solved sag, base, focus and cone, which raster the artwork landed on and
-   why, and warns you if the combination can't focus.
-4. Press **Run**.
-5. Open the node's editor and download the **16-bit gloss depth map**. The `interlaced` output is
+   why, and warns you if the combination can't focus or if the grid has outrun the printed dot.
+5. Press **Run**.
+6. Open the node's editor and download the **16-bit gloss depth map**. The `interlaced` output is
    your artwork; the `depth` output is an 8-bit preview only — don't print that one.
-6. Before committing to a real print, download the **calibration sheets** and read them as above.
+7. Before committing to a real print, download the **calibration sheets** and read them as above.
 
 ### From scratch
 
@@ -819,17 +921,20 @@ apart, that test fails.
 
 ## When it goes wrong
 
-| What you see                            | Probably                                             | Try                                                                             |
-| --------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Soft everywhere, never a clean flip     | Focus isn't landing on the artwork                   | Check the feasibility floor; run the Height calibration                         |
-| Clean at one edge, smeared at the other | Pitch mismatch (laminated lens, or RIP scaling)      | Run the LPI calibration                                                         |
-| Two views visible at once               | Focus too long, or the ink slumped                   | More height, or cure harder                                                     |
-| Depth inverted, motion feels wrong      | Pseudoscopic — views not mirrored                    | Mirror both view indices                                                        |
-| Stair-stepping on the lens surface      | 8-bit relief, or too few pixels per lens             | Emit 16-bit; raise PPI or lower LPI to ≥ 8 px per lens                          |
-| A view missing from some lenses         | Artwork raster too small, a tile fell between pixels | Raise samples per tile to 2 or more                                             |
-| Image slides sideways as it flips       | Sampling per-pixel instead of at the lens centre     | See [interlacing](#interlacing)                                                 |
-| Ragged, regularly-stepped view edges    | Diagonal strips on a minimal artwork raster          | Raster the artwork at PPI — see [above](#except-when-the-strips-run-diagonally) |
-| Contrast lower than expected (2D only)  | Sheet left flat between the caps: 21.5% square       | Switch to [hex packing](#packing-the-caps) for 9.3%, or raise LPI               |
+| What you see                                    | Probably                                                                                                       | Try                                                                                                             |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Soft everywhere, never a clean flip             | Focus isn't landing on the artwork                                                                             | Check the feasibility floor; run the Height calibration                                                         |
+| Clean at one edge, smeared at the other         | Pitch mismatch (laminated lens, or RIP scaling)                                                                | Run the LPI calibration                                                                                         |
+| Two views visible at once                       | Focus too long, or the ink slumped                                                                             | More height, or cure harder                                                                                     |
+| Depth inverted, motion feels wrong              | Pseudoscopic — views not mirrored                                                                              | Mirror both view indices                                                                                        |
+| Stair-stepping on the lens surface              | 8-bit relief, or too few pixels per lens                                                                       | Emit 16-bit; raise PPI or lower LPI to ≥ 8 px per lens                                                          |
+| A view missing from some lenses                 | Artwork raster too small, a tile fell between pixels                                                           | Raise samples per tile to 2 or more                                                                             |
+| Image slides sideways as it flips               | Sampling per-pixel instead of at the lens centre                                                               | See [interlacing](#interlacing)                                                                                 |
+| Ragged, regularly-stepped view edges            | Diagonal strips or tiles on a small artwork raster                                                             | Raise Artwork px per strip / view tile, up to the PPI cap — see [above](#except-when-the-strips-run-diagonally) |
+| Contrast lower than expected (2D only)          | Sheet left flat between the caps: 21.5% square                                                                 | Switch to [hex packing](#packing-the-caps) for 9.3%, or raise LPI                                               |
+| Never switches at all, mush at every angle (2D) | Too many views for the lenslet: under ~2 printed dots per view tile                                            | Smaller grid, lower LPI, or raise PPI — Info gives the figure                                                   |
+| Doubled edges rather than depth, from a model   | Well past the budget — over ~4 lenslets per view step                                                          | Less subject depth or setback, a bigger grid, or raise LPI                                                      |
+| The back of the subject soft, the front sharp   | 1.5–4 lenslets per step: the [depth haze](#overshooting-on-purpose-the-depth-haze), which may be what you want | Nothing — or less depth, if the back has to be crisp too                                                        |
 
 ---
 

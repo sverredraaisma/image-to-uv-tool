@@ -5,7 +5,7 @@
 // naming is shared with the print node so the ports line up by name.
 
 import type { ComputeContext, NodeConfig, NodeDefinition, RasterImage, StlValue } from '../types';
-import { DEFAULT_GRID, clampGrid, lensGeometry } from '../lib/lenticular';
+import { DEFAULT_GRID, MAX_GRID, MIN_GRID, clampGrid, lensGeometry } from '../lib/lenticular';
 import { MAX_IMPORT_TRIANGLES, meshBounds } from '../lib/stl';
 import { parseMesh } from '../lib/mesh';
 import {
@@ -297,7 +297,7 @@ export const modelViewsNode: NodeDefinition = {
     'the front of the subject out through the plate, which is worth a millimetre or two if you keep it ' +
     'away from the sheet edges. Watch the parallax figure in Info: past ~1.5 lenslets per view step the ' +
     'far face softens into haze (often worth having), and past ~4 it doubles. A bigger grid is what buys ' +
-    'depth, since it divides the cone into smaller steps. Manual: click Run.',
+    'depth, since it divides the cone into smaller steps. Up to 15×15 = 225 views. Manual: click Run.',
   autoRun: false,
   inputs: [
     { id: 'model', label: 'Mesh', type: 'stl', required: true },
@@ -311,7 +311,7 @@ export const modelViewsNode: NodeDefinition = {
     { id: 'info', label: 'Info', type: 'text' },
   ],
   configFields: [
-    { kind: 'number', key: 'grid', label: 'Grid (N × N views)', min: 2, max: 6, step: 1 },
+    { kind: 'number', key: 'grid', label: 'Grid (N × N views)', min: MIN_GRID, max: MAX_GRID, step: 1 },
     { kind: 'number', key: 'widthMm', label: 'Print width (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'sheetHeightMm', label: 'Print height (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'depthMm', label: 'Subject depth (mm)', min: 0, step: 1 },

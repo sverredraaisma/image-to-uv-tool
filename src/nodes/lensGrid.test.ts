@@ -1,16 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import '../nodes'; // register built-ins
 import { lensGridNode, gridSettingsFromConfig } from './lensGrid';
-import { lensGridCellInputs, lensGridInputs, nodePorts } from '../engine/ports';
+import {
+  lensGridCellInputs,
+  lensGridCellSlots,
+  lensGridInputs,
+  nodePorts,
+  summariseMissing,
+} from '../engine/ports';
 import { getNodeDef } from '../engine/registry';
 import { EXAMPLES } from '../components/examples';
 import { createImage } from '../lib/image';
 import {
+  describeGridGeometry,
   gridAxisLabel,
+  gridCellCounts,
   gridCellLabel,
   gridCells,
   gridInterlacedSize,
   gridSwitchViews,
+  lensGeometry,
+  outputSize,
   renderGridDepthMap,
   renderGridInterlaced,
   type LensGridSettings,
@@ -106,7 +116,15 @@ describe('grid cell naming', () => {
 
   it('clamps the grid to a printable range', () => {
     expect(gridCells(1)).toHaveLength(4); // floor of 2×2
-    expect(gridCells(99)).toHaveLength(36); // ceiling of 6×6
+    expect(gridCells(99)).toHaveLength(225); // ceiling of 15×15
+  });
+
+  it('numbers the ranks once a grid is too wide for words', () => {
+    // Left/Right and Far left/Far right run out at 5 across; beyond that the
+    // distance from head-on is a number, and the middle is still the neutral.
+    expect(gridCellLabel(0, 0, 15)).toBe('Left 7 · Up 7');
+    expect(gridCellLabel(7, 7, 15)).toBe('Centre (neutral)');
+    expect(gridCellLabel(8, 7, 15)).toBe('Right 1');
   });
 });
 
@@ -126,6 +144,23 @@ describe('Lens Grid node ports', () => {
     expect(lensGridCellInputs({})).toHaveLength(9); // default 3×3
     expect(lensGridCellInputs({ grid: '2' })).toHaveLength(4); // config values can be strings
     expect(lensGridInputs({ grid: 2 })).toHaveLength(5);
+  });
+
+  it('stops offering a port per cell past 4×4, leaving the sequence alone', () => {
+    // 25 handles on one node is not a way anyone would wire a print; 225 is not
+    // a node at all. The whole set comes down the one wire instead.
+    expect(lensGridCellInputs({ grid: 5 })).toHaveLength(0);
+    expect(lensGridInputs({ grid: 15 })).toEqual([
+      { id: 'views', label: 'All views (sequence)', type: 'sequence' },
+    ]);
+    // …but every cell still exists, in order, for the sequence to fill.
+    expect(lensGridCellSlots({ grid: 15 })).toHaveLength(225);
+    expect(lensGridCellSlots({ grid: 15 })[0].label).toBe('Left 7 · Up 7');
+  });
+
+  it('keeps a missing-view list readable', () => {
+    expect(summariseMissing(['a', 'b'])).toBe('a, b');
+    expect(summariseMissing(['a', 'b', 'c'], 2)).toBe('a, b … and 1 more');
   });
 });
 
@@ -186,8 +221,8 @@ describe('gridInterlacedSize', () => {
   });
 
   it('adds the hex row spacing back, so a tile keeps its samples down too', () => {
-    // 40 ÷ √3/2: without it the closer rows would only get 1.7 px per tile. Well
-    // under the PPI raster this sheet is really printed on, though — see below.
+    // 40 ÷ √3/2: without it the closer rows would only get 1.7 px per tile.
+    // Well under the PPI raster this sheet is really printed on, though.
     const s = settings({ ppi: 1 });
     expect(gridInterlacedSize(s, QUAD).width).toBe(47);
     expect(gridInterlacedSize({ ...s, grid: 3 }, QUAD).width).toBe(70);
@@ -318,6 +353,49 @@ describe('Lens Grid node', () => {
     await expect(lensGridNode.compute(ctx({ c0r0: LU, c1r1: RD }, config()))).rejects.toThrow(
       /Missing: Right · Up, Left · Down/,
     );
+  });
+
+  it('prints a big grid off the sequence alone', async () => {
+    // 6×6 = 36 views, none of which has a port to wire.
+    const frames = Array.from({ length: 36 }, (_, i) => solid([i * 7, 0, 255 - i * 7]));
+    const out = await lensGridNode.compute(
+      ctx({ views: { kind: 'sequence', frames } }, config({ grid: 6, packing: 'square' })),
+    );
+    expect((out.interlaced as RasterImage).width).toBe(120); // 10 cells × 6 tiles × 2 px
+    if (out.info?.kind === 'text') expect(out.info.text).toContain('6×6 grid = 36 views');
+    else throw new Error('expected a text info output');
+  });
+
+  it('says where the views have to come from when the grid has no cell ports', async () => {
+    await expect(lensGridNode.compute(ctx({}, config({ grid: 15 })))).rejects.toThrow(
+      /needs all 225 views.*and 219 more\. A grid this big has no per-cell inputs/s,
+    );
+  });
+
+  it('warns when the view tiles are finer than the print can lay down', async () => {
+    // 15 tiles across a lenslet that is only 10 printed dots wide: 0.67 dots
+    // each, so nothing switches. At the node's real defaults — 1440 PPI, 45 LPI,
+    // 32 dots to a lenslet — the same 15×15 sits just over two dots and passes.
+    const frames = Array.from({ length: 225 }, () => solid([10, 20, 30], 4, 4));
+    const out = await lensGridNode.compute(
+      ctx({ views: { kind: 'sequence', frames } }, config({ grid: 15, packing: 'square' })),
+    );
+    if (out.info?.kind === 'text') {
+      expect(out.info.text).toMatch(/⚠ A view tile lands on only 0\.\d+ printed dots/);
+    } else throw new Error('expected a text info output');
+  });
+
+  it('passes a 15×15 at the node’s own defaults — which is what caps it there', () => {
+    const s = gridSettingsFromConfig({ ...lensGridNode.defaultConfig(), grid: 15 });
+    const view = solid([0, 0, 0], 8, 8);
+    const text = describeGridGeometry(
+      s,
+      lensGeometry(s),
+      outputSize(s, view),
+      gridInterlacedSize(s, [view]),
+      gridCellCounts(s, view),
+    );
+    expect(text).not.toContain('printed dots');
   });
 
   it('reads the grid-only settings out of config', () => {

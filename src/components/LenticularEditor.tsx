@@ -34,7 +34,7 @@ import {
   type OutputSize,
   type RenderOptions,
 } from '../lib/lenticular';
-import { lensGridCellInputs, radialViewInputs } from '../engine/ports';
+import { lensGridCellSlots, radialViewInputs, summariseMissing } from '../engine/ports';
 import { settingsFromConfig } from '../nodes/lenticular';
 import { gridSettingsFromConfig } from '../nodes/lensGrid';
 import { radialSettingsFromConfig } from '../nodes/radialGrid';
@@ -396,7 +396,7 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
       const bundle = s.edges.find((e) => e.target === nodeId && e.targetHandle === 'views');
       const bundled = bundle ? s.runtime[bundle.source]?.outputs?.[bundle.sourceHandle] : undefined;
       const frames = bundled?.kind === 'sequence' ? bundled.frames : [];
-      return lensGridCellInputs(nd.config).map(
+      return lensGridCellSlots(nd.config).map(
         (port, i) => imageOn(s.edges, s.runtime, nodeId, port.id) ?? frames[i],
       );
     }),
@@ -407,7 +407,7 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
   const grid = clampGrid(settings.grid);
   const present = views.filter((v): v is RasterImage => !!v);
   const ready = present.length === grid * grid;
-  const missingLabels = lensGridCellInputs(node.config)
+  const missingLabels = lensGridCellSlots(node.config)
     .filter((_, i) => !views[i])
     .map((p) => p.label);
   const cells = ready ? gridCellCounts(settings, present[0]) : null;
@@ -421,7 +421,7 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
         settings,
         views: present,
         ready,
-        missing: `Connect all ${grid * grid} views of the ${grid}×${grid} grid. Missing: ${missingLabels.join(', ')}.`,
+        missing: `Connect all ${grid * grid} views of the ${grid}×${grid} grid. Missing: ${summariseMissing(missingLabels)}.`,
         // One whole cell of gutter: with lenslets in both axes a band edge
         // would otherwise leave a row of half-printed lenses.
         bandGapMm: Math.max(BAND_GAP_MM, 25.4 / Math.max(1, settings.lpi)),

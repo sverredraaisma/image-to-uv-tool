@@ -81,8 +81,8 @@ describe('Model → Grid Views', () => {
     await expect(modelViewsNode.compute(ctx({}, config()))).rejects.toThrow(/Connect a mesh/);
   });
 
-  it('renders one view per cell for any grid size', async () => {
-    for (const grid of [2, 4]) {
+  it('renders one view per cell for any grid size, up to the 15×15 ceiling', async () => {
+    for (const grid of [2, 4, 8]) {
       const out = await modelViewsNode.compute(ctx({ model: TETRA }, config({ grid })));
       expect((out.views as SequenceValue).frames).toHaveLength(grid * grid);
     }
@@ -215,6 +215,11 @@ describe('the Info report', () => {
       parseFloat(/Parallax ([\d.]+) lenslets/.exec(report(over))![1]);
     expect(step({ grid: 6 })).toBeLessThan(step({ grid: 3 }));
     expect(step({ grid: 2 })).toBeGreaterThan(step({ grid: 3 }));
+    // 15×15 is the ceiling, and it is what buys real depth: 14 steps across the
+    // cone instead of 2, so seven times the subject at the same parallax. 7 mm
+    // behind the glass doubles on a 3×3 and prints cleanly on a 15×15.
+    expect(report({ grid: 3, depthMm: 7 })).toMatch(/far past the line/);
+    expect(report({ grid: 15, depthMm: 7 })).not.toContain('⚠');
   });
 });
 

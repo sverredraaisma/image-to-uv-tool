@@ -59,26 +59,53 @@ function gridOf(config: NodeConfig): number {
 }
 
 /**
- * The Lens Grid's inputs: one image per cell of the view grid, in row-major
- * order, each named for where it is viewed from relative to head-on — plus a
- * `views` port that takes the whole grid on one wire, the way the lenticular
- * node takes a whole animation. Neither is marked required on its own, because
- * either route alone is enough; the node checks that at compute time.
+ * Largest grid that still gets one port per cell. A 4×4 is sixteen handles on
+ * one node and sixteen wires to drag, which is about the limit of something a
+ * person would actually do by hand; a 5×5 is twenty-five, and a 15×15 is 225 —
+ * a node nobody can read, for a job nobody would do that way. Bigger grids are
+ * fed by the `views` sequence alone, which is how a rendered grid arrives
+ * anyway.
  */
-export function lensGridInputs(config: NodeConfig): PortSpec[] {
-  return [
-    { id: 'views', label: 'All views (sequence)', type: 'sequence' as const },
-    ...gridCells(gridOf(config)).map((cell) => ({
-      id: cell.id,
-      label: cell.label,
-      type: 'image' as const,
-    })),
-  ];
+export const MAX_CELL_PORT_GRID = 4;
+
+/**
+ * Every cell of the grid, in row-major order and named for where it is viewed
+ * from relative to head-on — whether or not it is exposed as a port. This is the
+ * order a sequence on `views` is read in, so it is what the node and the editor
+ * iterate; {@link lensGridCellInputs} is the subset that has real ports.
+ */
+export function lensGridCellSlots(config: NodeConfig): PortSpec[] {
+  return gridCells(gridOf(config)).map((cell) => ({
+    id: cell.id,
+    label: cell.label,
+    type: 'image' as const,
+  }));
 }
 
-/** Just the per-cell image ports, in port order. */
+/**
+ * The Lens Grid's inputs: a `views` port that takes the whole grid on one wire,
+ * the way the lenticular node takes a whole animation, plus — up to
+ * {@link MAX_CELL_PORT_GRID} — one image port per cell. Neither is marked
+ * required on its own, because either route alone is enough; the node checks
+ * that at compute time.
+ */
+export function lensGridInputs(config: NodeConfig): PortSpec[] {
+  const cells = gridOf(config) <= MAX_CELL_PORT_GRID ? lensGridCellSlots(config) : [];
+  return [{ id: 'views', label: 'All views (sequence)', type: 'sequence' as const }, ...cells];
+}
+
+/** Just the per-cell image ports — empty on a grid too big to be wired by hand. */
 export function lensGridCellInputs(config: NodeConfig): PortSpec[] {
   return lensGridInputs(config).filter((p) => p.id !== 'views');
+}
+
+/**
+ * Missing-view labels for an error message, kept to a readable few. A 15×15 with
+ * nothing wired has 225 of them, and a wall of names says less than a count.
+ */
+export function summariseMissing(labels: string[], keep = 6): string {
+  if (labels.length <= keep) return labels.join(', ');
+  return `${labels.slice(0, keep).join(', ')} … and ${labels.length - keep} more`;
 }
 
 /** The view count a radial node instance is configured for. */
