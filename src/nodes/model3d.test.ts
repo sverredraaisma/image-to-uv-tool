@@ -141,6 +141,14 @@ describe('the Info report', () => {
     expect(text).toContain('Each view will print at 177×133 px');
   });
 
+  it('says where the window puts the subject, and what standing there costs it', () => {
+    const text = report({ depthMm: 6, setbackMm: 4 });
+    expect(text).toContain('the subject stands 4.0–10.0 mm behind the sheet');
+    // Fitted at the near face: 404/400 up, and the far face 1.5% smaller again.
+    expect(text).toContain('scaled ×1.010');
+    expect(text).toMatch(/far face lands 1\.\d% smaller/);
+  });
+
   it('passes the defaults without a warning — they sit just under one lenslet', () => {
     const text = report();
     expect(text).not.toContain('⚠');
@@ -151,9 +159,46 @@ describe('the Info report', () => {
 
   it('warns when the subject is too deep to print, and says how deep it may be', () => {
     const text = report({ depthMm: 20 });
-    expect(text).toMatch(/⚠ 9\.\d+ lenslets per step is too much/);
-    // 1.5 lenslets is the ceiling, so it should suggest about a seventh of 20 mm.
-    expect(text).toMatch(/Reduce Subject depth to about 3\.\d mm/);
+    expect(text).toMatch(/⚠ 16\.\d+ lenslets per step is far past the line/);
+    expect(text).toContain('double rather than soften');
+    // 1.5 lenslets is the ceiling, so it should suggest about a ninth of 20 mm.
+    expect(text).toMatch(/Reduce Subject depth to about 1\.\d mm/);
+  });
+
+  it('calls a mild overshoot haze rather than a fault', () => {
+    // 1.5–4 lenslets: the far face blurs progressively with distance, which is
+    // what air does. Worth having, so it is a note and not a warning.
+    const text = report({ depthMm: 3 });
+    expect(text).toMatch(/· 2\.\d+ lenslets per step is over the 1\.5/);
+    expect(text).toContain('read as haze');
+    expect(text).not.toContain('⚠');
+  });
+
+  it('reports a subject brought out through the plate, and warns about the edges', () => {
+    const text = report({ depthMm: 30, setbackMm: -2, grid: 15 });
+    expect(text).toContain('reaches 2.0 mm out through the plate and 28.0 mm into it');
+    expect(text).toContain('window violation');
+    // Fitted at the near face, which is now in front of the sheet: down, not up.
+    expect(text).toContain('scaled ×0.995');
+  });
+
+  it('names whichever face actually moves most', () => {
+    // Deep behind the glass, the far face decides…
+    expect(report({ depthMm: 30, setbackMm: -2 })).toContain('per view step at the far face');
+    // …but a subject that pokes out further than it sinks is decided in front.
+    expect(report({ depthMm: 1, setbackMm: -5 })).toContain('per view step at the near face');
+  });
+
+  it('holds a negative setback to a sane distance in front of the sheet', () => {
+    // A quarter of the viewing distance; past that the projection runs away.
+    expect(viewGridOptionsFromConfig({ setbackMm: -50, viewDistanceMm: 400 }).setbackMm).toBe(-50);
+    expect(viewGridOptionsFromConfig({ setbackMm: -500, viewDistanceMm: 400 }).setbackMm).toBe(-100);
+  });
+
+  it('counts the setback against the depth budget, since the far face is what moves', () => {
+    const step = (over: Record<string, unknown>) =>
+      parseFloat(/Parallax ([\d.]+) lenslets/.exec(report(over))![1]);
+    expect(step({ depthMm: 1, setbackMm: 1 })).toBeCloseTo(step({ depthMm: 2, setbackMm: 0 }), 2);
   });
 
   it('warns when there is so little depth that the print will look flat', () => {
@@ -348,7 +393,7 @@ describe('the cube example', () => {
     // (It does warn about resolution here — this test renders 64 px on purpose,
     // where the shipped 512 does not.)
     if (rendered.info?.kind === 'text') {
-      expect(rendered.info.text).not.toMatch(/lenslets per step is too much/);
+      expect(rendered.info.text).not.toMatch(/far past the line/);
       expect(rendered.info.text).not.toMatch(/⚠ Only/);
       expect(rendered.info.text).not.toMatch(/barely covers/);
     } else throw new Error('expected a text info output');

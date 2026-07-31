@@ -1027,15 +1027,16 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     tips: [
       'Everything behind the plate is the point. Nothing floats in front of the paper, so nothing can be cut off by the sheet edge while appearing to be nearer than it — the contradiction that makes a stereo print uncomfortable to look at.',
       'Because the subject is behind the window it projects smaller by D/(D+Z), so the node scales the fit up by the reciprocal — measured at the near face, so the subject fills the frame without any of it spilling past the aperture.',
+      'Setback can go negative, which brings the front of the subject out through the plate while the rest stays inside it — a nose in front of the glass on a head that is still in the box. 1–2 mm of it is plenty to read as a pop-out. The only rule is that the part in front must not touch the sheet edge, or the paper is cutting off something that looks nearer than the paper.',
       'Views cost nothing but render time here: a 1D print spends resolution on one axis only, so 12–24 views is normal, and every extra view buys depth by shrinking the step between eyes.',
-      'Watch the parallax figure in Info. More than ~1.5 lenticules per step and the far face ghosts instead of gliding; under 0.15 and the print is flat.',
+      'Watch the parallax figure in Info. Past ~1.5 lenticules per step the far face stops resolving — but it degrades into a soft veil that deepens with distance, which is exactly what haze does, so a mild overshoot often reads as more depth rather than less. It becomes visible doubling past ~4. Under 0.15 the print is flat.',
       'The views go out right-eye-first, because a lenticule shows its leftmost strip to an eye on the right and Lenticular Print interlaces in the order frames arrive. Turn off *Order for the lens* under Advanced if you ever need the raw left-to-right run.',
     ],
   },
 
   modelViews: {
     summary:
-      'Renders a mesh from every eye position of a lens grid and puts the whole set on one wire, in the order Lens Grid Print names its cells — connect it to All views. The eye shifts but never rotates, so the sheet plane stays sharp in every view and only depth moves.',
+      'Renders a mesh standing behind the print, from every eye position of a lens grid, and puts the whole set on one wire, in the order Lens Grid Print names its cells — connect it to All views. The sheet is a window: the subject sits entirely behind it and recedes into the paper, with the edges of the sheet occluding it — sideways and vertically both — as you move.',
     uses: [
       {
         title: 'Look-around object',

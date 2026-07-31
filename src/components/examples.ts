@@ -582,12 +582,13 @@ export const EXAMPLES: Example[] = [
   {
     name: 'Lens Grid → 3D cube',
     description:
-      'A cube with six coloured faces, rendered from all nine eye positions of a 3×3 lens grid and ' +
-      'printed as one sheet, so it turns as you move. The colours ride on the mesh itself — that is ' +
-      'what OBJ carries and STL cannot. Everything is at the nodes’ defaults, including the 2 mm ' +
-      'subject depth, which sounds absurd until you read the Info: that is already nearly a whole ' +
-      'lenslet of parallax per view step, and about all a 53° cone at 45 LPI can carry. Press Run ▶ ' +
-      'on both manual nodes.',
+      'A cube with six coloured faces, standing just behind the sheet and rendered from all nine eye ' +
+      'positions of a 3×3 lens grid, printed as one sheet so it turns as you move. The sheet is a ' +
+      'window: the cube recedes into the paper and the paper’s own edges cover and uncover it, in both ' +
+      'axes. The colours ride on the mesh itself — that is what OBJ carries and STL cannot. Everything ' +
+      'is at the nodes’ defaults, including the 1 mm subject depth, which sounds absurd until you read ' +
+      'the Info: that is already nearly a whole lenslet of parallax per view step, and about all a 53° ' +
+      'cone at 45 LPI can carry. Press Run ▶ on both manual nodes.',
     graph: {
       version: 1,
       nodes: [
@@ -624,12 +625,12 @@ export const EXAMPLES: Example[] = [
   {
     name: 'Stereo window → 3D cube',
     description:
-      'The same cube, but standing *behind* the sheet instead of straddling it: the print becomes a ' +
-      'window you look into, and the paper’s own edges cover and uncover the cube as you move past — ' +
-      'which is where most of the depth you actually see comes from. Twelve views across the lens cone ' +
-      'go down one wire into Lenticular Print, so the cube turns as you walk rather than flipping. ' +
-      'Depth behind the glass is cheaper than depth in front of it, which is why this carries 6 mm of ' +
-      'subject where the 3×3 grid manages 2. Press Run ▶ on both manual nodes.',
+      'The same cube behind the same window, but printed through a 1D lenticular instead of a grid: ' +
+      'twelve views across the lens cone go down one wire into Lenticular Print, so the cube turns as ' +
+      'you walk past rather than flipping. A 1D print spends resolution on one axis only, so it can ' +
+      'afford views the grid cannot — twelve of them against nine eye positions in total — and the ' +
+      'step between eyes is a third of the grid’s. That is why this carries 6 mm of subject where the ' +
+      '3×3 grid manages 1. Press Run ▶ on both manual nodes.',
     graph: {
       version: 1,
       nodes: [

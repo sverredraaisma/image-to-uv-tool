@@ -7,12 +7,16 @@ import { MAX_IMPORT_TRIANGLES } from '../lib/stl';
 import {
   MAX_VIEW_PX,
   MIN_VIEW_PX,
+  clampSetbackMm,
+  describePlacement,
   disparityAtDepth,
   eyeOffsetsMm,
   renderViewSequence,
+  worstDisparity,
   type ViewSequenceOptions,
   type ViewSequenceRender,
 } from '../lib/render3d';
+import { MAX_HAZE_LENSLETS } from './model3d';
 import { coneFromConfig } from './model3d';
 import { asImage, bool, num, str } from './helpers';
 
@@ -39,7 +43,9 @@ export function viewSequenceOptionsFromConfig(config: NodeConfig): ViewSequenceO
     widthPx: Math.min(MAX_VIEW_PX, Math.max(MIN_VIEW_PX, Math.round(num(config.viewPx, 512)))),
     viewDistanceMm: Math.max(10, num(config.viewDistanceMm, 400)),
     depthMm: Math.max(0, num(config.depthMm, 5)),
-    setbackMm: Math.max(0, num(config.setbackMm, 0)),
+    // Negative is a subject brought out through the plate; the renderer holds it
+    // to a sane distance in front (clampSetbackMm).
+    setbackMm: clampSetbackMm(num(config.setbackMm, 0), Math.max(10, num(config.viewDistanceMm, 400))),
     coneDeg: coneFromConfig(config),
     rotationDeg: [num(config.rotX, 0), num(config.rotY, 0), num(config.rotZ, 0)],
     margin: Math.min(0.4, Math.max(0, num(config.margin, 0.08))),
@@ -77,15 +83,19 @@ export function describeViewSequence(
   const lpi = Math.max(1, num(config.lpi, 45));
   const offsets = render.offsetsMm;
   const stepMm = offsets.length > 1 ? Math.abs(offsets[1] - offsets[0]) : 0;
-  // Behind the sheet z is negative, and the far face is the extreme.
-  const step = disparityAtDepth(stepMm, -render.farMm, o.viewDistanceMm, lpi);
+  const D = o.viewDistanceMm;
+  // Whichever face moves most: the far one for a subject inside the window, but
+  // the near one once it has been brought out through the plate, since
+  // z/(D − z) grows faster in front of the sheet than behind it.
+  const step = worstDisparity(stepMm, render.nearMm, render.farMm, D, lpi);
+  const face =
+    disparityAtDepth(stepMm, -render.nearMm, D, lpi).mm > disparityAtDepth(stepMm, -render.farMm, D, lpi).mm
+      ? 'near'
+      : 'far';
   const across = (Math.max(1, o.widthMm) * lpi) / 25.4;
   const viewPy = Math.round((o.widthPx * o.heightMm) / o.widthMm);
   const outer = offsets[offsets.length - 1];
   const fromLens = str(config.coneMode, 'lens') === 'lens';
-  // How much smaller the far face lands than the near one, through the window.
-  const D = o.viewDistanceMm;
-  const shrink = (D + render.nearMm) / (D + render.farMm);
 
   const lines = [
     `${o.views} views · ${o.widthPx}×${viewPy} px each · ${stl.triangleCount.toLocaleString()} triangles`,
@@ -95,15 +105,10 @@ export function describeViewSequence(
         ? ` (solved from ${lpi} LPI / ${num(config.lensHeightMm, 0.9)} mm / RI ${num(config.ri, 1.5)})`
         : ' (set by hand)'
     } — outer eye ${outer.toFixed(0)} mm off-axis, ${stepMm.toFixed(0)} mm per step`,
-    `Window: the subject stands ${render.nearMm.toFixed(1)}–${render.farMm.toFixed(1)} mm behind the ` +
-      `sheet, all of it. Nothing crosses the plane, so nothing can float in front of the paper edge ` +
-      `and be cut off by it`,
-    `Fitted at the near face, scaled ×${((D + render.nearMm) / D).toFixed(3)} to fill the window from ` +
-      `there; the far face lands ${((1 - shrink) * 100).toFixed(1)}% smaller, which is the perspective ` +
-      `doing the work`,
+    ...describePlacement(render.nearMm, render.farMm, D, 'and the sheet edges occlude it as you move'),
     `Covers ${(render.coverage * 100).toFixed(0)}% of the frame`,
     `Surface: ${surfaceUsed(stl, o)}`,
-    `Parallax ${step.lenslets.toFixed(2)} lenslets per view step at the far face ` +
+    `Parallax ${step.lenslets.toFixed(2)} lenslets per view step at the ${face} face ` +
       `(${step.mm.toFixed(3)} mm at ${lpi} LPI), ${(step.lenslets * (o.views - 1)).toFixed(2)} across the ` +
       `whole cone`,
     `Each view will print at ${Math.round(across)} px across — one pixel per lenticule`,
@@ -113,10 +118,19 @@ export function describeViewSequence(
   // sampled in between: it jumps instead of gliding, and the lens blur turns the
   // jump into a double image. This is the number that decides whether the print
   // reads as depth.
-  if (step.lenslets > MAX_STEP_LENSLETS) {
+  if (step.lenslets > MAX_HAZE_LENSLETS) {
     lines.push(
-      `⚠ ${step.lenslets.toFixed(2)} lenslets per step is too much — the print will ghost rather than ` +
-        `read as depth. Reduce Subject depth or Setback, add views, or raise LPI.`,
+      `⚠ ${step.lenslets.toFixed(2)} lenslets per step is far past the line — the ${face} face will ` +
+        `double rather than soften. Reduce Subject depth, bring the Setback back toward 0, add views, ` +
+        `or raise LPI.`,
+    );
+  } else if (step.lenslets > MAX_STEP_LENSLETS) {
+    lines.push(
+      `· ${step.lenslets.toFixed(2)} lenticules per step is over the ${MAX_STEP_LENSLETS} the lens can ` +
+        `resolve, but not by much: the ${face} face will read as haze rather than as detail, softening ` +
+        `with distance the way real air does. Keep the subject of the picture near the sheet plane, ` +
+        `which stays sharp, and this is a depth cue rather than a fault. Past ` +
+        `${MAX_HAZE_LENSLETS} lenticules it becomes visible doubling.`,
     );
   } else if (step.lenslets < 0.15 && render.farMm > 0) {
     lines.push(
@@ -151,8 +165,10 @@ export const modelStereoNode: NodeDefinition = {
     'recedes into the paper instead of floating in front of it, and the edges of the sheet occlude it as ' +
     'you move — which is where most of the depth you actually see comes from. The eye slides sideways ' +
     'and never rotates, so the window plane stays pin-sharp in every view; the run spans the lens’s own ' +
-    'viewing cone. Subject depth and Setback place the box behind the glass; watch the parallax figure ' +
-    'in Info, since more than ~1.5 lenticules per view step ghosts. Manual: click Run.',
+    'viewing cone. Subject depth and Setback place the box behind the glass — a negative Setback brings ' +
+    'the front of the subject out through the plate, which is worth a millimetre or two if you keep it ' +
+    'away from the sheet edges. Watch the parallax figure in Info: past ~1.5 lenticules per view step ' +
+    'the far face softens into haze (often worth having), and past ~4 it doubles. Manual: click Run.',
   autoRun: false,
   inputs: [
     { id: 'model', label: 'Mesh', type: 'stl', required: true },
@@ -168,7 +184,12 @@ export const modelStereoNode: NodeDefinition = {
     { kind: 'number', key: 'widthMm', label: 'Print width (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'sheetHeightMm', label: 'Print height (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'depthMm', label: 'Subject depth (mm)', min: 0, step: 1 },
-    { kind: 'number', key: 'setbackMm', label: 'Setback behind the sheet (mm)', min: 0, step: 1 },
+    {
+      kind: 'number',
+      key: 'setbackMm',
+      label: 'Setback behind the sheet (mm, negative comes out of it)',
+      step: 1,
+    },
     { kind: 'number', key: 'viewDistanceMm', label: 'Viewing distance (mm)', min: 10, step: 10 },
     { kind: 'number', key: 'viewPx', label: 'View width (px)', min: MIN_VIEW_PX, max: MAX_VIEW_PX, step: 32 },
     { kind: 'number', key: 'rotX', label: 'Rotate X (°)', min: -180, max: 180, step: 5 },

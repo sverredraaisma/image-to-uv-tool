@@ -25,6 +25,11 @@
 //     cone and the print jumps at the flip; narrower and you have thrown depth
 //     away. `eyeOffsetsMm` takes the cone `lensGeometry()` solved.
 //
+//   • The subject stands entirely BEHIND the sheet, in both renderers. The sheet
+//     is a window you look into rather than a surface things float in front of;
+//     the reasons fill the section at the foot of this file, and they apply to a
+//     grid in two axes just as they do to a 1D run in one.
+//
 // Coordinates: the sheet is the z = 0 plane, x right, y up, and the viewer is at
 // positive z. Millimetres throughout, so every setting is a physical one.
 
@@ -94,6 +99,17 @@ export interface ViewRenderOptions {
 export interface ViewGridOptions extends ViewRenderOptions {
   /** Views per side: 3 renders a 3×3 = 9 view grid. */
   grid: number;
+  /**
+   * Where the nearest point of the subject sits relative to the sheet, mm
+   * *behind* it. 0 puts it right against the glass — the plain window — and
+   * more sinks the whole subject further in.
+   *
+   * Negative brings it out through the plate: at −2 the nearest 2 mm of the
+   * subject stands in front of the sheet and everything else is still behind
+   * it. See {@link clampSetbackMm} and the window section at the foot of this
+   * file for what that costs.
+   */
+  setbackMm: number;
 }
 
 /** A vertex ready to project: world millimetres, sheet plane at z = 0. */
@@ -124,6 +140,20 @@ export interface PreparedMesh {
 
 export const MIN_VIEW_PX = 16;
 export const MAX_VIEW_PX = 4096;
+
+/**
+ * How far in front of the sheet the near face may be brought, as a fraction of
+ * the viewing distance. A negative setback pops the subject out of the plate,
+ * which is a real thing to want; but z/(D − z) runs away as z approaches the
+ * eye, so a subject a quarter of the way to the viewer already moves 33% more
+ * per eye step than the same distance behind the glass, and past that the
+ * projection stops meaning anything.
+ */
+export const MAX_POPOUT_FRACTION = 0.25;
+
+/** Keep a negative setback inside {@link MAX_POPOUT_FRACTION} of the viewing distance. */
+export const clampSetbackMm = (setbackMm: number, viewDistanceMm: number): number =>
+  Math.max(-MAX_POPOUT_FRACTION * Math.max(1e-6, viewDistanceMm), setbackMm);
 
 /**
  * How far the eye sits off the sheet's axis for each column (or row) of the
@@ -450,21 +480,45 @@ function downsample(rgb: Uint8ClampedArray, w: number, h: number, ss: number): R
 }
 
 /**
- * How far a point at the front of the subject slides across the sheet from one
- * view to the next, in lenslets.
+ * How far the most extreme point of the subject slides across the sheet from
+ * one view to the next, in lenslets.
  *
  * This is the number that decides whether a print reads as depth or as mush. A
  * lens grid samples each view once per lenslet, so a feature that moves more
  * than about one lenslet per view step is never recorded in between: instead of
- * gliding it jumps, and the lens blur turns the jump into a double image.
+ * gliding it jumps, and the lens blur turns the jump into a double image. (Up
+ * to a point that blur is worth having — it grows with depth, so it reads as
+ * haze; see the guide. Past it the print doubles.)
  *
  * From `projectToSheet`, ∂X/∂ex = 1 − t, so a step `s` of eye position moves the
- * point by s·(t − 1) = s·z/(D − z). The near face dominates, so z = depth/2.
+ * point by s·(t − 1) = s·z/(D − z). Which face is the extreme depends on where
+ * the subject sits: behind the sheet it is the far one, but a subject brought
+ * out through the plate can move more at its near face, since z/(D − z) grows
+ * faster in front than behind. Take whichever is worse.
  */
 export function disparityPerStep(o: ViewGridOptions, lpi: number): { mm: number; lenslets: number } {
   const offsets = eyeOffsetsMm(o.grid, o.coneDeg, o.viewDistanceMm);
   const step = offsets.length > 1 ? Math.abs(offsets[1] - offsets[0]) : 0;
-  return disparityAtDepth(step, Math.max(0, o.depthMm) / 2, o.viewDistanceMm, lpi);
+  const near = clampSetbackMm(o.setbackMm, o.viewDistanceMm);
+  return worstDisparity(step, near, near + Math.max(0, o.depthMm), o.viewDistanceMm, lpi);
+}
+
+/**
+ * The larger of the two faces' movement per eye step. `nearMm` and `farMm` are
+ * distances *behind* the sheet, so a negative near face is one standing in
+ * front of it.
+ */
+export function worstDisparity(
+  stepMm: number,
+  nearMm: number,
+  farMm: number,
+  viewDistanceMm: number,
+  lpi: number,
+): { mm: number; lenslets: number } {
+  const at = (behindMm: number) => disparityAtDepth(stepMm, -behindMm, viewDistanceMm, lpi);
+  const near = at(nearMm);
+  const far = at(farMm);
+  return far.mm >= near.mm ? far : near;
 }
 
 /**
@@ -492,18 +546,46 @@ export interface ViewGridRender {
   depth: RasterImage;
   /** Fraction of the centre view the subject covers, 0–1. */
   coverage: number;
+  /**
+   * Where the subject sits behind the sheet, mm: near face and far face. A
+   * negative `nearMm` is a subject brought out through the plate by that much.
+   */
+  nearMm: number;
+  farMm: number;
 }
 
 /**
- * Render the whole view grid. Views come back in {@link gridCells} order, so
- * they line up one-to-one with the Lens Grid Print node's inputs.
+ * Render the whole view grid, of a subject standing *behind* the sheet. Views
+ * come back in {@link gridCells} order, so they line up one-to-one with the
+ * Lens Grid Print node's inputs.
+ *
+ * The window is the same one the 1D run uses, in two axes rather than one: the
+ * subject does not cross the sheet plane, so it cannot be clipped by an edge it
+ * appears to float in front of, and the edges of the sheet cover and uncover it
+ * both sideways and vertically as you move. See the section at the foot of this
+ * file for the whole argument — including what a negative `setbackMm` trades
+ * away to bring the front of the subject out through the plate.
  *
  * No mirroring happens here: each view is honestly what an eye in that position
  * sees. The print node inverts them, because the *lens* is what inverts them.
  */
 export function renderViewGrid(stl: StlValue, o: ViewGridOptions): ViewGridRender {
   const grid = Math.max(1, Math.round(o.grid));
-  const mesh = prepareVertices(stl, o);
+  const depthMm = Math.max(0, o.depthMm);
+  const setbackMm = clampSetbackMm(o.setbackMm, o.viewDistanceMm);
+  // The subject occupies [-(setback + depth), -setback]: near face `setback`
+  // behind the sheet, or in front of it if that is negative. prepareVertices
+  // centres it on z = 0 and the compression maps it to `depthMm`, so the offset
+  // is to its mid-plane.
+  const placed: ViewGridOptions = {
+    ...o,
+    zOffsetMm: -(setbackMm + depthMm / 2),
+    // Fit at the near face: that is the plane that projects largest, so
+    // nothing of the subject can spill past the window's edge.
+    fitAtZMm: -setbackMm,
+  };
+
+  const mesh = prepareVertices(stl, placed);
   const offsets = eyeOffsetsMm(grid, o.coneDeg, o.viewDistanceMm);
 
   // The view nearest head-on; for an even grid, one of the middle four.
@@ -513,14 +595,14 @@ export function renderViewGrid(stl: StlValue, o: ViewGridOptions): ViewGridRende
   for (let row = 0; row < grid; row++) {
     for (let col = 0; col < grid; col++) {
       // Row 0 is `Up`: the eye is above the sheet, so +y. Column 0 is `Left`.
-      const rendered = renderOne(mesh, stl.triangleCount, o, offsets[col], -offsets[row]);
+      const rendered = renderOne(mesh, stl.triangleCount, placed, offsets[col], -offsets[row]);
       views.push(downsample(rendered.rgb, rendered.w, rendered.h, rendered.ss));
       if (col === mid && row === mid) centre = rendered;
     }
   }
 
-  const { depth, coverage } = depthOf(centre ?? renderOne(mesh, stl.triangleCount, o, 0, 0));
-  return { views, depth, coverage };
+  const { depth, coverage } = depthOf(centre ?? renderOne(mesh, stl.triangleCount, placed, 0, 0));
+  return { views, depth, coverage, nearMm: setbackMm, farMm: setbackMm + depthMm };
 }
 
 /**
@@ -556,12 +638,13 @@ function depthOf(src: ReturnType<typeof renderOne>): { depth: RasterImage; cover
 }
 
 // ---------------------------------------------------------------------------
-// The window: a horizontal run of views of a subject standing *behind* the
-// sheet, for a 1D lenticular print.
+// The window: a subject standing *behind* the sheet. Both renderers place their
+// subject this way — the grid over two axes, the run below over one — and this
+// is where the argument and the maths live.
 //
-// Same camera as the grid — the eye translates along one axis and never rotates
-// — but the subject is pushed back so that none of it crosses the sheet plane.
-// That makes the print a window rather than a hologram, and it is not a stylistic
+// The camera is the same either way: the eye translates and never rotates, and
+// the subject is pushed back so that none of it crosses the sheet plane. That
+// makes the print a window rather than a hologram, and it is not a stylistic
 // choice; three things follow from it:
 //
 //   • Nothing pops out, so nothing can be cut off by the edge of the sheet while
@@ -579,15 +662,77 @@ function depthOf(src: ReturnType<typeof renderOne>): { depth: RasterImage; cover
 // scaled up by the reciprocal to fill the frame — `fitAtZMm` in
 // {@link prepareVertices}, applied at the near face so nothing spills out of the
 // aperture.
+//
+// Breaking the window on purpose
+// ------------------------------
+// `setbackMm` may be negative, which brings the near face out through the plate
+// while the rest of the subject stays inside it — a nose in front of the glass
+// on a head that is still in the box. Nothing in the maths above needs changing:
+// the near face is at z = −setback, which is now positive, `fitAtZMm` scales the
+// fit *down* instead of up (a plane in front subtends more, not less), and the
+// disparity formula carries the sign on its own.
+//
+// What it trades away is the first bullet, and only for the part that crosses:
+// anything in front of the plane that touches the edge of the sheet is a window
+// violation. Keep the crossing part small — a millimetre or two is plenty to
+// read as "out of the plate" — and keep it away from the border, and the frame
+// still occludes everything else exactly as before. The near face also stops
+// being the sharp one: what prints sharp is always the sheet plane, which now
+// cuts through the subject rather than sitting at its front.
 // ---------------------------------------------------------------------------
+
+/**
+ * The two Info lines that place the subject relative to the sheet: where it
+ * stands, and what standing there does to its size. Shared by both render
+ * nodes, since it is the same window either way — `occlusion` is the clause
+ * that differs, the grid occluding in two axes and the 1D run in one.
+ *
+ * `nearMm` and `farMm` are distances behind the sheet, so a negative near face
+ * is one brought out through the plate.
+ */
+export function describePlacement(
+  nearMm: number,
+  farMm: number,
+  viewDistanceMm: number,
+  occlusion: string,
+): string[] {
+  const D = Math.max(1e-6, viewDistanceMm);
+  const outMm = Math.max(0, -nearMm);
+  const place =
+    outMm === 0
+      ? `Window: the subject stands ${nearMm.toFixed(1)}–${farMm.toFixed(1)} mm behind the sheet, all ` +
+        `of it. Nothing crosses the plane, so nothing can float in front of the paper edge and be cut ` +
+        `off by it, ${occlusion}`
+      : farMm > 0
+        ? `Window, broken on purpose: the subject reaches ${outMm.toFixed(1)} mm out through the plate ` +
+          `and ${farMm.toFixed(1)} mm into it. Keep that front ${outMm.toFixed(1)} mm clear of the ` +
+          `edges — something nearer than the paper that the paper's own edge cuts off is a window ` +
+          `violation, and that is the one thing that reads as wrong rather than as depth. Everything ` +
+          `behind the plane is unaffected, ${occlusion}`
+        : `Pop-out: the whole subject stands ${outMm.toFixed(1)}–${(-farMm).toFixed(1)} mm in front of ` +
+          `the sheet, none of it behind. Wherever it reaches the border the paper edge will cut off ` +
+          `something that appears nearer than the paper — a window violation. Pull the Setback back ` +
+          `toward 0 unless you know you want this`;
+  // The near face is the plane that projects largest, so the fit is measured
+  // there. Behind the glass that scales the subject up; in front of it, down.
+  const shrink = (D + nearMm) / (D + farMm);
+  return [
+    place,
+    `Fitted at the near face, scaled ×${((D + nearMm) / D).toFixed(3)} to fill the frame from there; ` +
+      `the far face lands ${((1 - shrink) * 100).toFixed(1)}% smaller, which is the perspective doing ` +
+      `the work`,
+  ];
+}
 
 export interface ViewSequenceOptions extends ViewRenderOptions {
   /** How many views to render across the cone, left to right. */
   views: number;
   /**
-   * Gap between the sheet and the nearest point of the subject, mm. 0 stands
-   * the subject right against the glass — the classic window — and anything
-   * more sinks it further into the box.
+   * Where the nearest point of the subject sits relative to the sheet, mm
+   * *behind* it. 0 stands it right against the glass — the classic window — and
+   * anything more sinks it further into the box. Negative brings the front of
+   * the subject out through the plate; see {@link clampSetbackMm} and the
+   * section above.
    */
   setbackMm: number;
 }
@@ -616,10 +761,11 @@ export interface ViewSequenceRender {
 export function renderViewSequence(stl: StlValue, o: ViewSequenceOptions): ViewSequenceRender {
   const count = Math.max(1, Math.round(o.views));
   const depthMm = Math.max(0, o.depthMm);
-  const setbackMm = Math.max(0, o.setbackMm);
-  // The subject occupies [-(setback + depth), -setback]: entirely behind the
-  // sheet, near face `setback` back. prepareVertices centres it on z = 0 and
-  // the compression maps it to `depthMm`, so the offset is to its mid-plane.
+  const setbackMm = clampSetbackMm(o.setbackMm, o.viewDistanceMm);
+  // The subject occupies [-(setback + depth), -setback]: near face `setback`
+  // behind the sheet, or in front of it if that is negative. prepareVertices
+  // centres it on z = 0 and the compression maps it to `depthMm`, so the offset
+  // is to its mid-plane.
   const placed: ViewSequenceOptions = {
     ...o,
     zOffsetMm: -(setbackMm + depthMm / 2),

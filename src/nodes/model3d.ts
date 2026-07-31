@@ -11,6 +11,9 @@ import { parseMesh } from '../lib/mesh';
 import {
   MAX_VIEW_PX,
   MIN_VIEW_PX,
+  clampSetbackMm,
+  describePlacement,
+  disparityAtDepth,
   disparityPerStep,
   eyeOffsetsMm,
   renderViewGrid,
@@ -103,6 +106,9 @@ export function viewGridOptionsFromConfig(config: NodeConfig): ViewGridOptions {
     widthPx: Math.min(MAX_VIEW_PX, Math.max(MIN_VIEW_PX, Math.round(num(config.viewPx, 512)))),
     viewDistanceMm: Math.max(10, num(config.viewDistanceMm, 400)),
     depthMm: Math.max(0, num(config.depthMm, 20)),
+    // Negative is a subject brought out through the plate; the renderer holds it
+    // to a sane distance in front (clampSetbackMm).
+    setbackMm: clampSetbackMm(num(config.setbackMm, 0), Math.max(10, num(config.viewDistanceMm, 400))),
     coneDeg: coneFromConfig(config),
     rotationDeg: [num(config.rotX, 0), num(config.rotY, 0), num(config.rotZ, 0)],
     margin: Math.min(0.4, Math.max(0, num(config.margin, 0.08))),
@@ -155,8 +161,19 @@ function lensletCounts(config: NodeConfig): { across: number; down: number } {
   return { across: Math.round(across), down: Math.round(down) };
 }
 
-/** More than this much movement per view step and the print ghosts. */
+/** More than this much movement per view step and the lens stops resolving it. */
 export const MAX_STEP_LENSLETS = 1.5;
+
+/**
+ * …and past *this* much it stops being worth having. Between the two the lens
+ * shows a blend of where a feature was and where it went, and because disparity
+ * grows with distance from the sheet the blend grows with it too: sharp at the
+ * plane, softer the deeper you look. That is what aerial perspective looks like,
+ * so a mild overshoot reads as haze — and as more depth, not less. Beyond this
+ * the blend separates into two distinct copies of an edge, which reads as a
+ * fault. See "Overshooting on purpose" in docs/printed-lenses.md.
+ */
+export const MAX_HAZE_LENSLETS = 4;
 
 /** Which of texture / vertex colour / material colour this render will use. */
 function surfaceUsed(stl: StlValue, o: ViewGridOptions): string {
@@ -188,15 +205,31 @@ export function describeViewGrid(
   const viewPy = Math.round((o.widthPx * o.heightMm) / o.widthMm);
   const fromLens = str(config.coneMode, 'lens') === 'lens';
 
+  // Where the window puts the subject: near face at the setback, far face a
+  // subject depth further back. Both are distances behind the sheet, so a
+  // negative near face is one brought out through the plate.
+  const nearMm = o.setbackMm;
+  const farMm = o.setbackMm + o.depthMm;
+  // Which face the parallax figure is about — the worst one, and with the
+  // subject out through the plate that can be the near one, since z/(D − z)
+  // grows faster in front of the sheet than behind it.
+  const stepMm = offsets.length > 1 ? Math.abs(offsets[1] - offsets[0]) : 0;
+  const D = o.viewDistanceMm;
+  const face =
+    disparityAtDepth(stepMm, -nearMm, D, lpi).mm > disparityAtDepth(stepMm, -farMm, D, lpi).mm
+      ? 'near'
+      : 'far';
+
   const lines = [
     `${grid}×${grid} = ${grid * grid} views · ${viewPx}×${viewPy} px each · ` +
       `${stl.triangleCount.toLocaleString()} triangles`,
     `Sheet ${o.widthMm}×${o.heightMm} mm, viewed from ${o.viewDistanceMm} mm`,
     `Cone ${o.coneDeg.toFixed(1)}°${fromLens ? ` (solved from ${lpi} LPI / ${num(config.lensHeightMm, 0.9)} mm / RI ${num(config.ri, 1.5)})` : ' (set by hand)'} — ` +
       `outer eye ${outer.toFixed(0)} mm off-axis`,
-    `Subject depth ${o.depthMm} mm about the sheet plane · covers ${(coverage * 100).toFixed(0)}% of the frame`,
+    ...describePlacement(nearMm, farMm, D, 'and the edges occlude it in both axes as you move'),
+    `Covers ${(coverage * 100).toFixed(0)}% of the frame`,
     `Surface: ${surfaceUsed(stl, o)}`,
-    `Parallax ${step.lenslets.toFixed(2)} lenslets per view step ` +
+    `Parallax ${step.lenslets.toFixed(2)} lenslets per view step at the ${face} face ` +
       `(${step.mm.toFixed(3)} mm at ${lpi} LPI), ${(step.lenslets * (grid - 1)).toFixed(2)} across the whole cone`,
     `Each view will print at ${cells.across}×${cells.down} px — one pixel per lenslet`,
   ];
@@ -204,17 +237,32 @@ export function describeViewGrid(
   // A feature that moves more than a lenslet between adjacent views is never
   // sampled in between: it jumps instead of gliding, and the lens blur turns the
   // jump into a double image. This is the number that decides whether the print
-  // reads as depth, so it gets the loudest warning in the node.
-  if (step.lenslets > MAX_STEP_LENSLETS) {
+  // reads as depth, so it gets the loudest warning in the node — but see
+  // MAX_HAZE_LENSLETS: the first stretch past the line is a graded blur that
+  // deepens with distance, which is what haze looks like, and is often wanted.
+  if (step.lenslets > MAX_HAZE_LENSLETS) {
+    // Disparity is very nearly linear in distance from the sheet, so scaling
+    // the worst face back by the overshoot is the honest suggestion — and what
+    // is left for the subject is that minus wherever its near face sits.
+    const room = Math.max(0, farMm * (MAX_STEP_LENSLETS / step.lenslets) - nearMm);
     lines.push(
-      `⚠ ${step.lenslets.toFixed(2)} lenslets per step is too much — the print will ghost rather than ` +
-        `read as depth. Reduce Subject depth to about ` +
-        `${(o.depthMm * (MAX_STEP_LENSLETS / step.lenslets)).toFixed(1)} mm, raise LPI, or use a bigger grid.`,
+      `⚠ ${step.lenslets.toFixed(2)} lenslets per step is far past the line — the ${face} face will ` +
+        `double rather than soften. Reduce Subject depth to about ${room.toFixed(1)} mm` +
+        `${nearMm !== 0 ? ' (or bring the Setback back toward 0)' : ''}, raise LPI, or use a bigger grid.`,
     );
-  } else if (step.lenslets < 0.15 && o.depthMm > 0) {
+  } else if (step.lenslets > MAX_STEP_LENSLETS) {
+    lines.push(
+      `· ${step.lenslets.toFixed(2)} lenslets per step is over the ${MAX_STEP_LENSLETS} the lens can ` +
+        `resolve, but not by much: the ${face} face will read as haze rather than as detail, softening ` +
+        `with distance the way real air does. Keep the subject of the picture near the sheet plane, ` +
+        `which stays sharp, and this is a depth cue rather than a fault. Past ` +
+        `${MAX_HAZE_LENSLETS} lenslets it becomes visible doubling.`,
+    );
+  } else if (step.lenslets < 0.15 && farMm > 0) {
     lines.push(
       `⚠ Only ${step.lenslets.toFixed(2)} lenslets per step — under a lenslet across the whole cone, so ` +
-        `the views are nearly identical and the print will look flat. Raise Subject depth.`,
+        `the views are nearly identical and the print will look flat. Raise Subject depth, or push the ` +
+        `Setback back.`,
     );
   }
   if (viewPx < cells.across) {
@@ -239,11 +287,17 @@ export const modelViewsNode: NodeDefinition = {
   label: 'Model → Grid Views',
   category: 'UV',
   description:
-    'Render a mesh from every eye position of a lens grid and send all of them down one wire into ' +
-    'Lens Grid Print’s All views input, in the order its cells are named. The eye is shifted, never rotated, so ' +
-    'the sheet plane stays pin-sharp in all views and only depth moves; the grid spans the lens’s own ' +
-    'viewing cone. Watch the parallax figure in Info: more than ~1.5 lenslets per view step ghosts ' +
-    'instead of reading as depth. Manual: click Run.',
+    'Render a mesh as if it stood behind the print, from every eye position of a lens grid, and send all ' +
+    'of them down one wire into Lens Grid Print’s All views input, in the order its cells are named. The ' +
+    'sheet is a window: the subject sits entirely behind it, so it recedes into the paper instead of ' +
+    'floating in front of it, and the edges of the sheet occlude it as you move — sideways and ' +
+    'vertically both, which is where most of the depth you actually see comes from. The eye is shifted, ' +
+    'never rotated, so the window plane stays pin-sharp in all views; the grid spans the lens’s own ' +
+    'viewing cone. Subject depth and Setback place the box behind the glass — a negative Setback brings ' +
+    'the front of the subject out through the plate, which is worth a millimetre or two if you keep it ' +
+    'away from the sheet edges. Watch the parallax figure in Info: past ~1.5 lenslets per view step the ' +
+    'far face softens into haze (often worth having), and past ~4 it doubles. A bigger grid is what buys ' +
+    'depth, since it divides the cone into smaller steps. Manual: click Run.',
   autoRun: false,
   inputs: [
     { id: 'model', label: 'Mesh', type: 'stl', required: true },
@@ -261,6 +315,12 @@ export const modelViewsNode: NodeDefinition = {
     { kind: 'number', key: 'widthMm', label: 'Print width (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'sheetHeightMm', label: 'Print height (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'depthMm', label: 'Subject depth (mm)', min: 0, step: 1 },
+    {
+      kind: 'number',
+      key: 'setbackMm',
+      label: 'Setback behind the sheet (mm, negative comes out of it)',
+      step: 1,
+    },
     { kind: 'number', key: 'viewDistanceMm', label: 'Viewing distance (mm)', min: 10, step: 10 },
     { kind: 'number', key: 'viewPx', label: 'View width (px)', min: MIN_VIEW_PX, max: MAX_VIEW_PX, step: 32 },
     { kind: 'number', key: 'rotX', label: 'Rotate X (°)', min: -180, max: 180, step: 5 },
@@ -316,12 +376,20 @@ export const modelViewsNode: NodeDefinition = {
     grid: DEFAULT_GRID,
     widthMm: 100,
     sheetHeightMm: 75,
-    // Two millimetres, and that is not a typo. A 3×3 over the lens's 53.3° cone
-    // steps the eye 201 mm between views, so a feature 1 mm off the sheet plane
+    // One millimetre, and that is not a typo. A 3×3 over the lens's 53.3° cone
+    // steps the eye 201 mm between views, so the far face 1 mm behind the sheet
     // already slides 0.50 mm across it — nearly a whole 45 LPI lenslet, which is
     // the most a lens grid can show. Depth of field is the scarce resource here,
-    // and it buys back linearly with the grid: 6×6 carries ~5.6 mm.
-    depthMm: 2,
+    // and it buys back linearly with the grid: 6×6 carries ~2.8 mm. A window
+    // spends it faster than a straddling subject would, because the far face is
+    // a whole depth off the plane rather than half of one — and pays for it in
+    // occlusion by the sheet edge, which is the better cue anyway.
+    depthMm: 1,
+    // Nothing between the glass and the subject: its nearest point just touches
+    // the window, which is as far forward as a window goes without breaking.
+    // Negative brings the front of the subject out through the plate — 1–2 mm
+    // is plenty, and the rest of the box stays inside.
+    setbackMm: 0,
     viewDistanceMm: 400,
     viewPx: 512,
     rotX: 0,

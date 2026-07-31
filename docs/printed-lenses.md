@@ -430,11 +430,13 @@ If the subject is a 3D model rather than nine photographs, the views can be rend
 rendering has to be done in a particular way, which is why the tool has its own renderer instead of
 leaving you to a 3D package. Two nodes render views, and they share every rule below:
 
-- **Model → Grid Views** fills the N² eye positions of a **lens grid**, with the subject straddling
-  the sheet plane — half in front, half behind.
-- **Model → Stereo Views** renders a horizontal run of views for a **1D lenticular**, with the
-  subject standing entirely _behind_ the sheet. That makes the print a window, which is worth a
-  section of its own — see [The window](#the-window-a-subject-behind-the-sheet) below.
+- **Model → Grid Views** fills the N² eye positions of a **lens grid**.
+- **Model → Stereo Views** renders a horizontal run of views for a **1D lenticular**.
+
+Both stand the subject entirely _behind_ the sheet, so the print is a window you look into rather
+than a surface things float in front of — the grid occluding with its edges in two axes, the run in
+one. That arrangement is worth a section of its own; see
+[The window](#the-window-a-subject-behind-the-sheet) below.
 
 ### Shift the eye; never rotate it
 
@@ -563,11 +565,16 @@ front of the sheet at `z = +Z` moves `s·Z/(D − Z)` per eye step; a point behi
 s·Z / (D + Z)
 ```
 
-`D − Z` shrinking against `D + Z` growing. At the tool's 400 mm viewing distance a subject 10 mm
-deep moves about 5% less per step behind the glass than in front of it, and the gap widens fast as
-the subject deepens. Depth behind the plane is simply cheaper than depth in front of it, which is
-why a window carries a bigger subject at the same LPI — 6 mm in the stereo example against the 2 mm
-the 3×3 grid manages, most of that difference coming from the extra views but some of it from this.
+`D − Z` shrinking against `D + Z` growing. At the tool's 400 mm viewing distance a point 10 mm off
+the plane moves about 5% less per step behind the glass than in front of it, and the gap widens fast
+as it recedes. Depth behind the plane is simply cheaper, millimetre for millimetre, than depth in
+front of it.
+
+Cheaper per millimetre, note — not cheaper overall, because the far face is now a whole depth off the
+plane instead of half of one. That is the factor of two in the depth table above, and it is why the
+number to watch is the far face's distance from the sheet rather than the subject's thickness. What
+carries the stereo example's 6 mm against the 3×3 grid's 1 mm is mostly its extra views: twelve of
+them across the same cone, so a step a third the size.
 
 #### What it costs: the subject gets smaller
 
@@ -587,6 +594,33 @@ projects largest, so fitting there is the one choice that guarantees nothing spi
 the aperture. At the default setback of zero the factor is exactly 1 — the nearest point of the
 subject touches the glass and fills the frame, and everything deeper falls away inside it, which is
 what a box seen through a window looks like.
+
+#### Breaking the window on purpose
+
+Everything above argues for keeping the subject inside the box. There is one exception worth having,
+and both render nodes allow it: **Setback may be negative.** At −2 the nearest 2 mm of the subject
+stands _in front_ of the sheet and the other 28 mm of a 30 mm subject is still behind it. A nose in
+front of the glass, on a head that is still in the box.
+
+Nothing in the maths needs changing. The near face is at `z = −setback`, which is simply positive
+now; the fit scales by `(D + Z)/D` with a negative `Z`, so it scales the subject _down_ instead of up
+(a plane in front subtends more, not less); and the disparity formula carries the sign itself. Two
+things do change in how it reads:
+
+- **The window violation is back, for the part that crosses.** Anything in front of the plane that
+  the sheet's own edge cuts off asks the eye to believe the edge is both in front of it and behind
+  it. The fix is compositional, not numerical: keep the part that pokes out small, and keep it away
+  from the border. A subject that comes 2 mm out in the middle of a 100 mm sheet never goes near an
+  edge, and the effect is free.
+- **The sharp plane moves into the subject.** What prints sharp is always the sheet plane, and it now
+  cuts through the model rather than sitting at its front. Choose the crossing so that the plane lands
+  on what you want crisp.
+
+The parallax figure follows the worse of the two faces, which is not always the far one: `Z/(D − Z)`
+grows faster in front of the sheet than `Z/(D + Z)` does behind it, so a subject brought far enough
+out is limited by its nose rather than its back. Info names the face it is quoting. The renderer also
+refuses to bring the near face closer than a quarter of the viewing distance, where the projection
+stops meaning anything.
 
 #### Ordering the views for the lens
 

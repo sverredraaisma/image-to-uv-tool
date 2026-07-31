@@ -161,7 +161,48 @@ describe('Model → Stereo Views', () => {
       farMm: 80,
     });
     expect(text).toContain('⚠');
-    expect(text).toContain('ghost rather than read as depth');
+    expect(text).toContain('double rather than soften');
+  });
+
+  it('calls a mild overshoot haze rather than a fault', () => {
+    // Between 1.5 and 4 lenticules per step the far face blurs progressively
+    // with distance, which is what air does — worth having, so no ⚠.
+    const over = { depthMm: 12, setbackMm: 0, views: 12 };
+    const o = options(over);
+    const text = describeViewSequence(config(over), o, TETRA, {
+      views: [],
+      offsetsMm: stereoEyeOffsets(o),
+      depth: { kind: 'image', width: 1, height: 1, data: new Uint8ClampedArray(4) },
+      coverage: 0.5,
+      nearMm: 0,
+      farMm: 12,
+    });
+    expect(text).toMatch(/· [\d.]+ lenticules per step is over the 1\.5/);
+    expect(text).toContain('read as haze');
+    // A note, not a warning — the only ⚠ here is the render-resolution one this
+    // test's deliberately small config earns.
+    expect(text).not.toContain('double rather than soften');
+  });
+
+  it('reports a subject brought out through the plate, and warns about the edges', () => {
+    // 2 mm out, 28 mm in: the window is broken on purpose.
+    const over = { depthMm: 30, setbackMm: -2, views: 12 };
+    const o = options(over);
+    expect(o.setbackMm).toBe(-2);
+    const text = describeViewSequence(config(over), o, TETRA, {
+      views: [],
+      offsetsMm: stereoEyeOffsets(o),
+      depth: { kind: 'image', width: 1, height: 1, data: new Uint8ClampedArray(4) },
+      coverage: 0.5,
+      nearMm: -2,
+      farMm: 28,
+    });
+    expect(text).toContain('reaches 2.0 mm out through the plate and 28.0 mm into it');
+    expect(text).toContain('window violation');
+    // Fitted at the near face, which is now in front: scaled down, not up.
+    expect(text).toContain('scaled ×0.995');
+    // …and the far face is still the one that moves most at this depth.
+    expect(text).toContain('per view step at the far face');
   });
 
   it('warns when there is nothing to see', () => {

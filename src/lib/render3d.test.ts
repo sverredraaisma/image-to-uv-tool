@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  clampSetbackMm,
   disparityPerStep,
   eyeOffsetsMm,
   prepareVertices,
@@ -18,6 +19,7 @@ const options = (over: Partial<ViewGridOptions> = {}): ViewGridOptions => ({
   widthPx: 64,
   viewDistanceMm: 400,
   depthMm: 20,
+  setbackMm: 0,
   coneDeg: 60,
   rotationDeg: [0, 0, 0],
   margin: 0,
@@ -48,6 +50,14 @@ const dark = (img: RasterImage, x: number, y: number) => img.data[(y * img.width
 /** Rightmost column holding any object pixel, or -1. */
 function rightmostDark(img: RasterImage): number {
   for (let x = img.width - 1; x >= 0; x--) {
+    for (let y = 0; y < img.height; y++) if (dark(img, x, y)) return x;
+  }
+  return -1;
+}
+
+/** Leftmost column holding any object pixel, or -1. */
+function leftmostDark(img: RasterImage): number {
+  for (let x = 0; x < img.width; x++) {
     for (let y = 0; y < img.height; y++) if (dark(img, x, y)) return x;
   }
   return -1;
@@ -167,21 +177,75 @@ describe('renderViewGrid', () => {
     expect(r.depth.width).toBe(32);
   });
 
-  it('renders a flat subject identically from every eye — the sheet is the focal plane', () => {
-    const r = renderViewGrid(mesh(quad(-1, 1, -1, 1, 0)), options());
+  it('renders a subject lying in the window identically from every eye — it is the focal plane', () => {
+    // Flat, no depth and no setback: the subject is the sheet plane itself.
+    const r = renderViewGrid(mesh(quad(-1, 1, -1, 1, 0)), options({ depthMm: 0, setbackMm: 0 }));
     for (const view of r.views) expect(view.data).toEqual(r.views[4].data);
   });
 
-  it('moves a near feature against the eye, in both axes', () => {
-    // A back plane filling the sheet, with a nearer tab on its right-hand half.
-    const stl = mesh(quad(-1, 1, -1, 1, -1), quad(0.2, 1, -0.4, 0.4, 1));
-    const r = renderViewGrid(stl, options({ margin: 0.25, depthMm: 30 }));
-    const [lu, , ru, , , , ld] = r.views;
-    // Row 0 col 0 is Left · Up, col 2 is Right · Up: seen from the left, the
-    // near tab reads further right on the sheet than it does from the right.
-    expect(rightmostDark(lu)).toBeGreaterThan(rightmostDark(ru));
-    // And from above, a near feature reads lower — Left · Down sees it higher.
+  it('stands the subject behind the sheet, so all of it slides *with* the eye', () => {
+    // A plane 40 mm back. Nothing is in front of the window, so every point
+    // moves the way the eye does — the opposite of a pop-out.
+    const back = options({ margin: 0.4, depthMm: 0, setbackMm: 40 });
+    const r = renderViewGrid(mesh(quad(-1, 1, -1, 1, 0)), back);
+    const [lu, cu, ru, , , , ld] = r.views;
+    expect(rightmostDark(ru)).toBeGreaterThan(rightmostDark(cu));
+    expect(rightmostDark(cu)).toBeGreaterThan(rightmostDark(lu));
+    // The same in the other axis: the eye above sees it higher up the sheet.
     expect(lowestDark(ld)).toBeGreaterThan(lowestDark(lu));
+
+    // …and it is a window, not a shove backwards: the fit is measured at the
+    // near face, so the subject still fills the frame head-on however far back
+    // it stands. (Within a pixel — the two scalings cancel in real numbers.)
+    const flush = renderViewGrid(mesh(quad(-1, 1, -1, 1, 0)), { ...back, setbackMm: 0 });
+    expect(Math.abs(rightmostDark(cu) - rightmostDark(flush.views[4]))).toBeLessThanOrEqual(1);
+  });
+
+  it('moves a near feature less than a far one — the parallax the print carries', () => {
+    // A back plane over the left of the sheet, with a nearer tab clear of its
+    // right-hand edge, so each is measured by its own extreme.
+    const stl = mesh(quad(-1, 0.8, -1, 1, -1), quad(0.85, 1, -0.4, 0.4, 1));
+    const r = renderViewGrid(stl, options({ margin: 0.25, depthMm: 30 }));
+    const [lu, , ru] = r.views;
+    const tab = rightmostDark(ru) - rightmostDark(lu);
+    const plane = leftmostDark(ru) - leftmostDark(lu);
+    // Both slide right as the eye goes right, because both are behind the
+    // sheet; the deeper one slides further, and that difference is the depth.
+    expect(tab).toBeGreaterThan(0);
+    expect(plane).toBeGreaterThan(tab);
+  });
+
+  it('reports where the subject stands behind the sheet', () => {
+    const r = renderViewGrid(mesh(quad(-1, 1, -1, 1, 1)), options({ depthMm: 6, setbackMm: 4 }));
+    expect([r.nearMm, r.farMm]).toEqual([4, 10]);
+  });
+
+  it('brings the subject out through the plate on a negative setback', () => {
+    // 40 mm in front of the sheet, all of it: now it slides *against* the eye,
+    // the way anything nearer than the paper has to.
+    const front = options({ margin: 0.4, depthMm: 0, setbackMm: -40 });
+    const r = renderViewGrid(mesh(quad(-1, 1, -1, 1, 0)), front);
+    const [lu, cu, ru] = r.views;
+    expect([r.nearMm, r.farMm]).toEqual([-40, -40]);
+    expect(rightmostDark(ru)).toBeLessThan(rightmostDark(cu));
+    expect(rightmostDark(cu)).toBeLessThan(rightmostDark(lu));
+    // Fitted at the near face still, which is in front now — so it is scaled
+    // down to fit the frame rather than up, and lands the same size head-on.
+    const flush = renderViewGrid(mesh(quad(-1, 1, -1, 1, 0)), { ...front, setbackMm: 0 });
+    expect(Math.abs(rightmostDark(cu) - rightmostDark(flush.views[4]))).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps a crossing subject partly either side of the plane', () => {
+    // 2 mm out, 28 mm in — the arrangement a pop-out detail on a deep subject
+    // actually wants.
+    const r = renderViewGrid(mesh(quad(-1, 1, -1, 1, 1)), options({ depthMm: 30, setbackMm: -2 }));
+    expect([r.nearMm, r.farMm]).toEqual([-2, 28]);
+  });
+
+  it('holds the pop-out to a quarter of the viewing distance', () => {
+    const r = renderViewGrid(mesh(quad(-1, 1, -1, 1, 1)), options({ depthMm: 1, setbackMm: -1000 }));
+    expect(r.nearMm).toBe(-100); // 400 mm viewing distance
+    expect(clampSetbackMm(-10, 400)).toBe(-10);
   });
 
   it('keeps the nearer surface where two overlap', () => {
@@ -229,14 +293,21 @@ describe('renderViewGrid', () => {
 describe('disparityPerStep', () => {
   it('matches the hand calculation', () => {
     const o = options({ grid: 3, coneDeg: 60, viewDistanceMm: 400, depthMm: 20 });
-    // Eye step = 400·tan30° = 230.94 mm; the near face sits 10 mm off the sheet,
-    // so it slides 230.94 × 10/390 = 5.92 mm per step. At 45 LPI (0.5644 mm
-    // pitch) that is 10.5 lenslets — wildly too much, which is the point: it is
-    // easy to ask for far more depth than a lens grid can show.
+    // Eye step = 400·tan30° = 230.94 mm; the far face stands 20 mm behind the
+    // sheet, so it slides 230.94 × 20/420 = 11.0 mm per step. At 45 LPI
+    // (0.5644 mm pitch) that is 19.5 lenslets — wildly too much, which is the
+    // point: it is easy to ask for far more depth than a lens grid can show.
     const d = disparityPerStep(o, 45);
-    expect(d.mm).toBeCloseTo((400 * Math.tan(Math.PI / 6) * 10) / 390, 6);
+    expect(d.mm).toBeCloseTo((400 * Math.tan(Math.PI / 6) * 20) / 420, 6);
     expect(d.lenslets).toBeCloseTo(d.mm / (25.4 / 45), 6);
-    expect(d.lenslets).toBeGreaterThan(10);
+    expect(d.lenslets).toBeGreaterThan(19);
+  });
+
+  it('is measured at the far face, so the setback counts as depth', () => {
+    // 5 mm of subject 5 mm back reaches as far as 10 mm of subject on the glass.
+    const a = disparityPerStep(options({ depthMm: 5, setbackMm: 5 }), 45);
+    const b = disparityPerStep(options({ depthMm: 10, setbackMm: 0 }), 45);
+    expect(a.mm).toBeCloseTo(b.mm, 10);
   });
 
   it('falls linearly with depth and rises with the cone', () => {
