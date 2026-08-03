@@ -1006,6 +1006,40 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     ],
   },
 
+  depthStereo: {
+    summary:
+      'Warps one picture and its heightmap into the whole run of views a Lenticular Print needs, on one wire. Each pixel slides sideways by an amount its depth decides — the same projection Model → Stereo Views uses, but from a relief rather than a mesh, so a photograph with a depth map prints in 3D without any geometry at all.',
+    uses: [
+      {
+        title: 'A photograph, in depth',
+        detail:
+          'Estimate depth from the picture itself and print it: no model, no second camera, no re-shoot.',
+        chain: ['Image Input', 'Depth Anything v2', 'Image + Depth → Stereo Views', 'Lenticular Print'],
+      },
+      {
+        title: 'Generated art with real parallax',
+        detail:
+          'Generate the artwork, run a depth estimate over it, and the flat render gains a window it never had. Cheap enough to try on anything, since only the depth pass costs credits.',
+        chain: ['Prompt Input', 'a text→image node', 'Depth Anything v2', 'Image + Depth → Stereo Views'],
+      },
+      {
+        title: 'Paint the depth by hand',
+        detail:
+          'Any greyscale image works as the heightmap — a gradient, a mask, a blurred selection. White is the plane nearest you, so a white subject on a black ground lifts it off the background by exactly the Depth range.',
+        chain: ['Image Input', 'Curves', 'Image + Depth → Stereo Views'],
+      },
+    ],
+    tips: [
+      'A heightmap has nothing behind itself. Slide a near edge sideways and it uncovers ground the camera never saw, so the node fills that strip by stretching the background it uncovered — silhouettes stay crisp, the wall behind them smears. Info reports what percentage of each view had to be invented; a few tenths is normal, past ~3% the edges visibly drag.',
+      'No real depth map has a one-pixel cliff — an estimator ramps across a silhouette over two or three pixels, and the picture is antialiased over the same ones, so those pixels are a blend of subject and background. They are what smears if you let them: the node measures the edge over a window instead, and repaints the whole gap from the plateau beyond it. *Edge jump* under Advanced is where a surface turning away stops counting as a surface; lower it if a subject still drags a halo behind it, raise it if a steeply receding floor is coming out in flat bands.',
+      'That is why Depth range is 5 mm and not 50. Depth here is bought with invented pixels, not with render time — the opposite of the mesh node, where depth is free and only the parallax limit bites.',
+      'White = near. If your map comes out the other way round (some estimators publish far-is-white), tick *Heightmap: white is far* rather than inverting it upstream, so the Depth output still means what the gloss chain expects.',
+      'Depth blur is worth the 1 px it defaults to: an 8-bit depth map bands, and every band boundary is a place where two neighbouring pixels land a pixel apart and tear. Raise it to 3–4 for a noisy estimate; lower it to 0 only for a map you drew yourself.',
+      'The depth map is a relief, so it cannot rotate anything — you get parallax and occlusion, not a new angle on the subject. For a real turn, use Model → Stereo Views with a mesh.',
+      'The views go out right-eye-first, because a lenticule shows its leftmost strip to an eye on the right and Lenticular Print interlaces in the order frames arrive. Turn off *Order for the lens* under Advanced if you ever need the raw left-to-right run.',
+    ],
+  },
+
   modelStereo: {
     summary:
       'Renders a mesh standing behind the print and puts the whole run of views on one wire, ready for Lenticular Print’s Frames input. The sheet is a window: the subject sits entirely behind it and recedes into the paper, with the edges of the sheet occluding it as you move.',
