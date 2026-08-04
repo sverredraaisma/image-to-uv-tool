@@ -380,6 +380,30 @@ describe('loading a large file', () => {
     return out;
   }
 
+  it('turns a COLMAP capture upright by default, and says so', async () => {
+    // The default the whole setting exists for: a .ply off a normal pipeline is
+    // Y-down, and without this every preview is upside down.
+    const store = createBlobStore(memoryBackend());
+    const restore = { putBytes: platform.putBytes, getBytes: platform.getBytes };
+    setPlatform({ putBytes: store.putBytes, getBytes: store.getBytes });
+    try {
+      const ref = await platform.putBytes(plyOf(2));
+      expect(splatInputNode.defaultConfig().upAxis).toBe('-y');
+      const cfg = { ...splatInputNode.defaultConfig(), bytesRef: ref, name: 's.ply' };
+      const out = await splatInputNode.compute(ctx({}, cfg));
+      const cloud = out.out as SplatValue;
+      // plyOf puts every splat at y = 0, z = 0, so only the sign of x survives
+      // — but the report has to say what it did.
+      expect(cloud.count).toBe(2);
+      expect((out.info as { text: string }).text).toMatch(/turned upright from Y down/);
+
+      const asIs = await splatInputNode.compute(ctx({}, { ...cfg, upAxis: 'y' }));
+      expect((asIs.info as { text: string }).text).toMatch(/Y up — taken as already upright/);
+    } finally {
+      setPlatform(restore);
+    }
+  });
+
   it('reads the bytes an upload stored, without a data URL anywhere', async () => {
     const store = createBlobStore(memoryBackend());
     const restore = { putBytes: platform.putBytes, getBytes: platform.getBytes };

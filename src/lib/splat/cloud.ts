@@ -36,6 +36,84 @@ export const MAX_IMPORT_SPLATS = 8_000_000;
 export const looksLikeZip = (bytes: Uint8Array): boolean =>
   bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
 
+/**
+ * Which way is up in the file, so it can be made up here.
+ *
+ * Almost every splat capture is trained from a COLMAP reconstruction, and
+ * COLMAP's world space has **+Y pointing down** and +Z forward — the OpenCV
+ * convention. Everything in this tool is the other one: +Y up, −Z forward, as
+ * OpenGL and Blender have it. Load a capture without converting and it renders
+ * perfectly, in focus, and upside down.
+ *
+ * `-y` is the default because it is what a `.ply` off a normal pipeline
+ * contains. A file that has already been converted — some exporters do it —
+ * wants `y` instead, and a Blender-style Z-up export wants `z`.
+ */
+export type UpAxis = 'y' | '-y' | 'z';
+
+export const UP_AXES: { value: UpAxis; label: string }[] = [
+  { value: '-y', label: 'Y down — COLMAP, and most .ply captures' },
+  { value: 'y', label: 'Y up — already upright' },
+  { value: 'z', label: 'Z up — Blender-style' },
+];
+
+export const asUpAxis = (v: unknown): UpAxis => (v === 'y' || v === 'z' ? v : '-y');
+
+/**
+ * Turn a cloud the right way up, in place.
+ *
+ * A rotation, never a mirror. Flipping the sign of one axis would put Y up just
+ * as well and would also turn the scene inside out — a right-handed capture
+ * becomes left-handed, every ellipsoid's twist reverses, and the print comes
+ * out subtly, unplaceably wrong. So `-y` is 180° about X and `z` is −90° about
+ * X, both of which are rotations, and both are applied to the ellipsoid
+ * orientations as well as to the centres.
+ *
+ * In place because the cloud has just been parsed and nothing else holds it
+ * yet, and a copy is hundreds of megabytes.
+ */
+export function orientCloud(cloud: SplatValue, up: UpAxis): SplatValue {
+  if (up === 'y') return cloud;
+  const { positions, rotations, count } = cloud;
+
+  if (up === '-y') {
+    // 180° about X: (x, y, z) → (x, −y, −z).
+    for (let i = 0; i < count; i++) {
+      positions[i * 3 + 1] = -positions[i * 3 + 1];
+      positions[i * 3 + 2] = -positions[i * 3 + 2];
+      // The same rotation applied to the orientation: q ← qₓ(180°) ⊗ q, which
+      // for (x, y, z, w) works out as (w, −z, y, −x).
+      const x = rotations[i * 4],
+        y = rotations[i * 4 + 1],
+        z = rotations[i * 4 + 2],
+        w = rotations[i * 4 + 3];
+      rotations[i * 4] = w;
+      rotations[i * 4 + 1] = -z;
+      rotations[i * 4 + 2] = y;
+      rotations[i * 4 + 3] = -x;
+    }
+    return cloud;
+  }
+
+  // −90° about X: (x, y, z) → (x, z, −y), so the old +Z becomes the new up.
+  const c = Math.SQRT1_2;
+  const s = -Math.SQRT1_2;
+  for (let i = 0; i < count; i++) {
+    const py = positions[i * 3 + 1];
+    positions[i * 3 + 1] = positions[i * 3 + 2];
+    positions[i * 3 + 2] = -py;
+    const x = rotations[i * 4],
+      y = rotations[i * 4 + 1],
+      z = rotations[i * 4 + 2],
+      w = rotations[i * 4 + 3];
+    rotations[i * 4] = c * x + s * w;
+    rotations[i * 4 + 1] = c * y - s * z;
+    rotations[i * 4 + 2] = c * z + s * y;
+    rotations[i * 4 + 3] = c * w - s * x;
+  }
+  return cloud;
+}
+
 /** Axis-aligned extent of a cloud, ignoring the ellipsoid radii. */
 export interface CloudBounds {
   min: [number, number, number];

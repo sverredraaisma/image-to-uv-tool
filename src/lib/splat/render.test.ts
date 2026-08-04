@@ -6,7 +6,7 @@ import {
   toCameraSpace,
   type SplatViewOptions,
 } from './render';
-import { cameraAxes, cloudBounds, framingCamera } from './cloud';
+import { cameraAxes, cloudBounds, framingCamera, orientCloud } from './cloud';
 import { disparityAtDepth } from '../render3d';
 import type { RasterImage, SplatValue, TransformValue } from '../../types';
 
@@ -380,5 +380,82 @@ describe('the budget is spent on what is in frame', () => {
     const off = { ...options({ views: 3, coneDeg: 0 }), camera: camera({ position: [100, 0, 0] }) };
     expect(renderSplatViews(cloud, off).offSheet).toBe(1);
     expect(renderSplatViews(cloud, { ...off, coneDeg: 120 }).offSheet).toBe(0);
+  });
+});
+
+describe('which way is up', () => {
+  /** Where the ink ended up, vertically: above the middle of the sheet or below. */
+  const half = (img: RasterImage) => (centroid(img).y < img.height / 2 ? 'top' : 'bottom');
+
+  it('draws a splat above the camera in the top of the frame', () => {
+    // The coverage that was missing while every preview came out inverted: the
+    // renderer's own axis was right all along, and nothing checked it.
+    const above = cloudOf([[0, 20, -20, 3, 0, 0, 0, 255]]);
+    expect(half(renderSplatViews(above, options({ views: 1 })).views[0])).toBe('top');
+    const below = cloudOf([[0, -20, -20, 3, 0, 0, 0, 255]]);
+    expect(half(renderSplatViews(below, options({ views: 1 })).views[0])).toBe('bottom');
+  });
+
+  it('turns a Y-down capture the right way up', () => {
+    // What COLMAP writes: +Y points down, so a splat the capture calls y = −20
+    // is 20 above the camera and belongs in the top of the frame. On the sheet
+    // plane (z = 0) so that it survives the cull either way and only the flip
+    // is under test.
+    const colmap = () => cloudOf([[0, -20, 0, 3, 0, 0, 0, 255]]);
+    expect(half(renderSplatViews(colmap(), options({ views: 1 })).views[0])).toBe('bottom');
+    expect(half(renderSplatViews(orientCloud(colmap(), '-y'), options({ views: 1 })).views[0])).toBe('top');
+  });
+
+  it('turns a Z-up capture onto its feet', () => {
+    // Blender-style: +Z is up, and −Y is forward.
+    const blender = cloudOf([[0, 20, 20, 3, 0, 0, 0, 255]]);
+    const upright = orientCloud(blender, 'z');
+    expect(upright.positions[1]).toBeCloseTo(20, 6); // z became y
+    expect(upright.positions[2]).toBeCloseTo(-20, 6); // y became −z
+    expect(half(renderSplatViews(upright, options({ views: 1 })).views[0])).toBe('top');
+  });
+
+  it('rotates rather than mirrors, so the scene never comes out inside out', () => {
+    // A sign flip would put Y up too, and would turn a right-handed capture
+    // left-handed — every ellipsoid's twist reversed, and no way to see it in a
+    // still. A rotation keeps the determinant at +1, and keeps the quaternions
+    // unit-length.
+    const cloud = cloudOf([
+      [1, 2, 3, 1, 0, 0, 0, 255],
+      [-4, 5, -6, 2, 0, 0, 0, 255],
+    ]);
+    cloud.rotations.set([0.5, 0.5, 0.5, 0.5], 0);
+    cloud.rotations.set([0, Math.SQRT1_2, 0, Math.SQRT1_2], 4);
+    for (const up of ['-y', 'z'] as const) {
+      const turned = orientCloud(cloudOf([[1, 2, 3, 1, 0, 0, 0, 255]]), up);
+      // Distance from the origin is a rotation invariant.
+      expect(Math.hypot(turned.positions[0], turned.positions[1], turned.positions[2])).toBeCloseTo(
+        Math.hypot(1, 2, 3),
+        5,
+      );
+    }
+    const q = orientCloud(cloud, '-y').rotations;
+    expect(Math.hypot(q[0], q[1], q[2], q[3])).toBeCloseTo(1, 6);
+    expect(Math.hypot(q[4], q[5], q[6], q[7])).toBeCloseTo(1, 6);
+  });
+
+  it('leaves an already-upright cloud completely alone', () => {
+    const cloud = cloudOf([[1, 2, 3, 1, 0, 0, 0, 255]]);
+    const before = [...cloud.positions];
+    expect(orientCloud(cloud, 'y')).toBe(cloud);
+    expect([...cloud.positions]).toEqual(before);
+  });
+
+  it('is its own inverse for Y down, so turning twice is where you started', () => {
+    const cloud = cloudOf([[1, 2, 3, 1, 0, 0, 0, 255]]);
+    const q = [0.5, 0.5, 0.5, 0.5];
+    cloud.rotations.set(q, 0);
+    const roundTrip = orientCloud(orientCloud(cloud, '-y'), '-y');
+    expect([...roundTrip.positions]).toEqual([1, 2, 3]);
+    // Two 180° turns are 360°, which as a quaternion is −q rather than q — the
+    // same rotation, with the sign the double cover leaves behind. So the test
+    // is on the rotation, not on the four numbers.
+    const dot = q.reduce((sum, v, i) => sum + v * roundTrip.rotations[i], 0);
+    expect(Math.abs(dot)).toBeCloseTo(1, 6);
   });
 });

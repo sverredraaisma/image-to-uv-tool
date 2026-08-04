@@ -28,10 +28,14 @@ import type { ComputeContext, NodeConfig, NodeDefinition, RasterImage, SplatValu
 import type { SplatViewOptions } from '../lib/splat/render';
 import {
   MAX_IMPORT_SPLATS,
+  UP_AXES,
+  asUpAxis,
   cloudBounds,
   describeCamera,
   framingCamera,
   looksLikeZip,
+  orientCloud,
+  type UpAxis,
 } from '../lib/splat/cloud';
 import { DEFAULT_GRID, MAX_GRID, MIN_GRID, clampGrid } from '../lib/lenticular';
 import { runChunked } from '../lib/chunked';
@@ -105,11 +109,16 @@ async function decodeTexture(bytes: Uint8Array, mime: string): Promise<RasterIma
 }
 
 /** Human-readable summary of a loaded cloud. */
-export function describeCloud(cloud: SplatValue): string {
+export function describeCloud(cloud: SplatValue, up: UpAxis = 'y'): string {
   const b = cloudBounds(cloud);
   const n = (v: number) => (Math.round(v * 1000) / 1000).toString();
   const lines = [
     `${cloud.name || 'Cloud'} · ${cloud.count.toLocaleString()} splats`,
+    up === 'y'
+      ? 'Up axis: Y up — taken as already upright.'
+      : `Up axis: turned upright from ${
+          up === '-y' ? 'Y down, the COLMAP convention nearly every capture is trained in' : 'Z up'
+        }. If the scene is upside down or lying on its side, this is the setting.`,
     `Bounds ${n(b.size[0])} × ${n(b.size[1])} × ${n(b.size[2])} (scene units)`,
     `Centre ${n(b.centre[0])}, ${n(b.centre[1])}, ${n(b.centre[2])} · radius ${n(b.radius)}`,
   ];
@@ -136,7 +145,9 @@ export const splatInputNode: NodeDefinition = {
     'Upload a Gaussian splat scene — .ply (what every trainer writes), .sog (the compact bundle, ' +
     'roughly 20× smaller) or .splat — and output the cloud. Feed it to Splat Camera to choose where ' +
     'you stand, then to Splat → Views to print it. ' +
-    'The file’s units and origin do not matter; the camera’s scale is what ties the scene to the sheet. ' +
+    'The file’s units and origin do not matter; the camera’s scale is what ties the scene to the sheet — ' +
+    'but which way is *up* does, and it defaults to the Y-down convention COLMAP trains in. If a scene ' +
+    'loads upside down, that is the Up axis setting. ' +
     'The whole cloud is kept — what a render draws is thinned at render time, once it knows what is in ' +
     'front of the camera — and only the base colour of each splat is kept. See the Info output.',
   autoRun: true,
@@ -145,10 +156,14 @@ export const splatInputNode: NodeDefinition = {
     { id: 'out', label: 'Splat cloud', type: 'splat' },
     { id: 'info', label: 'Info', type: 'text' },
   ],
-  configFields: [],
-  defaultConfig: () => ({ bytesRef: '', src: '', srcRef: '', name: '' }),
+  configFields: [{ kind: 'select', key: 'upAxis', label: 'Up axis', options: UP_AXES }],
+  // Y down by default: it is what a .ply off a COLMAP pipeline contains, which
+  // is nearly all of them, and the symptom of getting it wrong is a scene that
+  // renders perfectly and upside down.
+  defaultConfig: () => ({ bytesRef: '', src: '', srcRef: '', name: '', upAxis: '-y' }),
   compute: async ({ config, onProgress, signal }) => {
     const name = str(config.name);
+    const up = asUpAxis(config.upAxis);
     const bytes = await uploadedBytes(config);
     if (!bytes) return { out: undefined, info: undefined };
     onProgress?.('Reading splat file…');
@@ -160,13 +175,15 @@ export const splatInputNode: NodeDefinition = {
       const { loadSogBundle, decodeSogChunks } = await import('../lib/splat/sog');
       onProgress?.('Unpacking SOG bundle…');
       const { meta, textures } = await loadSogBundle(bytes, decodeTexture);
-      const cloud = await runChunked(decodeSogChunks(meta, textures, name), { onProgress, signal });
-      return { out: cloud, info: { kind: 'text', text: describeCloud(cloud) } };
+      const decoded = await runChunked(decodeSogChunks(meta, textures, name), { onProgress, signal });
+      const cloud = orientCloud(decoded, up);
+      return { out: cloud, info: { kind: 'text', text: describeCloud(cloud, up) } };
     }
 
     const { parseSplatFileChunks } = await import('../lib/splat/parse');
-    const cloud = await runChunked(parseSplatFileChunks(bytes, name), { onProgress, signal });
-    return { out: cloud, info: { kind: 'text', text: describeCloud(cloud) } };
+    const parsed = await runChunked(parseSplatFileChunks(bytes, name), { onProgress, signal });
+    const cloud = orientCloud(parsed, up);
+    return { out: cloud, info: { kind: 'text', text: describeCloud(cloud, up) } };
   },
 };
 
