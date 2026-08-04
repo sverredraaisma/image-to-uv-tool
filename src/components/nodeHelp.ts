@@ -929,6 +929,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     ],
     tips: [
       'Frames must fit one lenticule: PPI ÷ LPI ÷ strip samples. At 1440 PPI and 45 LPI that is 32 frames at one sample each.',
+      'Set the pitch by pixels per lens rather than by LPI, in the editor. PPI ÷ LPI is what decides whether every lens on the sheet is identical: give it a whole number and each lenticule covers the same pixel columns, so the interlace never drifts. 1440 ÷ 45 is a clean 32, but 50 LPI on the same press is 28.8, and that fifth of a pixel accumulates into visible banding across the print. The editor shows the figure, warns when it is fractional, and snaps to the nearest whole, even or odd value — even puts the lens axis on a pixel boundary (what an even view count wants), odd puts one pixel on the axis for a true head-on view.',
       'The depth map is on the PPI raster (it is the lens); the interlaced artwork ships at the smallest raster that keeps the interlace and your sources, and never more than the press can print — scale it to the sheet at print time. Turning the array puts the strip edges on diagonals, where more pixels do buy sharper edges: raise Artwork px per strip, up to that PPI cap.',
       'Manual node: a 100 mm sheet at 1440 PPI is a ~32 MP render, so it only runs when you press Run ▶.',
       'A sheet whose raster comes out over 80 MP is not refused — the tool tells you how big it would be and how many chunks it would take, and you decide. Say yes and it renders a band of rows at a time, with a progress bar on the node and Cancel ✕ working between chunks. The same goes for the calibration sheets in the editor.',
@@ -949,6 +950,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       },
     ],
     tips: [
+      'Set the pitch by pixels per lens rather than by LPI, in the editor. PPI ÷ LPI is what decides whether every lens on the sheet is identical: give it a whole number and each lenticule covers the same pixel columns, so the interlace never drifts. 1440 ÷ 45 is a clean 32, but 50 LPI on the same press is 28.8, and that fifth of a pixel accumulates into visible banding across the print. The editor shows the figure, warns when it is fractional, and snaps to the nearest whole, even or odd value — even puts the lens axis on a pixel boundary (what an even view count wants), odd puts one pixel on the axis for a true head-on view.',
       'Each view resolves to a single pixel per lenslet whatever the grid size, so more views cost artwork raster and light per view rather than sharpness — start at grid 2 or 3 by hand, and go large only when a renderer is feeding the wire.',
       'What caps the grid is the printed dot: the lenslet’s own pixels divide by N, and under about two dots per view tile the views bleed together at every angle instead of switching. Info warns when that happens — at 1440 PPI and 45 LPI a 15×15 is just inside it.',
       'Ports are named for where the view is seen from: Left · Up, Centre (neutral), Right · Down — and Left 7 · Up 7 out at the corners of a big grid. Past 4×4 there are no per-cell ports at all; 25 handles on one node is not a way anyone would wire a print.',

@@ -29,6 +29,10 @@ import {
   stripsOffPixelGrid,
   switchFrames,
   clampRadialViews,
+  lpiForPixelsPerLens,
+  pplFit,
+  snapPixelsPerLens,
+  type PplParity,
   type CalibrationParam,
   type ChunkProgress,
   type CalibrationSpec,
@@ -86,6 +90,88 @@ interface PrintKind {
   renderDepth(options: RenderOptions): Generator<ChunkProgress, DepthMapResult>;
   /** Solid views that read as a hard flip, for the switch sheet. */
   switchViews(): RasterImage[];
+}
+
+/**
+ * Choose the pitch as pixels per lens rather than as lines per inch.
+ *
+ * LPI is what a lens sheet is sold by, so it is what the node stores — this
+ * writes straight back to it and keeps no state of its own, which is why the
+ * two controls can never disagree. But PPI / LPI is what you want to *pick*,
+ * because it is the only number that decides whether every lens on the sheet
+ * comes out the same: see the note in `lib/lenticular.ts`.
+ */
+function PitchControl({
+  nodeId,
+  settings,
+  views,
+}: {
+  nodeId: string;
+  settings: LenticularSettings;
+  views: number;
+}) {
+  const updateNodeConfig = useStore((s) => s.updateNodeConfig);
+  const fit = pplFit(settings, views);
+  const setPpl = (ppl: number) =>
+    updateNodeConfig(nodeId, { lpi: lpiForPixelsPerLens(settings.ppi, ppl) });
+
+  const snapTo = (parity: PplParity) => snapPixelsPerLens(fit.ppl, parity);
+  const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+  return (
+    <div className="pitch-control">
+      <label className="pitch-field">
+        <span>Pixels per lens</span>
+        <input
+          type="number"
+          min={2}
+          step={1}
+          value={round3(fit.ppl)}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            if (Number.isFinite(v) && v > 0) setPpl(v);
+          }}
+        />
+      </label>
+      <span className="pitch-derived">
+        = {round3(settings.lpi)} LPI at {settings.ppi} PPI
+      </span>
+      <span className="seg" role="group" aria-label="Snap pixels per lens">
+        {(['any', 'even', 'odd'] as PplParity[]).map((parity) => (
+          <button
+            key={parity}
+            type="button"
+            className={fit.whole && (parity === 'any' || fit.parity === parity) ? 'active' : ''}
+            title={`Snap to ${snapTo(parity)} px per lens`}
+            onClick={() => setPpl(snapTo(parity))}
+          >
+            {parity === 'any' ? `Whole (${snapTo('any')})` : `${parity === 'even' ? 'Even' : 'Odd'} (${snapTo(parity)})`}
+          </button>
+        ))}
+      </span>
+
+      {fit.whole ? (
+        <p className="lenticular-note">
+          {Math.round(fit.ppl)} px per lens, {fit.parity} — every one of the {Math.round(fit.lensCount)}{' '}
+          lenses on this sheet covers the same pixel columns, so they print identically and the interlace
+          never drifts.{' '}
+          {fit.parity === 'even'
+            ? 'The lens axis falls on a pixel boundary, which splits the strips evenly either side of it — what an even number of views wants.'
+            : 'One pixel sits centred on the lens axis, which is the head-on view — what an odd number of views wants.'}
+          {views > 0 &&
+            (fit.pxPerView
+              ? ` At ${views} views that is exactly ${fit.pxPerView} px per view.`
+              : ` ${views} views do not divide ${Math.round(fit.ppl)} px, so the strips under one lens are not all the same width — pick a pitch that is a multiple of ${views}.`)}
+        </p>
+      ) : (
+        <p className="lenticular-warning">
+          ⚠ {round3(fit.ppl)} px per lens is not a whole number, so no two lenses on the sheet are alike:
+          the strip pattern slides {fit.driftPx.toFixed(1)} px from one edge of the print to the other, which
+          reads as slow banding. Snap it above.
+        </p>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -203,7 +289,7 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
       <dl className="lenticular-geometry">
         <dt>Pitch</dt>
         <dd>
-          {mm(geometry.pitchMm)} ({geometry.pitchPx.toFixed(2)} px)
+          {mm(geometry.pitchMm)} ({geometry.pitchPx.toFixed(2)} px per lens)
         </dd>
         <dt>Lens sag</dt>
         <dd>{mm(geometry.sagMm)}</dd>
@@ -221,6 +307,8 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
         <dd>{kind.artSize ? `${kind.artSize.width} × ${kind.artSize.height} px` : '— connect the inputs'}</dd>
         {kind.rows}
       </dl>
+
+      <PitchControl nodeId={kind.nodeId} settings={settings} views={views.length} />
 
       {!geometry.feasible && (
         <p className="lenticular-warning">

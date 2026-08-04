@@ -173,6 +173,92 @@ export function lensGeometry(settings: LenticularSettings): LensGeometry {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Pitch as pixels per lens
+// ---------------------------------------------------------------------------
+//
+// LPI is how lens sheets are sold, so it is what the nodes store. But it is the
+// wrong number to *choose* one by here, because this tool prints its own lens:
+// the depth map is rastered at PPI, on the same grid as the interlace, and a
+// lens is only as repeatable as that grid lets it be.
+//
+// The number that governs that is PPI / LPI — how many printed pixels one
+// lenticule spans. Give it a whole value and every lens on the sheet is
+// identical: same pixel columns under each, same sag profile, same phase. Give
+// it 28.8 and no two neighbours are alike — the strip boundaries land at a
+// different subpixel offset under each lens, drifting a whole pixel every five
+// of them, and that drift is a slow bright/dark banding across the print that
+// no amount of care with the artwork removes.
+//
+// Even or odd then decides where the lens axis falls. Even splits the lenticule
+// symmetrically, with the axis on a pixel boundary — which is what an even
+// number of views wants, half the strips either side. Odd puts one pixel
+// centred on the axis, which is the head-on view, and is what an odd view count
+// wants so that its middle frame is genuinely the middle.
+
+/** How many printed pixels one lenticule spans. The number to design by. */
+export const pixelsPerLens = (settings: Pick<LenticularSettings, 'ppi' | 'lpi'>): number =>
+  Math.max(1e-6, settings.ppi) / Math.max(1e-6, settings.lpi);
+
+/** The LPI that gives exactly this many pixels per lens at this PPI. */
+export const lpiForPixelsPerLens = (ppi: number, ppl: number): number =>
+  Math.max(1e-6, ppi) / Math.max(1e-6, ppl);
+
+/** Whether a pixels-per-lens figure wants an even split, an odd one, or anything. */
+export type PplParity = 'any' | 'even' | 'odd';
+
+/**
+ * Nearest whole pixels-per-lens of the requested parity, never below 2.
+ *
+ * Below 2 px a lenticule cannot show two views at all, so there is nothing to
+ * interlace; the clamp is what keeps a snap from proposing a lens that could
+ * not print a flip.
+ */
+export function snapPixelsPerLens(ppl: number, parity: PplParity = 'any'): number {
+  const target = Math.max(2, ppl);
+  if (parity === 'any') return Math.max(2, Math.round(target));
+  const step = 2;
+  const offset = parity === 'even' ? 0 : 1;
+  const snapped = Math.round((target - offset) / step) * step + offset;
+  return Math.max(parity === 'odd' ? 3 : 2, snapped);
+}
+
+/** What a pixels-per-lens figure means for the consistency of the print. */
+export interface PplFit {
+  ppl: number;
+  /** Whole pixels per lens: every lenticule identical. */
+  whole: boolean;
+  /** Only meaningful when whole. */
+  parity: 'even' | 'odd' | null;
+  /**
+   * How far the strip pattern drifts across the whole sheet, in pixels — the
+   * accumulated error of a fractional pitch over every lens on the print.
+   */
+  driftPx: number;
+  /** Lenses the sheet holds at this pitch. */
+  lensCount: number;
+  /** Pixels each view gets under one lens, when it divides evenly. */
+  pxPerView: number | null;
+}
+
+/** Measure a pitch against the raster it has to print on. */
+export function pplFit(settings: Pick<LenticularSettings, 'ppi' | 'lpi' | 'widthMm'>, views = 0): PplFit {
+  const ppl = pixelsPerLens(settings);
+  const fraction = ppl - Math.round(ppl);
+  const whole = Math.abs(fraction) < 1e-9;
+  const lensCount = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
+  const perView = views > 0 ? ppl / views : 0;
+  return {
+    ppl,
+    whole,
+    parity: whole ? (Math.round(ppl) % 2 === 0 ? 'even' : 'odd') : null,
+    // Each lens is off by `fraction`; the error accumulates along the sheet.
+    driftPx: Math.abs(fraction) * lensCount,
+    lensCount,
+    pxPerView: views > 0 && Math.abs(perView - Math.round(perView)) < 1e-9 ? perView : null,
+  };
+}
+
 export interface OutputSize {
   width: number;
   height: number;

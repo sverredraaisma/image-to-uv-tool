@@ -17,6 +17,10 @@ import {
   interlacedSize,
   lensGeometry,
   outputSize,
+  pixelsPerLens,
+  lpiForPixelsPerLens,
+  pplFit,
+  snapPixelsPerLens,
   renderDepthMap,
   renderInterlaced,
   renderLenticular,
@@ -638,5 +642,81 @@ describe('describeGeometry', () => {
     expect(describeGeometry(s, lensGeometry(s), 4, depth, art)).toContain(
       'the printed lens will be terraced',
     );
+  });
+});
+
+describe('pitch as pixels per lens', () => {
+  const at = (ppi: number, lpi: number, widthMm = 100) => ({ ppi, lpi, widthMm });
+
+  it('is PPI over LPI, and inverts exactly', () => {
+    // The pairing every lenticular tutorial uses, and the reason 1440/45 is the
+    // default in this tool: it is a whole 32 px per lens.
+    expect(pixelsPerLens(at(1440, 45))).toBe(32);
+    expect(lpiForPixelsPerLens(1440, 32)).toBe(45);
+    // Round-trips at values that do not divide, too.
+    expect(pixelsPerLens({ ppi: 1440, lpi: lpiForPixelsPerLens(1440, 28.8) })).toBeCloseTo(28.8, 9);
+  });
+
+  it('spots a pitch that does not land on the pixel grid', () => {
+    const good = pplFit(at(1440, 45));
+    expect(good.whole).toBe(true);
+    expect(good.parity).toBe('even');
+    expect(good.driftPx).toBe(0);
+
+    // 50 LPI at 1440 PPI is 28.8 px: four fifths of a pixel adrift per lens.
+    const bad = pplFit(at(1440, 50));
+    expect(bad.whole).toBe(false);
+    expect(bad.parity).toBeNull();
+    // ~197 lenses across 100 mm, each 0.2 px off — the pattern slides right
+    // across the sheet, which is the banding the editor warns about.
+    expect(bad.lensCount).toBeCloseTo(196.85, 1);
+    expect(bad.driftPx).toBeCloseTo(39.4, 1);
+  });
+
+  it('reads the parity, which is where the lens axis falls', () => {
+    expect(pplFit(at(1440, 45)).parity).toBe('even'); // 32
+    expect(pplFit(at(1440, 480)).parity).toBe('odd'); // 3
+  });
+
+  it('says whether the views divide the lens evenly', () => {
+    // 32 px over 8 views is 4 px each, exactly.
+    expect(pplFit(at(1440, 45), 8).pxPerView).toBe(4);
+    // Over 12 it is 2.67, so the strips under one lens are not all alike.
+    expect(pplFit(at(1440, 45), 12).pxPerView).toBeNull();
+    expect(pplFit(at(1440, 45), 0).pxPerView).toBeNull();
+  });
+
+  it('snaps to the nearest whole pitch, or the nearest of a parity', () => {
+    expect(snapPixelsPerLens(28.8)).toBe(29);
+    expect(snapPixelsPerLens(28.8, 'even')).toBe(28);
+    expect(snapPixelsPerLens(28.8, 'odd')).toBe(29);
+    expect(snapPixelsPerLens(31.4, 'even')).toBe(32);
+    expect(snapPixelsPerLens(31.4, 'odd')).toBe(31);
+    // Already there: snapping is idempotent.
+    expect(snapPixelsPerLens(32, 'even')).toBe(32);
+    expect(snapPixelsPerLens(33, 'odd')).toBe(33);
+  });
+
+  it('never snaps below a pitch that could show two views', () => {
+    // Under 2 px a lenticule cannot carry a flip at all.
+    expect(snapPixelsPerLens(0.4)).toBe(2);
+    expect(snapPixelsPerLens(1, 'even')).toBe(2);
+    expect(snapPixelsPerLens(0.1, 'odd')).toBe(3);
+  });
+
+  it('agrees with the geometry the lens is actually solved from', () => {
+    // pitchPx and pixelsPerLens must not drift apart — they are the same
+    // quantity, and the editor shows both.
+    const settings: LenticularSettings = {
+      widthMm: 100,
+      ppi: 1200,
+      lpi: 40,
+      phase: 0,
+      heightMm: 0.9,
+      ri: 1.5,
+      orientationDeg: 0,
+      stripSamples: 2,
+    };
+    expect(lensGeometry(settings).pitchPx).toBe(pixelsPerLens(settings));
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '../nodes'; // register built-ins
 import { LenticularEditor, LensGridEditor } from './LenticularEditor';
@@ -7,6 +7,14 @@ import { useStore } from '../store/store';
 import { setPlatform } from '../lib/platform';
 
 const s = () => useStore.getState();
+
+/**
+ * The download buttons, and only those. The editor also carries the pitch
+ * snaps, which stay live with nothing connected on purpose — choosing the lens
+ * is something you do before you have the frames, not after.
+ */
+const downloadButtons = (container: HTMLElement) =>
+  [...container.querySelectorAll('.lenticular-actions button')] as HTMLButtonElement[];
 
 /** jsdom's Blob has no arrayBuffer(), so go through FileReader. */
 function blobBytes(blob: Blob): Promise<Uint8Array> {
@@ -61,9 +69,11 @@ describe('LenticularEditor', () => {
 
   it('asks for frames and disables the downloads until two are connected', () => {
     const id = s().addNode('lenticular');
-    render(<LenticularEditor nodeId={id} />);
+    const { container } = render(<LenticularEditor nodeId={id} />);
     expect(screen.getByText(/Connect at least 2 images/)).toBeInTheDocument();
-    for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled();
+    const buttons = downloadButtons(container);
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) expect(button).toBeDisabled();
   });
 
   it('warns when no lens can focus within the configured height', () => {
@@ -182,7 +192,7 @@ describe('LensGridEditor', () => {
 
   it('reports the grid, its per-view resolution and both rasters', async () => {
     const id = await gridWithViews();
-    render(<LensGridEditor nodeId={id} />);
+    const { container } = render(<LensGridEditor nodeId={id} />);
     expect(screen.getByText('2 × 2 = 4 views')).toBeInTheDocument();
     // Hex by default: rows √3/2 apart, so 12 rows of lenslets fit where 10
     // columns do, and the artwork grows to keep 2 px per tile down as well.
@@ -193,7 +203,7 @@ describe('LensGridEditor', () => {
     // the 100 px the press could print.
     expect(screen.getByText('47 × 47 px')).toBeInTheDocument();
     expect(screen.getByText(/edges between view tiles on diagonals/)).toBeInTheDocument();
-    for (const button of screen.getAllByRole('button')) expect(button).toBeEnabled();
+    for (const button of downloadButtons(container)) expect(button).toBeEnabled();
   });
 
   it('reports a square array when the packing is switched back', async () => {
@@ -208,9 +218,11 @@ describe('LensGridEditor', () => {
 
   it('names the unconnected cells and blocks the downloads', async () => {
     const id = await gridWithViews(['c0r0', 'c1r1']);
-    render(<LensGridEditor nodeId={id} />);
+    const { container } = render(<LensGridEditor nodeId={id} />);
     expect(screen.getByText(/Missing: Right · Up, Left · Down/)).toBeInTheDocument();
-    for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled();
+    const buttons = downloadButtons(container);
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) expect(button).toBeDisabled();
   });
 
   it('downloads calibration sheets under its own filename stem', async () => {
@@ -233,5 +245,64 @@ describe('LensGridEditor', () => {
     expect(names[2]).toMatch(/^lensgrid-calib-height-0-6-to-1-4-9bands-depth16-max/);
     click.mockRestore();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('pitch as pixels per lens', () => {
+  it('shows the pitch in pixels per lens, and what it means for the sheet', () => {
+    const id = s().addNode('lenticular'); // 1440 PPI / 45 LPI = 32 px, even
+    render(<LenticularEditor nodeId={id} />);
+    expect(screen.getByLabelText<HTMLInputElement>('Pixels per lens').value).toBe('32');
+    expect(screen.getByText(/= 45 LPI at 1440 PPI/)).toBeInTheDocument();
+    expect(screen.getByText(/32 px per lens, even/)).toBeInTheDocument();
+    expect(screen.getByText(/print identically and the interlace never drifts/)).toBeInTheDocument();
+  });
+
+  it('writes LPI back, so the node keeps storing what a lens is sold by', async () => {
+    const id = s().addNode('lenticular');
+    render(<LenticularEditor nodeId={id} />);
+    // Set outright rather than typed: the field is controlled by the config, so
+    // a per-keystroke `type()` would be entering 3, then 36, then 362…
+    fireEvent.change(screen.getByLabelText('Pixels per lens'), { target: { value: '36' } });
+    // 1440 / 36 = 40 LPI exactly.
+    await waitFor(() => expect(s().nodes.find((n) => n.id === id)!.config.lpi).toBe(40));
+  });
+
+  it('warns when the pitch does not land on the pixel grid, and snaps it', async () => {
+    const user = userEvent.setup();
+    const id = s().addNode('lenticular');
+    s().updateNodeConfig(id, { lpi: 50 }); // 1440 / 50 = 28.8 px
+    render(<LenticularEditor nodeId={id} />);
+    expect(screen.getByText(/28\.8 px per lens is not a whole number/)).toBeInTheDocument();
+    expect(screen.getByText(/no two lenses on the sheet are alike/)).toBeInTheDocument();
+
+    // The even snap is 28, which is 1440 / 28 ≈ 51.43 LPI.
+    await user.click(screen.getByTitle('Snap to 28 px per lens'));
+    await waitFor(() => {
+      expect(s().nodes.find((n) => n.id === id)!.config.lpi).toBeCloseTo(1440 / 28, 9);
+    });
+  });
+
+  it('offers an odd pitch, for a run with a true middle view', async () => {
+    const user = userEvent.setup();
+    const id = s().addNode('lenticular');
+    render(<LenticularEditor nodeId={id} />);
+    // From 32, the nearest odd pitch is 31 or 33; either is one step away.
+    await user.click(screen.getByTitle(/Snap to 3[13] px per lens/));
+    await waitFor(() => {
+      const ppl = 1440 / (s().nodes.find((n) => n.id === id)!.config.lpi as number);
+      expect(ppl % 2).toBeCloseTo(1, 9);
+    });
+    expect(screen.getByText(/One pixel sits centred on the lens axis/)).toBeInTheDocument();
+  });
+
+  it('says whether the connected views divide the lens evenly', async () => {
+    const id = await graphWithFrames(); // 100 PPI / 10 LPI = 10 px, 2 frames
+    render(<LenticularEditor nodeId={id} />);
+    expect(screen.getByText(/exactly 5 px per view/)).toBeInTheDocument();
+
+    s().updateNodeConfig(id, { lpi: 100 / 9 }); // 9 px per lens, 2 views
+    render(<LenticularEditor nodeId={id} />);
+    expect(screen.getAllByText(/2 views do not divide 9 px/)[0]).toBeInTheDocument();
   });
 });
