@@ -1024,7 +1024,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     ],
     tips: [
       'Prefer .sog for anything large. It is the same scene about 20× smaller, because it sorts the cloud so that neighbouring splats land next to each other in an image and then lets an ordinary image codec do the work — a 1.4 GB PLY becomes a few tens of megabytes. Only the single-file bundle is read, not the loose folder form; splat-transform will bundle one for you.',
-      'Big captures are thinned on import — an even stride through the file, so the scene keeps its shape and only loses density. The Info output says how many went.',
+      'Nothing is thinned on import any more. The whole cloud is kept, and Splat → Views thins what it draws *after* culling — so the splats in front of the camera get the entire budget instead of a share of it. Thinning at the door would have spent it on every room of a scanned house at once, including the ones you never point at. There is still a ceiling of 8 million splats, but that is a memory backstop rather than a quality decision.',
       'Only the base colour of each splat is kept. The higher spherical-harmonic bands are what make a surface change colour with the angle you look from, and they are 45 floats a splat — more memory than a browser tab has to spare. The print loses its moving highlights and nothing else.',
       'The file’s units and origin do not matter. The Splat Camera’s scale is the one number that ties the scene to a physical sheet.',
       'The parser and the renderer are downloaded the first time you run a splat node, not when the app loads.',
@@ -1083,8 +1083,8 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     ],
     tips: [
       'This is the honest version of Image + Depth → Stereo Views. A heightmap has nothing behind itself and has to invent the strip a near edge uncovers; a splat scene has a real behind, so it does not.',
-      'Cost scales with views × splats. A 15×15 grid is 225 full passes over the cloud — set the Splat budget under Advanced while you are finding the framing, then clear it for the final run.',
-      'Everything in front of the sheet is culled before a single view is drawn — the plane does not move as the eye slides, so the cull does not either. The Info output says how many splats went. “Cull plane” under Advanced pushes it deeper into the scene if you want to drop the foreground as well.',
+      'Cost scales with views × splats. A 15×15 grid is 225 full passes over the cloud — set the Splat budget under Advanced while you are finding the framing, then clear it for the final run. The budget is spent after the culls, so it buys density in frame: on a capture where a tenth of the scene is on the paper, the same budget draws ten times as densely as thinning the cloud up front would.',
+      'Two culls run before a single view is drawn, and both are eye-independent so neither has to be repeated per view: everything in front of the sheet, and everything that cannot land on the paper in any view of the run. The Info output breaks down what each removed. “Cull plane” under Advanced pushes the first one deeper into the scene if you want the foreground gone as well.',
       'Supersample defaults to 1 here, unlike the mesh renderer’s 2: a splat is already a smooth falloff rather than a hard-edged triangle, so there is very little aliasing left to average away.',
       'A run goes out right-eye-first for the lens; a grid goes out in the order Lens Grid Print names its cells. Both match what the print node expects, so the wire is one wire.',
     ],

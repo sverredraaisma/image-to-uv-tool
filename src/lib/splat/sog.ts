@@ -36,7 +36,7 @@
 
 import type { RasterImage, SplatValue } from '../../types';
 import type { ChunkProgress } from '../chunked';
-import { MAX_SPLATS, decimate } from './cloud';
+import { MAX_IMPORT_SPLATS } from './cloud';
 import { SH_C0 } from './parse';
 import { readZip } from '../zip';
 
@@ -140,8 +140,10 @@ export function* decodeSogChunks(
     tex.sh0.width * tex.sh0.height,
   );
   // The textures are padded out to a rectangle, so they hold at least `count`
-  // splats and usually a few more; trailing pixels are not splats at all.
-  const total = Math.min(meta.count, pixels);
+  // splats and usually a few more; trailing pixels are not splats at all. The
+  // import ceiling is a memory backstop — what a render thins is decided at
+  // render time, by what is in front of the camera.
+  const total = Math.min(meta.count, pixels, MAX_IMPORT_SPLATS);
   if (total < 1) {
     throw new Error(
       `SOG textures hold ${pixels} pixels but the metadata claims ${meta.count.toLocaleString()} splats — ` +
@@ -208,7 +210,7 @@ export function* decodeSogChunks(
     }
   }
 
-  const cloud: SplatValue = {
+  return {
     kind: 'splat',
     count: total,
     positions,
@@ -218,7 +220,6 @@ export function* decodeSogChunks(
     name,
     droppedCount: meta.count - total,
   };
-  return decimate(cloud, MAX_SPLATS);
 }
 
 /** Pick an entry by the metadata's own file list, falling back to its role name. */

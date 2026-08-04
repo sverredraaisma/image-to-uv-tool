@@ -72,11 +72,17 @@ export interface SplatViewRender {
   /** Where the drawn cloud sits relative to the sheet, mm behind it. */
   nearMm: number;
   farMm: number;
-  /** Splats drawn per view after the frame cull, and the cull's input. */
+  /** Splats drawn per view, and how many survived the culls to be drawable. */
   drawn: number;
   considered: number;
   /** Splats dropped for standing in front of the sheet. */
   culled: number;
+  /** Splats dropped for falling outside the sheet in every view. */
+  offSheet: number;
+  /** Splats the budget thinned away — after the culls, so none of them visible. */
+  thinned: number;
+  /** How many splats the scan looked at to decide all of the above. */
+  scanned: number;
 }
 
 /** Smallest a splat may be drawn, in px². Below this it aliases into fireflies. */
@@ -96,9 +102,27 @@ export interface CameraSpaceCloud {
   /** Upper triangle of each 3×3 covariance: 00, 01, 02, 11, 12, 22. */
   cov: Float32Array;
   colours: Uint8ClampedArray;
-  /** How many splats the front-of-sheet cull dropped on the way in. */
+  /** Splats dropped for standing in front of the sheet. */
   culled: number;
+  /** Splats dropped for falling outside the sheet in every view of the run. */
+  offSheet: number;
+  /** Splats the budget thinned away, after both culls. */
+  thinned: number;
+  /** How many the scan looked at — everything, unless a scan limit applied. */
+  scanned: number;
 }
+
+/**
+ * How many splats a budgeted render looks at per budgeted splat drawn.
+ *
+ * Only the editor sets a budget, and only there does this matter: the cull has
+ * to walk the cloud to find out what is visible, and on an eight-million splat
+ * capture that walk alone is more than a frame however cheap each step is.
+ * Scanning sixteen times the budget keeps the preview moving while still
+ * letting the cull concentrate what it draws. The print render sets no budget
+ * and scans everything.
+ */
+const SCAN_PER_BUDGET = 16;
 
 /**
  * Move the cloud into the camera's frame, in millimetres of print, dropping
@@ -127,39 +151,106 @@ export interface CameraSpaceCloud {
  * Rather than build Σ and multiply, `M` is folded straight into the ellipsoid's
  * own axes (basis · rotation, columns scaled by the radii), and Σ' = AAᵀ falls
  * out — a third of the arithmetic, and no intermediate to lose precision in.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this is two passes
+ * ---------------------------------------------------------------------------
+ * Because a budget has to be spent on splats you can actually see.
+ *
+ * Thinning a cloud before knowing where the camera points spends it everywhere
+ * at once. Frame a doorway in a scan of a house that way and you get a thinned
+ * doorway — having also thinned every room you are not looking at, to no
+ * purpose whatever. The part in frame should get the whole budget, and that
+ * needs knowing what is in frame first.
+ *
+ * So pass one answers only *which splats survive*, and needs only the position
+ * transform: three dot products, no covariance, no ellipsoid. It applies both
+ * culls — the sheet plane, and a frame test asking whether a splat can land on
+ * the paper in any view of the run. Pass two thins what is left to the budget
+ * and pays for the covariance arithmetic, for those alone. On a capture where a
+ * tenth of the scene is in frame, that is ten times the density for the same
+ * number of splats drawn.
+ *
+ * The frame test is conservative by construction. A splat at depth z projects
+ * to X = t·x + e(1−t), and the eye spans ±eMax across the run, so its whole
+ * possible span is t·x ± eMax(1−t) — widened by three sigma of the splat's own
+ * widest axis, which no ellipsoid reaches past. Only what lies off the sheet
+ * for every eye in that span is dropped, so nothing that could have appeared
+ * ever is.
  */
 export function toCameraSpace(cloud: SplatValue, o: SplatViewOptions, budget?: number): CameraSpaceCloud {
-  const step = budget && budget < cloud.count ? cloud.count / budget : 1;
-  const considered = step > 1 ? Math.floor(cloud.count / step) : cloud.count;
   const B = cameraBasis(o.camera.rotationDeg);
   const [cx, cy, cz] = o.camera.position;
   const perMm = 1 / Math.max(1e-9, o.camera.scale);
   // The cull plane, as a sheet-space z. 0 is the sheet; deeper is further back.
   const cullAt = -Math.max(0, o.frontMarginMm ?? 0);
+  const D = Math.max(1e-6, o.viewDistanceMm);
+  const halfW = o.widthMm / 2;
+  const halfH = o.heightMm / 2;
+  const eyes = splatEyeOffsets(o);
+  const eMaxX = Math.max(...eyes.map((e) => Math.abs(e.x)));
+  const eMaxY = Math.max(...eyes.map((e) => Math.abs(e.y)));
 
-  const xyz = new Float32Array(considered * 3);
-  const cov = new Float32Array(considered * 6);
-  const colours = new Uint8ClampedArray(considered * 4);
+  // A budgeted render bounds what it even looks at; see SCAN_PER_BUDGET.
+  const scanLimit = budget ? Math.min(cloud.count, budget * SCAN_PER_BUDGET) : cloud.count;
+  const scanStep = scanLimit < cloud.count ? cloud.count / scanLimit : 1;
+  const scanned = scanStep > 1 ? Math.floor(cloud.count / scanStep) : cloud.count;
 
-  let i = 0;
-  for (let k = 0; k < considered; k++) {
-    const s = step > 1 ? Math.min(cloud.count - 1, Math.floor(k * step)) : k;
+  // --- pass 1: which splats survive? positions only ----------------------
+  const keep = new Uint32Array(scanned);
+  let kept = 0;
+  let culled = 0;
+  let offSheet = 0;
+  for (let k = 0; k < scanned; k++) {
+    const s = scanStep > 1 ? Math.min(cloud.count - 1, Math.floor(k * scanStep)) : k;
     const wx = (cloud.positions[s * 3] - cx) * perMm;
     const wy = (cloud.positions[s * 3 + 1] - cy) * perMm;
     const wz = (cloud.positions[s * 3 + 2] - cz) * perMm;
     // Camera axes: +x right, +y up, −z forward. The camera sits on the sheet
     // plane, so a point level with it lands at z = 0 and anything further along
     // the view direction goes negative — behind the paper, where it belongs.
-    const qx = B[0] * wx + B[1] * wy + B[2] * wz;
-    const qy = B[3] * wx + B[4] * wy + B[5] * wz;
     const qz = B[6] * wx + B[7] * wy + B[8] * wz;
     // The test is on the centre, so a splat straddling the plane keeps its
     // whole ellipsoid — there is no way to cut one in half, and a fringe of
     // half-emerged splats reads better than a hard edge through them.
-    if (qz > cullAt) continue;
-    xyz[i * 3] = qx;
-    xyz[i * 3 + 1] = qy;
-    xyz[i * 3 + 2] = qz;
+    if (qz > cullAt) {
+      culled++;
+      continue;
+    }
+    const qx = B[0] * wx + B[1] * wy + B[2] * wz;
+    const qy = B[3] * wx + B[4] * wy + B[5] * wz;
+    const t = D / (D - qz);
+    // Three sigma of the widest axis, which no ellipsoid reaches past.
+    const reach =
+      3 * Math.max(cloud.scales[s * 3], cloud.scales[s * 3 + 1], cloud.scales[s * 3 + 2]) * perMm * t;
+    const spanX = eMaxX * (1 - t) + reach;
+    const spanY = eMaxY * (1 - t) + reach;
+    if (t * qx + spanX < -halfW || t * qx - spanX > halfW) {
+      offSheet++;
+      continue;
+    }
+    if (t * qy + spanY < -halfH || t * qy - spanY > halfH) {
+      offSheet++;
+      continue;
+    }
+    keep[kept++] = s;
+  }
+
+  // --- pass 2: thin the survivors, then pay for the covariance ------------
+  const drawStep = budget && budget < kept ? kept / budget : 1;
+  const count = drawStep > 1 ? Math.floor(kept / drawStep) : kept;
+  const xyz = new Float32Array(count * 3);
+  const cov = new Float32Array(count * 6);
+  const colours = new Uint8ClampedArray(count * 4);
+
+  for (let i = 0; i < count; i++) {
+    const s = keep[drawStep > 1 ? Math.min(kept - 1, Math.floor(i * drawStep)) : i];
+    const wx = (cloud.positions[s * 3] - cx) * perMm;
+    const wy = (cloud.positions[s * 3 + 1] - cy) * perMm;
+    const wz = (cloud.positions[s * 3 + 2] - cz) * perMm;
+    xyz[i * 3] = B[0] * wx + B[1] * wy + B[2] * wz;
+    xyz[i * 3 + 1] = B[3] * wx + B[4] * wy + B[5] * wz;
+    xyz[i * 3 + 2] = B[6] * wx + B[7] * wy + B[8] * wz;
 
     // A = B · R, columns then scaled by the ellipsoid radii.
     const rx = cloud.rotations[s * 4],
@@ -198,18 +289,8 @@ export function toCameraSpace(cloud: SplatValue, o: SplatViewOptions, budget?: n
     cov[i * 6 + 5] = a20 * a20 + a21 * a21 + a22 * a22;
 
     for (let a = 0; a < 4; a++) colours[i * 4 + a] = cloud.colours[s * 4 + a];
-    i++;
   }
-  // Views over the filled prefix rather than copies: the cull usually keeps
-  // most of the cloud, and re-packing tens of megabytes to reclaim the tail
-  // would cost more than the tail is worth.
-  return {
-    count: i,
-    xyz: xyz.subarray(0, i * 3),
-    cov: cov.subarray(0, i * 6),
-    colours: colours.subarray(0, i * 4),
-    culled: considered - i,
-  };
+  return { count, xyz, cov, colours, culled, offSheet, thinned: kept - count, scanned };
 }
 
 /** One view's worth of scratch, reused across the run. */
@@ -522,6 +603,9 @@ export function* splatViewChunks(
     drawn,
     considered: cam.count,
     culled: cam.culled,
+    offSheet: cam.offSheet,
+    thinned: cam.thinned,
+    scanned: cam.scanned,
   };
 }
 

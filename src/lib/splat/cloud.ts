@@ -12,13 +12,19 @@ import type { SplatValue, TransformValue } from '../../types';
 /**
  * Most splats an import will keep.
  *
- * Not a format limit — a capture off a phone is happily 2–4 million. It is a
- * memory limit: at 44 bytes a splat this is already ~53 MB of typed arrays
- * sitting in a tab that also holds several 32-megapixel print rasters, and the
- * renderer walks the whole cloud once per view. Past this the import thins the
- * cloud out instead of failing.
+ * A memory backstop, and nothing more. It is deliberately far above any figure
+ * that would be chosen for quality, because quality is not decided here: the
+ * renderer thins what it draws *after* culling, so the splats you can actually
+ * see get the whole budget instead of a share of it. Throwing detail away at
+ * the door would be throwing it away everywhere at once, permanently, to pay
+ * for a part of the scene the camera may never point at.
+ *
+ * At 44 bytes a splat this is ~350 MB of typed arrays, which is the point where
+ * a browser tab holding print rasters as well starts to be in real trouble.
+ * Past it the import strides, because a cloud that will not fit is better
+ * thinned than refused.
  */
-export const MAX_SPLATS = 1_200_000;
+export const MAX_IMPORT_SPLATS = 8_000_000;
 
 /**
  * Does this file start with a ZIP local header, and so is possibly a bundled
@@ -61,42 +67,6 @@ export function cloudBounds(cloud: SplatValue): CloudBounds {
     size,
     radius: Math.hypot(size[0], size[1], size[2]) / 2,
   };
-}
-
-/**
- * Thin a cloud down to at most `keep` splats, taking every nth.
- *
- * A stride rather than a random sample or a "drop the smallest": splat files
- * come out of the optimiser in no meaningful order, so a stride is unbiased
- * over the scene, and it is the one choice that gives the same cloud every time
- * — which matters when the camera you placed yesterday has to frame the same
- * scene today.
- */
-export function decimate(cloud: SplatValue, keep: number): SplatValue {
-  if (cloud.count <= keep || keep < 1) return cloud;
-  const stride = cloud.count / keep;
-  const out: SplatValue = {
-    kind: 'splat',
-    count: keep,
-    positions: new Float32Array(keep * 3),
-    scales: new Float32Array(keep * 3),
-    rotations: new Float32Array(keep * 4),
-    colours: new Uint8ClampedArray(keep * 4),
-    name: cloud.name,
-    droppedCount: (cloud.droppedCount ?? 0) + cloud.count - keep,
-  };
-  for (let i = 0; i < keep; i++) {
-    const s = Math.min(cloud.count - 1, Math.floor(i * stride));
-    for (let a = 0; a < 3; a++) {
-      out.positions[i * 3 + a] = cloud.positions[s * 3 + a];
-      out.scales[i * 3 + a] = cloud.scales[s * 3 + a];
-    }
-    for (let a = 0; a < 4; a++) {
-      out.rotations[i * 4 + a] = cloud.rotations[s * 4 + a];
-      out.colours[i * 4 + a] = cloud.colours[s * 4 + a];
-    }
-  }
-  return out;
 }
 
 const DEG = Math.PI / 180;

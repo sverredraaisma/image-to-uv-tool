@@ -24,7 +24,7 @@
 
 import type { SplatValue } from '../../types';
 import type { ChunkProgress } from '../chunked';
-import { MAX_SPLATS } from './cloud';
+import { MAX_IMPORT_SPLATS } from './cloud';
 
 /**
  * The zeroth spherical-harmonic basis function, 1/(2√π).
@@ -162,23 +162,26 @@ function readScalar(view: DataView, at: number, type: string): number {
 }
 
 /**
- * How to walk a file of `count` splats while keeping at most {@link MAX_SPLATS}.
+ * How to walk a file of `count` splats while keeping at most
+ * {@link MAX_IMPORT_SPLATS}.
  *
- * The stride is applied *while reading*, not afterwards. Reading everything and
- * thinning at the end would allocate four or five times the arrays it keeps —
- * on a capture large enough to need thinning, that is the allocation most
- * likely to fail — and it buys nothing, because an even stride over the whole
- * file is the same set of splats whichever end you do it from.
+ * Almost always the whole file: the ceiling is a memory backstop, not a quality
+ * decision, and what gets thinned for a render is decided at render time by
+ * what is in front of the camera. Where it does bite, the stride is applied
+ * *while reading* — reading everything and thinning at the end would allocate
+ * several times the arrays it keeps, which on a file this size is the
+ * allocation most likely to fail, and an even stride is the same set of splats
+ * whichever end you do it from.
  */
 function walk(count: number): { total: number; step: number; dropped: number } {
-  const total = Math.min(count, MAX_SPLATS);
-  return { total, step: count > MAX_SPLATS ? count / MAX_SPLATS : 1, dropped: count - total };
+  const total = Math.min(count, MAX_IMPORT_SPLATS);
+  return { total, step: count > MAX_IMPORT_SPLATS ? count / MAX_IMPORT_SPLATS : 1, dropped: count - total };
 }
 
 /**
  * Decode a PLY splat file, a band of rows at a time.
  *
- * A file past {@link MAX_SPLATS} is strided rather than truncated — see
+ * A file past {@link MAX_IMPORT_SPLATS} is strided rather than truncated — see
  * {@link walk}. Stopping early would keep whichever corner of the scene the
  * trainer happened to write first; a stride keeps all of it, at lower density.
  */

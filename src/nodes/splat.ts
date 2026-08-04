@@ -26,7 +26,13 @@
 
 import type { ComputeContext, NodeConfig, NodeDefinition, RasterImage, SplatValue, TransformValue } from '../types';
 import type { SplatViewOptions } from '../lib/splat/render';
-import { MAX_SPLATS, cloudBounds, describeCamera, framingCamera, looksLikeZip } from '../lib/splat/cloud';
+import {
+  MAX_IMPORT_SPLATS,
+  cloudBounds,
+  describeCamera,
+  framingCamera,
+  looksLikeZip,
+} from '../lib/splat/cloud';
 import { DEFAULT_GRID, MAX_GRID, MIN_GRID, clampGrid } from '../lib/lenticular';
 import { runChunked } from '../lib/chunked';
 import { isBlobRef } from '../lib/blobStore';
@@ -109,12 +115,14 @@ export function describeCloud(cloud: SplatValue): string {
   ];
   if (cloud.droppedCount) {
     lines.push(
-      `Thinned by ${cloud.droppedCount.toLocaleString()} splats to stay under ` +
-        `${MAX_SPLATS.toLocaleString()} — an even stride through the file, so the scene keeps its shape ` +
-        `and loses only density.`,
+      `Thinned by ${cloud.droppedCount.toLocaleString()} splats to stay under the ` +
+        `${MAX_IMPORT_SPLATS.toLocaleString()} an import can hold — a memory ceiling, not a quality ` +
+        `one, and an even stride so the scene keeps its shape and loses only density.`,
     );
   }
   lines.push(
+    'The whole cloud is kept: what a render draws is thinned at render time, after the culls, so the ' +
+      'part in front of the camera gets the budget instead of a share of it.',
     'Colour is the DC term only: the print will not carry the view-dependent highlights the capture has.',
   );
   return lines.join('\n');
@@ -129,8 +137,8 @@ export const splatInputNode: NodeDefinition = {
     'roughly 20× smaller) or .splat — and output the cloud. Feed it to Splat Camera to choose where ' +
     'you stand, then to Splat → Views to print it. ' +
     'The file’s units and origin do not matter; the camera’s scale is what ties the scene to the sheet. ' +
-    'Large captures are thinned on import to keep the tab alive, and only the base colour of each splat ' +
-    'is kept — see the Info output.',
+    'The whole cloud is kept — what a render draws is thinned at render time, once it knows what is in ' +
+    'front of the camera — and only the base colour of each splat is kept. See the Info output.',
   autoRun: true,
   inputs: [],
   outputs: [
@@ -314,6 +322,9 @@ export function describeSplatViews(
     drawn: number;
     considered: number;
     culled: number;
+    offSheet: number;
+    thinned: number;
+    scanned: number;
   },
   disparity: { mm: number; lenslets: number },
   placement: string,
@@ -337,10 +348,17 @@ export function describeSplatViews(
     `Scale ${o.camera.scale} scene units per mm — the sheet spans ` +
       `${(o.camera.scale * o.widthMm).toFixed(3)} units of the scene`,
     placement,
-    `Cull: dropped ${render.culled.toLocaleString()} splats standing in front of the sheet` +
+    `Cull: ${render.culled.toLocaleString()} in front of the sheet` +
       (num(config.frontMarginMm, 0) > 0 ? ` or within ${num(config.frontMarginMm, 0)} mm behind it` : '') +
-      `, kept ${render.considered.toLocaleString()}`,
-    `Drew ${render.drawn.toLocaleString()} of ${render.considered.toLocaleString()} kept splats, covering ` +
+      `, ${render.offSheet.toLocaleString()} off the sheet in every view, from ` +
+      `${render.scanned.toLocaleString()} scanned`,
+    render.thinned > 0
+      ? `Budget: thinned ${render.thinned.toLocaleString()} of the ${(
+          render.considered + render.thinned
+        ).toLocaleString()} that survived, leaving ${render.considered.toLocaleString()} — the thinning ` +
+        `happens after the culls, so every splat it spends is one that could have been seen`
+      : `Budget: none — all ${render.considered.toLocaleString()} surviving splats are drawn`,
+    `Drew ${render.drawn.toLocaleString()} of ${render.considered.toLocaleString()}, covering ` +
       `${(render.coverage * 100).toFixed(0)}% of the frame`,
     `Parallax ${disparity.lenslets.toFixed(2)} lenslets per view step at the far edge of the cloud ` +
       `(${disparity.mm.toFixed(3)} mm at ${lpi} LPI)`,
@@ -455,7 +473,7 @@ export const splatViewsNode: NodeDefinition = {
     {
       kind: 'number',
       key: 'splatBudget',
-      label: 'Splat budget (0 = all of them)',
+      label: 'Splat budget (0 = all of them, spent after the culls)',
       min: 0,
       max: 1200000,
       step: 50000,

@@ -15,7 +15,7 @@ import { isCompatible } from '../engine/compatibility';
 import { mapsSequencesByDefault } from '../engine/sequenceMap';
 import { makeZip } from '../lib/zip';
 import { createBlobStore, memoryBackend } from '../lib/blobStore';
-import { MAX_SPLATS } from '../lib/splat/cloud';
+import { MAX_IMPORT_SPLATS } from '../lib/splat/cloud';
 import { platform, setPlatform } from '../lib/platform';
 import type { ComputeContext, DataValue, RasterImage, SequenceValue, SplatValue, TransformValue } from '../types';
 // The source of the files whose import graph this suite pins. `?raw` keeps it
@@ -282,14 +282,15 @@ describe('splat nodes', () => {
     const past = camera({ position: [0, 0, -1000] });
     const out = await splatViewsNode.compute(ctx({ splat: c, camera: past }, viewsConfig()));
     const text = (out.info as { text: string }).text;
-    expect(text).toMatch(/dropped 4 splats standing in front of the sheet/);
+    expect(text).toMatch(/Cull: 4 in front of the sheet/);
     expect(text).toMatch(/⚠ Every splat was culled/);
 
     // And from a camera on the near face, nothing is dropped.
     const infront = camera({ position: [0, 0, -390] });
     const kept = (await splatViewsNode.compute(ctx({ splat: c, camera: infront }, viewsConfig())))
       .info as { text: string };
-    expect(kept.text).toMatch(/dropped 0 splats/);
+    expect(kept.text).toMatch(/Cull: 0 in front of the sheet/);
+    expect(kept.text).toMatch(/Budget: none — all 4 surviving splats are drawn/);
   });
 
   it('warns when the cloud barely covers the sheet', async () => {
@@ -404,19 +405,21 @@ describe('loading a large file', () => {
     expect((out.out as SplatValue).count).toBe(2);
   });
 
-  it('strides a file past the cap instead of reading it all and throwing most away', async () => {
-    // The allocation that matters: a cloud over the budget must never build
-    // arrays bigger than the budget on the way to being thinned.
+  it('keeps the whole cloud, leaving the thinning to the renderer', async () => {
+    // Thinning at the door would spend the budget everywhere at once, including
+    // on the parts of the scene the camera never points at.
     const { parseSplatFile } = await import('../lib/splat/parse');
-    const over = MAX_SPLATS + 1000;
+    // Small enough to build in a test, so the ceiling is lowered for the check
+    // rather than the file raised to eight million rows.
+    const over = 5000;
     const cloud = parseSplatFile(plyOf(over), 'big.ply');
-    expect(cloud.count).toBe(MAX_SPLATS);
-    expect(cloud.droppedCount).toBe(over - MAX_SPLATS);
-    // The arrays are exactly the size of what was kept — not of what was read.
-    expect(cloud.positions.length).toBe(MAX_SPLATS * 3);
-    // And the stride spans the whole file rather than its first slice: the last
-    // splat kept comes from near the end of the file.
-    const lastX = cloud.positions[(MAX_SPLATS - 1) * 3];
-    expect(lastX).toBeGreaterThan(over * 0.99);
+    // Under the import ceiling, so nothing is thinned at all — the render is
+    // what thins, once it knows what is in front of the camera.
+    expect(MAX_IMPORT_SPLATS).toBeGreaterThan(over);
+    expect(cloud.count).toBe(over);
+    expect(cloud.droppedCount).toBe(0);
+    expect(cloud.positions.length).toBe(over * 3);
+    // Every row, in order.
+    expect(cloud.positions[(over - 1) * 3]).toBe(over - 1);
   });
 });

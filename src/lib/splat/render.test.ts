@@ -6,7 +6,7 @@ import {
   toCameraSpace,
   type SplatViewOptions,
 } from './render';
-import { cameraAxes, cloudBounds, decimate, framingCamera } from './cloud';
+import { cameraAxes, cloudBounds, framingCamera } from './cloud';
 import { disparityAtDepth } from '../render3d';
 import type { RasterImage, SplatValue, TransformValue } from '../../types';
 
@@ -246,7 +246,7 @@ describe('splat view rendering', () => {
 
   it('takes the splat budget as a thinning, not a truncation', () => {
     const cloud = cloudOf(
-      Array.from({ length: 100 }, (_, i) => [(i % 10) * 4 - 20, Math.floor(i / 10) * 4 - 20, -400, 2, 0, 0, 0, 255]),
+      Array.from({ length: 100 }, (_, i) => [(i % 10) * 4 - 20, Math.floor(i / 10) * 4 - 20, -40, 2, 0, 0, 0, 255]),
     );
     const cam = toCameraSpace(cloud, options(), 20);
     expect(cam.count).toBe(20);
@@ -272,16 +272,6 @@ describe('splat cloud helpers', () => {
 
   it('keeps an empty cloud from producing infinities', () => {
     expect(cloudBounds(cloudOf([])).radius).toBe(0);
-  });
-
-  it('thins by an even stride and says how many went', () => {
-    const many = cloudOf(Array.from({ length: 10 }, (_, i) => [i, 0, 0, 1, 0, 0, 0, 255]));
-    const few = decimate(many, 5);
-    expect(few.count).toBe(5);
-    expect(few.droppedCount).toBe(5);
-    expect([...few.positions.filter((_, i) => i % 3 === 0)]).toEqual([0, 2, 4, 6, 8]);
-    // Under the cap it is the same object, not a copy.
-    expect(decimate(many, 20)).toBe(many);
   });
 
   it('frames the whole cloud with the sheet on its near face', () => {
@@ -327,5 +317,68 @@ describe('splat cloud helpers', () => {
     expect(yawed.forward.map(round0)).toEqual([-1, 0, 0]);
     const pitched = cameraAxes([-90, 0, 0]);
     expect(pitched.forward.map(round0)).toEqual([0, -1, 0]);
+  });
+});
+
+describe('the budget is spent on what is in frame', () => {
+  /**
+   * Half the splats sit on the sheet in front of the camera; the other half are
+   * the same distance off to the side, far outside the paper. A budget should
+   * buy density in the half you can see and nothing at all in the half you
+   * cannot.
+   */
+  const halfInFrame = () =>
+    cloudOf([
+      ...Array.from({ length: 200 }, (_, i) => [(i % 20) - 10, Math.floor(i / 20) - 5, -20, 0.5, 0, 0, 0, 255]),
+      ...Array.from({ length: 200 }, (_, i) => [900 + (i % 20), Math.floor(i / 20), -20, 0.5, 0, 0, 0, 255]),
+    ]);
+
+  it('drops what cannot land on the sheet in any view', () => {
+    const r = renderSplatViews(halfInFrame(), options({ views: 3 }));
+    expect(r.offSheet).toBe(200);
+    expect(r.considered).toBe(200);
+    expect(r.culled).toBe(0);
+  });
+
+  it('spends the whole budget on the visible half', () => {
+    // 100 splats of budget against a cloud that is half out of frame. Thinning
+    // first would give 50 visible ones; culling first gives 100 — twice the
+    // density on the paper for the same work.
+    const o = options({ views: 1, splatBudget: 100 });
+    const cam = toCameraSpace(halfInFrame(), o, 100);
+    expect(cam.count).toBe(100);
+    expect(cam.thinned).toBe(100);
+    // Every one of them is on the sheet, not one from the group off to the side.
+    for (let i = 0; i < cam.count; i++) expect(Math.abs(cam.xyz[i * 3])).toBeLessThan(50);
+    // Nothing the budget spent was invisible: the culls ran first.
+    expect(cam.culled + cam.offSheet + cam.thinned + cam.count).toBe(cam.scanned);
+  });
+
+  it('keeps everything when there is no budget', () => {
+    const r = renderSplatViews(halfInFrame(), options({ views: 1 }));
+    expect(r.thinned).toBe(0);
+    expect(r.considered).toBe(200);
+    expect(r.scanned).toBe(400);
+  });
+
+  it('never drops a splat that reaches onto the sheet from outside it', () => {
+    // Centre outside the paper, but wide enough to reach in: the frame test is
+    // widened by the splat's own extent precisely so this survives.
+    const wide = cloudOf([[60, 0, -20, 30, 0, 0, 0, 255]]);
+    expect(renderSplatViews(wide, options({ views: 1 })).offSheet).toBe(0);
+    // The same splat, small, is genuinely outside and goes.
+    const small = cloudOf([[60, 0, -20, 0.5, 0, 0, 0, 255]]);
+    expect(renderSplatViews(small, options({ views: 1 })).offSheet).toBe(1);
+  });
+
+  it('keeps what only the outermost eye of the run can see', () => {
+    // Just off the paper head-on, but a wide cone swings it into frame — the
+    // cull spans every eye, so it is kept for the views that need it.
+    const cloud = cloudOf([[0, 0, -200, 1, 0, 0, 0, 255]]);
+    // 100 units off-axis: at a third of the way to the sheet plane that lands
+    // 67 mm out, past the 50 mm edge of the paper.
+    const off = { ...options({ views: 3, coneDeg: 0 }), camera: camera({ position: [100, 0, 0] }) };
+    expect(renderSplatViews(cloud, off).offSheet).toBe(1);
+    expect(renderSplatViews(cloud, { ...off, coneDeg: 120 }).offSheet).toBe(0);
   });
 });
