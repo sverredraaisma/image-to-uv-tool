@@ -1,4 +1,11 @@
-import type { DataValue, RasterImage, SequenceValue, TextValue } from '../types';
+import type {
+  DataValue,
+  RasterImage,
+  SequenceValue,
+  SplatValue,
+  TextValue,
+  TransformValue,
+} from '../types';
 
 /**
  * Coerce a resolved input to a single image (first if it was a `multiple`).
@@ -29,6 +36,21 @@ export function asSequence(value: DataValue | DataValue[] | undefined): Sequence
   if (v?.kind === 'sequence') return v;
   if (v?.kind === 'image') return { kind: 'sequence', frames: [v] };
   return undefined;
+}
+
+/**
+ * Coerce a resolved input to a splat cloud. Never copied — a cloud is tens of
+ * megabytes of typed array, and every node downstream only reads it.
+ */
+export function asSplat(value: DataValue | DataValue[] | undefined): SplatValue | undefined {
+  const v = Array.isArray(value) ? value[0] : value;
+  return v && v.kind === 'splat' ? v : undefined;
+}
+
+/** Coerce a resolved input to a camera placement. */
+export function asTransform(value: DataValue | DataValue[] | undefined): TransformValue | undefined {
+  const v = Array.isArray(value) ? value[0] : value;
+  return v && v.kind === 'transform' ? v : undefined;
 }
 
 export function asText(value: DataValue | DataValue[] | undefined): string | undefined {

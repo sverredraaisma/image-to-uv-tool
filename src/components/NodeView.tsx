@@ -80,7 +80,9 @@ export function NodeView({ id, selected }: NodeProps) {
               accept: '.stl,.obj,model/stl,model/obj,application/sla,application/vnd.ms-pki.stl',
               label: 'Upload mesh (STL/OBJ)…',
             }
-          : null;
+          : node.type === 'splatInput'
+            ? { accept: '.ply,.splat', label: 'Upload splat scene (PLY/SPLAT)…' }
+            : null;
 
   const portClass = (side: ConnectionSide, portId: string) => {
     let cls = `port port-${side}`;

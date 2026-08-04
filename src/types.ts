@@ -6,7 +6,7 @@
 // (uploading a file, rendering a preview, talking to Replicate).
 
 /** Semantic type of a port, used for connection-compatibility checks. */
-export type PortType = 'image' | 'mask' | 'text' | 'stl' | 'sequence';
+export type PortType = 'image' | 'mask' | 'text' | 'stl' | 'sequence' | 'splat' | 'transform';
 
 /** A raw RGBA raster image. `data` length must equal width * height * 4. */
 export interface RasterImage {
@@ -62,8 +62,59 @@ export interface SequenceValue {
   delaysMs?: number[];
 }
 
+/**
+ * A 3D Gaussian splat cloud — a captured scene as a few hundred thousand
+ * translucent ellipsoids rather than as geometry.
+ *
+ * Structure-of-arrays, and deliberately flat: a cloud is one or two orders of
+ * magnitude bigger than any mesh this tool handles, so it is stored the way it
+ * will be read (one pass per attribute, no per-splat objects) and passed along
+ * edges by reference, never cloned.
+ *
+ * Only the DC term of each splat's spherical harmonics is kept, as a plain
+ * RGBA. The higher bands are what make a splat's colour change with the angle
+ * you look from, and dropping them costs the print its moving specular
+ * highlights — but they are 45 floats a splat, which is more memory than a
+ * browser tab has to spare on a scene this size. See `lib/splat/parse.ts`.
+ */
+export interface SplatValue {
+  kind: 'splat';
+  count: number;
+  /** Centres [x,y,z, …] (length = count*3), in the file's own units. */
+  positions: Float32Array;
+  /** Ellipsoid radii [sx,sy,sz, …] (length = count*3), same units. */
+  scales: Float32Array;
+  /** Orientations as unit quaternions [x,y,z,w, …] (length = count*4). */
+  rotations: Float32Array;
+  /** Colour and opacity [r,g,b,a, …] (length = count*4), 0–255, already sRGB. */
+  colours: Uint8ClampedArray;
+  /** File name it came from, for the reports. */
+  name?: string;
+  /** Splats dropped on import to stay inside the budget, if any. */
+  droppedCount?: number;
+}
+
+/**
+ * A placed camera: where you stood, which way you faced, and how much of the
+ * scene the sheet spans.
+ *
+ * `scale` is scene units per millimetre of print, which is the one number that
+ * ties a captured scene of arbitrary size to a physical sheet: a print 100 mm
+ * across at scale 0.02 spans 2 units of the scene. It is what the Splat Camera
+ * editor's zoom sets, and what the view renderer turns back into millimetres.
+ */
+export interface TransformValue {
+  kind: 'transform';
+  /** Camera position in scene units. */
+  position: [number, number, number];
+  /** Camera orientation, degrees: pitch (X), yaw (Y), roll (Z), applied Y·X·Z. */
+  rotationDeg: [number, number, number];
+  /** Scene units per millimetre of print. */
+  scale: number;
+}
+
 /** Any value that can travel along an edge / sit on a port. */
-export type DataValue = RasterImage | TextValue | StlValue | SequenceValue;
+export type DataValue = RasterImage | TextValue | StlValue | SequenceValue | SplatValue | TransformValue;
 
 /** Kind string of a DataValue, for runtime checks. */
 export type DataKind = DataValue['kind'];

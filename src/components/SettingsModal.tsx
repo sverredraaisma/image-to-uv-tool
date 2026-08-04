@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react';
 import { useStore } from '../store/store';
 import { getNodeDefSafe } from '../engine/registry';
 import { ConfigFields } from './ConfigFields';
@@ -8,6 +9,18 @@ import { Gloss3DEditor } from './Gloss3DEditor';
 import { LenticularEditor, LensGridEditor, RadialGridEditor } from './LenticularEditor';
 import { ModelSchemaHint } from './ModelSchemaHint';
 import { Modal } from './Modal';
+
+/**
+ * The splat camera editor is fetched the first time someone opens one.
+ *
+ * It is the only editor that carries a renderer with it — the splat rasteriser
+ * — and a graph full of ordinary image nodes should not download that to sit
+ * unused. Everything else here is small enough that a static import is the
+ * simpler answer.
+ */
+const SplatCameraEditor = lazy(() =>
+  import('./SplatCameraEditor').then((m) => ({ default: m.SplatCameraEditor })),
+);
 
 export function SettingsModal() {
   const editorNodeId = useStore((s) => s.editorNodeId);
@@ -21,6 +34,7 @@ export function SettingsModal() {
   const isAreaPicker = def.customEditor === 'areaPicker';
   const isSplitRegion = def.customEditor === 'splitRegion';
   const isGloss3d = def.customEditor === 'gloss3d';
+  const isSplatCam = def.customEditor === 'splatCamera';
   const isAi = def.category === 'AI (Replicate)';
 
   return (
@@ -28,7 +42,7 @@ export function SettingsModal() {
       title={`${def.label} · settings`}
       onClose={() => close(null)}
       className="settings-modal"
-      wide={isAreaPicker || isSplitRegion || isGloss3d}
+      wide={isAreaPicker || isSplitRegion || isGloss3d || isSplatCam}
     >
       {isAreaPicker ? (
         <AreaPickerEditor nodeId={editorNodeId} />
@@ -43,6 +57,11 @@ export function SettingsModal() {
           {def.customEditor === 'curves' && <CurvesEditor nodeId={editorNodeId} />}
           {isSplitRegion && <SplitRegionEditor nodeId={editorNodeId} />}
           {isGloss3d && <Gloss3DEditor nodeId={editorNodeId} />}
+          {isSplatCam && (
+            <Suspense fallback={<div className="splatcam-loading">Loading the splat renderer…</div>}>
+              <SplatCameraEditor nodeId={editorNodeId} />
+            </Suspense>
+          )}
           {def.customEditor === 'lenticular' && <LenticularEditor nodeId={editorNodeId} />}
           {def.customEditor === 'lensGrid' && <LensGridEditor nodeId={editorNodeId} />}
           {def.customEditor === 'radialGrid' && <RadialGridEditor nodeId={editorNodeId} />}

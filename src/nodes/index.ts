@@ -9,6 +9,7 @@ import { radialGridNodes } from './radialGrid';
 import { model3dNodes } from './model3d';
 import { modelStereoNodes } from './modelStereo';
 import { depthStereoNodes } from './depthStereo';
+import { splatNodes } from './splat';
 import { pipelineNodes } from './pipeline';
 
 let registered = false;
@@ -27,6 +28,7 @@ export function registerBuiltinNodes(): void {
     ...model3dNodes,
     ...modelStereoNodes,
     ...depthStereoNodes,
+    ...splatNodes,
     ...pipelineNodes,
   ];
   for (const def of all) {

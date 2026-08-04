@@ -1006,6 +1006,81 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     ],
   },
 
+  splatInput: {
+    summary:
+      'Reads a Gaussian splat scene — a capture stored as a few hundred thousand translucent ellipsoids rather than as geometry — and puts the cloud on a wire. .ply is what every trainer writes; .splat is the compact web format.',
+    uses: [
+      {
+        title: 'Print a place you scanned',
+        detail:
+          'A phone capture through Polycam or Luma, trained into splats, becomes a lenticular print of the room with real parallax.',
+        chain: ['Gaussian Splat Input', 'Splat Camera', 'Splat → Views', 'Lenticular Print'],
+      },
+    ],
+    tips: [
+      'Big captures are thinned on import — an even stride through the file, so the scene keeps its shape and only loses density. The Info output says how many went.',
+      'Only the base colour of each splat is kept. The higher spherical-harmonic bands are what make a surface change colour with the angle you look from, and they are 45 floats a splat — more memory than a browser tab has to spare. The print loses its moving highlights and nothing else.',
+      'The file’s units and origin do not matter. The Splat Camera’s scale is the one number that ties the scene to a physical sheet.',
+      'The parser and the renderer are downloaded the first time you run a splat node, not when the app loads.',
+    ],
+  },
+
+  splatCamera: {
+    summary:
+      'Fly through a splat scene and keep the spot you liked. Position, rotation and scale go out on one wire. The editor’s preview is the head-on view of the print itself — the canvas is the sheet, so what you frame is what gets printed.',
+    uses: [
+      {
+        title: 'Compose the shot',
+        detail:
+          'Open the editor, fly to where the scene looks best, close it. The camera is saved on the node and the render node picks it up.',
+        chain: ['Gaussian Splat Input', 'Splat Camera', 'Splat → Views'],
+      },
+      {
+        title: 'Several prints from one capture',
+        detail:
+          'Wire the same cloud into two or three cameras and each one is a different print of the same scan, with no re-import.',
+      },
+    ],
+    tips: [
+      'W A S D to move, Space and Shift for up and down, mouse to look. Click the picture to take the mouse; Esc gives it back.',
+      'Scroll changes scale — how much of the scene the sheet spans — which is the only control here that is about the print rather than about where you are standing. Everything downstream is measured in millimetres of paper, and scale is what converts.',
+      'The preview thins the cloud while you are moving and redraws with all of it once you stop, so the picture you judge is the full-quality one.',
+      'Depth costs parallax. Standing back to get a whole room in means the far wall moves further per view step than the lens can resolve — check the parallax figure in Splat → Views and move closer if it complains.',
+    ],
+  },
+
+  splatViews: {
+    summary:
+      'Renders a splat scene from every eye position a lens shows, and sends the whole run down one wire — a horizontal run for a Lenticular Print, or a square grid for a Lens Grid Print. The sheet is a window: its plane prints pin-sharp and everything off it separates as you move.',
+    uses: [
+      {
+        title: 'Lenticular print of a scan',
+        detail:
+          'A dozen views across the lens’s own cone, straight into the print node. Nothing is invented — an edge moving aside uncovers what was really behind it.',
+        chain: ['Splat Camera', 'Splat → Views', 'Lenticular Print'],
+      },
+      {
+        title: 'Look-around print of a scan',
+        detail:
+          'Switch the layout to a grid and the same scene prints with parallax in both axes, from one capture.',
+        chain: ['Splat Camera', 'Splat → Views', 'Lens Grid Print'],
+      },
+      {
+        title: 'Relief from a capture',
+        detail:
+          'The Depth output is the centre view’s composite depth, so the gloss chain can emboss the same scene it prints.',
+        chain: ['Splat → Views', 'Gloss Preview'],
+      },
+    ],
+    tips: [
+      'This is the honest version of Image + Depth → Stereo Views. A heightmap has nothing behind itself and has to invent the strip a near edge uncovers; a splat scene has a real behind, so it does not.',
+      'Cost scales with views × splats. A 15×15 grid is 225 full passes over the cloud — set the Splat budget under Advanced while you are finding the framing, then clear it for the final run.',
+      'Near clip drops splats right in front of the eye. Captures are full of floaters there, and one that passes through the eye projects across the whole frame.',
+      'Supersample defaults to 1 here, unlike the mesh renderer’s 2: a splat is already a smooth falloff rather than a hard-edged triangle, so there is very little aliasing left to average away.',
+      'A run goes out right-eye-first for the lens; a grid goes out in the order Lens Grid Print names its cells. Both match what the print node expects, so the wire is one wire.',
+    ],
+  },
+
   depthStereo: {
     summary:
       'Warps one picture and its heightmap into the whole run of views a Lenticular Print needs, on one wire. Each pixel slides sideways by an amount its depth decides — the same projection Model → Stereo Views uses, but from a relief rather than a mesh, so a photograph with a depth map prints in 3D without any geometry at all.',
