@@ -20,6 +20,16 @@ import type { SplatValue, TransformValue } from '../../types';
  */
 export const MAX_SPLATS = 1_200_000;
 
+/**
+ * Does this file start with a ZIP local header, and so is possibly a bundled
+ * `.sog`?
+ *
+ * It lives here, in the module both halves can afford to load, so that deciding
+ * *which* reader a file needs does not require loading either of them.
+ */
+export const looksLikeZip = (bytes: Uint8Array): boolean =>
+  bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+
 /** Axis-aligned extent of a cloud, ignoring the ellipsoid radii. */
 export interface CloudBounds {
   min: [number, number, number];

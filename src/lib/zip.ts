@@ -1,5 +1,10 @@
-// Minimal STORED (uncompressed) ZIP writer — enough to build container formats
-// like 3MF without pulling in a zip dependency. Pure and testable.
+// Minimal ZIP writer and reader — enough to build and open container formats
+// like 3MF and SOG without pulling in a zip dependency.
+//
+// The writer only ever STOREs. The reader has to do better than that, because
+// it opens files other tools wrote: STORED is handled inline, and DEFLATE is
+// handed to the platform's own `DecompressionStream`, which is the only reason
+// `readZip` is async.
 
 export interface ZipEntry {
   name: string;
@@ -98,5 +103,116 @@ export function makeZip(entries: ZipEntry[]): Uint8Array<ArrayBuffer> {
     p += c.length;
   }
   out.set(eocd, p);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Reading
+// ---------------------------------------------------------------------------
+
+const EOCD_SIG = 0x06054b50;
+const CENTRAL_SIG = 0x02014b50;
+const LOCAL_SIG = 0x04034b50;
+
+/** Longest an end-of-central-directory record can be, comment and all. */
+const MAX_EOCD = 22 + 0xffff;
+
+/**
+ * Find the end-of-central-directory record.
+ *
+ * It has to be searched for backwards rather than read at a fixed offset,
+ * because the record ends with a variable-length comment — so the only way to
+ * locate it is to look for its signature from the end of the file, and the only
+ * bound on how far back is the comment's own maximum length.
+ */
+function findEocd(view: DataView, length: number): number {
+  const floor = Math.max(0, length - MAX_EOCD);
+  for (let at = length - 22; at >= floor; at--) {
+    if (view.getUint32(at, true) === EOCD_SIG) return at;
+  }
+  return -1;
+}
+
+/** Inflate a raw DEFLATE member using whatever the platform provides. */
+async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+  const Ctor = (globalThis as { DecompressionStream?: typeof DecompressionStream }).DecompressionStream;
+  if (!Ctor) {
+    throw new Error(
+      'This archive is DEFLATE-compressed and this browser has no DecompressionStream to unpack it.',
+    );
+  }
+  // Fed from a ReadableStream rather than `new Blob(...).stream()`, and drained
+  // by hand rather than through `new Response(...)`: both of those shortcuts
+  // are missing from enough environments (jsdom among them) that the portable
+  // spelling is worth the extra six lines.
+  // Typed as BufferSource because that is what the decompression stream's
+  // writable side accepts.
+  const source = new ReadableStream<BufferSource>({
+    start(controller) {
+      controller.enqueue(data as BufferSource);
+      controller.close();
+    },
+  });
+  const reader = source.pipeThrough(new Ctor('deflate-raw')).getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value as Uint8Array);
+    total += (value as Uint8Array).length;
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+/**
+ * Read a ZIP archive into its entries, by name.
+ *
+ * The central directory is the authority on what is in the file — the local
+ * headers are a partial duplicate of it, and may lie about sizes when the
+ * writer streamed the entry — so names and methods are read from there, and the
+ * local header is consulted only to find where each entry's bytes actually
+ * start (its name and extra fields can differ in length from the central one).
+ */
+export async function readZip(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocd = findEocd(view, bytes.byteLength);
+  if (eocd < 0) throw new Error('Not a ZIP archive — no end-of-central-directory record.');
+
+  const count = view.getUint16(eocd + 10, true);
+  let at = view.getUint32(eocd + 16, true);
+  const out = new Map<string, Uint8Array>();
+  const decoder = new TextDecoder();
+
+  for (let i = 0; i < count; i++) {
+    if (at + 46 > bytes.byteLength || view.getUint32(at, true) !== CENTRAL_SIG) {
+      throw new Error(`ZIP central directory ends after ${i} of ${count} entries.`);
+    }
+    const method = view.getUint16(at + 10, true);
+    const compressedSize = view.getUint32(at + 20, true);
+    const nameLen = view.getUint16(at + 28, true);
+    const extraLen = view.getUint16(at + 30, true);
+    const commentLen = view.getUint16(at + 32, true);
+    const localAt = view.getUint32(at + 42, true);
+    const name = decoder.decode(bytes.subarray(at + 46, at + 46 + nameLen));
+
+    if (view.getUint32(localAt, true) !== LOCAL_SIG) {
+      throw new Error(`ZIP entry “${name}” points at no local header.`);
+    }
+    // The local header's own name/extra lengths, not the central ones.
+    const dataAt = localAt + 30 + view.getUint16(localAt + 26, true) + view.getUint16(localAt + 28, true);
+    const raw = bytes.subarray(dataAt, dataAt + compressedSize);
+    if (method === 0) out.set(name, raw);
+    else if (method === 8) out.set(name, await inflateRaw(raw));
+    else throw new Error(`ZIP entry “${name}” uses compression method ${method}, which is not supported.`);
+
+    at += 46 + nameLen + extraLen + commentLen;
+  }
   return out;
 }

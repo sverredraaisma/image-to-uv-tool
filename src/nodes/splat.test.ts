@@ -13,6 +13,8 @@ import { getNodeDef } from '../engine/registry';
 import { nodePorts } from '../engine/ports';
 import { isCompatible } from '../engine/compatibility';
 import { mapsSequencesByDefault } from '../engine/sequenceMap';
+import { makeZip } from '../lib/zip';
+import { platform, setPlatform } from '../lib/platform';
 import type { ComputeContext, DataValue, RasterImage, SequenceValue, SplatValue, TransformValue } from '../types';
 // The source of the files whose import graph this suite pins. `?raw` keeps it
 // to Vite's own loader rather than a Node filesystem call, so the test runs in
@@ -125,6 +127,53 @@ describe('splat nodes', () => {
     expect(c.kind).toBe('splat');
     expect(c.count).toBe(1);
     expect(c.positions[0]).toBe(1);
+  });
+
+  it('routes a .sog bundle to the SOG reader, decoding its textures through the platform', async () => {
+    // A one-splat bundle. The textures are 1×1 PNGs as far as this test is
+    // concerned — what matters is that the node unpacks the zip, hands each
+    // texture to the platform's image decoder, and feeds the results to the
+    // SOG decode rather than to the PLY one.
+    const codebook = Array.from({ length: 256 }, (_, i) => (i - 128) / 64);
+    const meta = {
+      version: 2,
+      count: 1,
+      means: { mins: [0, 0, 0], maxs: [1, 1, 1], files: ['means_l.webp', 'means_u.webp'] },
+      scales: { codebook, files: ['scales.webp'] },
+      quats: { files: ['quats.webp'] },
+      sh0: { codebook, files: ['sh0.webp'] },
+    };
+    const enc = (s: string) => new TextEncoder().encode(s);
+    const zip = makeZip([
+      { name: 'meta.json', data: enc(JSON.stringify(meta)) },
+      ...['means_l', 'means_u', 'quats', 'scales', 'sh0'].map((n) => ({
+        name: `${n}.webp`,
+        data: enc(n),
+      })),
+    ]);
+
+    const decoded: string[] = [];
+    const restore = platform.decodeImage;
+    setPlatform({
+      decodeImage: async (src: string) => {
+        decoded.push(src);
+        return { kind: 'image', width: 1, height: 1, data: new Uint8ClampedArray([128, 128, 128, 255]) };
+      },
+    });
+    try {
+      const b64 = btoa(String.fromCharCode(...zip));
+      const out = await splatInputNode.compute(
+        ctx({}, { src: `data:application/zip;base64,${b64}`, name: 'scene.sog' }),
+      );
+      const c = out.out as SplatValue;
+      expect(c.kind).toBe('splat');
+      expect(c.count).toBe(1);
+      expect(c.name).toBe('scene.sog');
+      // Five textures, each handed over exactly once.
+      expect(decoded).toHaveLength(5);
+    } finally {
+      setPlatform({ decodeImage: restore });
+    }
   });
 
   it('says what a cloud is, and admits what it dropped', () => {
@@ -261,7 +310,7 @@ describe('the splat code stays split out of the main bundle', () => {
     // keyword from that one line would pull the whole rasteriser into the entry
     // chunk and nothing else would complain — hence this test.
     for (const text of [splatNodeSource, nodeIndexSource]) {
-      const heavy = staticImports(text).filter((i) => /splat\/(parse|render)/.test(i.from));
+      const heavy = staticImports(text).filter((i) => /splat\/(parse|render|sog)/.test(i.from));
       expect(heavy.filter((i) => !i.typeOnly)).toEqual([]);
     }
   });
@@ -270,6 +319,7 @@ describe('the splat code stays split out of the main bundle', () => {
     const text = splatNodeSource;
     expect(text).toMatch(/await import\('\.\.\/lib\/splat\/parse'\)/);
     expect(text).toMatch(/await import\('\.\.\/lib\/splat\/render'\)/);
+    expect(text).toMatch(/await import\('\.\.\/lib\/splat\/sog'\)/);
   });
 
   it('keeps the editor behind React.lazy', () => {

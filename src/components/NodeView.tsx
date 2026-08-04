@@ -81,7 +81,7 @@ export function NodeView({ id, selected }: NodeProps) {
               label: 'Upload mesh (STL/OBJ)…',
             }
           : node.type === 'splatInput'
-            ? { accept: '.ply,.splat', label: 'Upload splat scene (PLY/SPLAT)…' }
+            ? { accept: '.ply,.sog,.splat', label: 'Upload splat scene (PLY/SOG/SPLAT)…' }
             : null;
 
   const portClass = (side: ConnectionSide, portId: string) => {

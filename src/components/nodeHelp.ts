@@ -1008,7 +1008,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
 
   splatInput: {
     summary:
-      'Reads a Gaussian splat scene — a capture stored as a few hundred thousand translucent ellipsoids rather than as geometry — and puts the cloud on a wire. .ply is what every trainer writes; .splat is the compact web format.',
+      'Reads a Gaussian splat scene — a capture stored as a few hundred thousand translucent ellipsoids rather than as geometry — and puts the cloud on a wire. .ply is what every trainer writes, .sog is the compact bundle worth using for anything large, and .splat is the older web format.',
     uses: [
       {
         title: 'Print a place you scanned',
@@ -1018,6 +1018,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       },
     ],
     tips: [
+      'Prefer .sog for anything large. It is the same scene about 20× smaller, because it sorts the cloud so that neighbouring splats land next to each other in an image and then lets an ordinary image codec do the work — a 1.4 GB PLY becomes a few tens of megabytes. Only the single-file bundle is read, not the loose folder form; splat-transform will bundle one for you.',
       'Big captures are thinned on import — an even stride through the file, so the scene keeps its shape and only loses density. The Info output says how many went.',
       'Only the base colour of each splat is kept. The higher spherical-harmonic bands are what make a surface change colour with the angle you look from, and they are 45 floats a splat — more memory than a browser tab has to spare. The print loses its moving highlights and nothing else.',
       'The file’s units and origin do not matter. The Splat Camera’s scale is the one number that ties the scene to a physical sheet.',

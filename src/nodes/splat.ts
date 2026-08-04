@@ -24,9 +24,9 @@
 // nothing fails to tell you. Shared runtime values live in `lib/splat/cloud`,
 // which is small and eager on purpose.
 
-import type { ComputeContext, NodeConfig, NodeDefinition, SplatValue, TransformValue } from '../types';
+import type { ComputeContext, NodeConfig, NodeDefinition, RasterImage, SplatValue, TransformValue } from '../types';
 import type { SplatViewOptions } from '../lib/splat/render';
-import { MAX_SPLATS, cloudBounds, describeCamera, framingCamera } from '../lib/splat/cloud';
+import { MAX_SPLATS, cloudBounds, describeCamera, framingCamera, looksLikeZip } from '../lib/splat/cloud';
 import { DEFAULT_GRID, MAX_GRID, MIN_GRID, clampGrid } from '../lib/lenticular';
 import { runChunked } from '../lib/chunked';
 import { isBlobRef } from '../lib/blobStore';
@@ -48,6 +48,34 @@ function dataUrlToBytes(src: string): Uint8Array {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+/**
+ * Hand a texture's bytes to the browser's own image decoder.
+ *
+ * SOG stores its attributes as WebP, and there is no sane way to decode WebP in
+ * JavaScript — so this is the one place the splat path needs the platform. An
+ * object URL rather than a data URL because these run to several megabytes each
+ * and base64 would cost a third again in memory, plus the encode.
+ */
+async function decodeTexture(bytes: Uint8Array, mime: string): Promise<RasterImage> {
+  const makeUrl = (globalThis as { URL?: typeof URL }).URL;
+  if (typeof makeUrl?.createObjectURL !== 'function') {
+    // No object URLs (a worker without them, an odd embedding): fall back to a
+    // data URL, built in chunks because `String.fromCharCode(...bytes)` on a
+    // multi-megabyte array overflows the argument stack.
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return platform.decodeImage(`data:${mime};base64,${btoa(bin)}`);
+  }
+  const url = makeUrl.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+  try {
+    return await platform.decodeImage(url);
+  } finally {
+    makeUrl.revokeObjectURL(url);
+  }
 }
 
 /** Human-readable summary of a loaded cloud. */
@@ -77,8 +105,9 @@ export const splatInputNode: NodeDefinition = {
   label: 'Gaussian Splat Input',
   category: 'Input',
   description:
-    'Upload a Gaussian splat scene — .ply (the format every trainer writes) or .splat — and output the ' +
-    'cloud. Feed it to Splat Camera to choose where you stand, then to Splat → Views to print it. ' +
+    'Upload a Gaussian splat scene — .ply (what every trainer writes), .sog (the compact bundle, ' +
+    'roughly 20× smaller) or .splat — and output the cloud. Feed it to Splat Camera to choose where ' +
+    'you stand, then to Splat → Views to print it. ' +
     'The file’s units and origin do not matter; the camera’s scale is what ties the scene to the sheet. ' +
     'Large captures are thinned on import to keep the tab alive, and only the base colour of each splat ' +
     'is kept — see the Info output.',
@@ -98,11 +127,22 @@ export const splatInputNode: NodeDefinition = {
     if (!src) return { out: undefined, info: undefined };
 
     onProgress?.('Reading splat file…');
+    const bytes = dataUrlToBytes(src);
+    const name = str(config.name);
+
+    // A SOG bundle is a ZIP of textures rather than a list of splats, so it
+    // needs its own reader — and its own module, which a graph reading plain
+    // PLYs should not download either.
+    if (looksLikeZip(bytes)) {
+      const { loadSogBundle, decodeSogChunks } = await import('../lib/splat/sog');
+      onProgress?.('Unpacking SOG bundle…');
+      const { meta, textures } = await loadSogBundle(bytes, decodeTexture);
+      const cloud = await runChunked(decodeSogChunks(meta, textures, name), { onProgress, signal });
+      return { out: cloud, info: { kind: 'text', text: describeCloud(cloud) } };
+    }
+
     const { parseSplatFileChunks } = await import('../lib/splat/parse');
-    const cloud = await runChunked(parseSplatFileChunks(dataUrlToBytes(src), str(config.name)), {
-      onProgress,
-      signal,
-    });
+    const cloud = await runChunked(parseSplatFileChunks(bytes, name), { onProgress, signal });
     return { out: cloud, info: { kind: 'text', text: describeCloud(cloud) } };
   },
 };
