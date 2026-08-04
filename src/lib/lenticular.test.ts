@@ -4,6 +4,7 @@ import {
   MAX_OUTPUT_PIXELS,
   MAX_OVERSIZE_PIXELS,
   OversizeOutputError,
+  alignedInterlaceWidth,
   calibrationPixelsPerLens,
   calibrationValues,
   chunkCount,
@@ -802,5 +803,113 @@ describe('snapping an LPI sweep to whole pixels per lens', () => {
     // Three distinct pitches in that range, so three bands on the sheet.
     expect(r.bands).toHaveLength(3);
     expect(r.bands.map((b) => Math.round(1440 / (b.value ?? 0)))).toEqual([33, 32, 31]);
+  });
+});
+
+describe('every lens switches at once', () => {
+  /**
+   * Which frame each pixel of one row takes, read straight off the render by
+   * matching the flat colour back to the frame that produced it.
+   */
+  function stripPattern(art: RasterImage, frames: RasterImage[]): number[] {
+    const out: number[] = [];
+    for (let x = 0; x < art.width; x++) {
+      const [r, g, b] = pixelAt(art, x, Math.floor(art.height / 2));
+      let best = 0;
+      let bestErr = Infinity;
+      frames.forEach((f, i) => {
+        const err = Math.abs(f.data[0] - r) + Math.abs(f.data[1] - g) + Math.abs(f.data[2] - b);
+        if (err < bestErr) {
+          bestErr = err;
+          best = i;
+        }
+      });
+      out.push(best);
+    }
+    return out;
+  }
+
+  it('gives every lenticule the same whole number of pixels', () => {
+    // A source resolution that divides nothing: the raster grows to the next
+    // size that does rather than taking it as-is.
+    const odd = solid([9, 9, 9], 905, 905);
+    const s = settings({ widthMm: 25.4, ppi: 1000, lpi: 10 });
+    const size = interlacedSize(s, [RED, odd]);
+    const lenticules = (25.4 * 10) / 25.4;
+    expect(size.width / lenticules).toBe(Math.round(size.width / lenticules));
+    // …and it went up to reach it, never down past what the sources hold.
+    expect(size.width).toBeGreaterThanOrEqual(905);
+  });
+
+  it('repeats the strip pattern exactly, lens for lens', () => {
+    // The property the whole thing is for: lens 0 and lens 7 must divide into
+    // frames at the same pixel offsets, or they flip at different angles and
+    // the sheet wipes instead of switching.
+    const s = settings({ widthMm: 25.4, ppi: 400, lpi: 10, stripSamples: 3 });
+    const frames = [RED, GREEN, BLUE];
+    const size = interlacedSize(s, frames);
+    const art = renderInterlaced(frames, s, { interlacedSize: size });
+    const pattern = stripPattern(art, frames);
+    const perLens = size.width / 10;
+    expect(perLens).toBe(Math.round(perLens));
+    const first = pattern.slice(0, perLens);
+    for (let lens = 1; lens < 10; lens++) {
+      expect(pattern.slice(lens * perLens, (lens + 1) * perLens)).toEqual(first);
+    }
+  });
+
+  it('gives every frame an equal share of the lens when the press allows', () => {
+    const s = settings({ widthMm: 25.4, ppi: 400, lpi: 10, stripSamples: 3 });
+    const frames = [RED, GREEN, BLUE];
+    const art = renderInterlaced(frames, s, { interlacedSize: interlacedSize(s, frames) });
+    const pattern = stripPattern(art, frames);
+    const counts = [0, 0, 0];
+    for (const frame of pattern) counts[frame]++;
+    expect(counts[0]).toBe(counts[1]);
+    expect(counts[1]).toBe(counts[2]);
+  });
+
+  it('falls back to whole pixels per lens when equal strips would overrun the press', () => {
+    // 32 px per lens over 12 views: 2.67 px a strip, and rounding up to 3 would
+    // need 36 px — more than the press has. So the strips come out uneven…
+    const lenticules = 100;
+    const cap = 3200;
+    const width = alignedInterlaceWidth(3200, lenticules, 12, cap);
+    expect(width).toBeLessThanOrEqual(cap);
+    // …but the pitch is still whole, which is what keeps the sheet switching
+    // as one.
+    expect(width / lenticules).toBe(Math.round(width / lenticules));
+    expect(width / lenticules).toBe(32);
+  });
+
+  it('grows to the next whole strip, and stops at the press', () => {
+    // 1000 px over 100 lenses is 10 px each, which four views cannot share
+    // evenly — so it goes up to 12, the next multiple of 4.
+    expect(alignedInterlaceWidth(1000, 100, 4, 1200)).toBe(1200);
+    // Already exact: left alone.
+    expect(alignedInterlaceWidth(1200, 100, 4, 2000)).toBe(1200);
+    expect(alignedInterlaceWidth(800, 100, 4, 2000)).toBe(800);
+    // A lenticule the press cannot give one pixel to: capped, and left alone.
+    expect(alignedInterlaceWidth(2000, 500, 2, 100)).toBe(100);
+  });
+
+  it('keeps the switch sheet on the same grid as the artwork it accompanies', () => {
+    // The test print has to have the property it is printed to check for.
+    const s = settings({ widthMm: 25.4, ppi: 400, lpi: 10, stripSamples: 3 });
+    const frames = [RED, GREEN, BLUE];
+    const size = interlacedSize(s, frames);
+    const sw = switchFrames(frames.length);
+    const sheet = renderInterlaced(sw, s, { interlacedSize: size });
+    expect([sheet.width, sheet.height]).toEqual([size.width, size.height]);
+    const pattern = stripPattern(sheet, sw);
+    const perLens = size.width / 10;
+    const first = pattern.slice(0, perLens);
+    for (let lens = 1; lens < 10; lens++) {
+      expect(pattern.slice(lens * perLens, (lens + 1) * perLens)).toEqual(first);
+    }
+    // And it is the alternating target, so the strips are pure black and white.
+    for (let x = 0; x < sheet.width; x++) {
+      expect([0, 255]).toContain(pixelAt(sheet, x, 5)[0]);
+    }
   });
 });

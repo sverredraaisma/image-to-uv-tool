@@ -277,11 +277,32 @@ for a diagonal sheet and an axis-aligned one alike.
 It is a ceiling and not a destination, though, and that distinction is the whole of the sizing rule:
 
 ```
-artwork width = min( PPI raster,  max( interlace floor,  sharpest source ) )
+wanted        = max( interlace floor,  sharpest source )
+artwork width = wanted, rounded so every lenticule gets the same whole number
+                of pixels — and never bigger than the PPI raster
 ```
 
 So the artwork is as big as the interlace and your own images need, and never bigger than the press
-can print. A diagonal sheet is welcome to more pixels than that — its staircase is as fine as the
+can print.
+
+That rounding is not a detail, and it is worth being exact about why. The frame a pixel belongs to is
+`floor(frac(u / p) · N)`, so what fixes a strip boundary inside a lens is the pixel *offset* of that
+lens. Let a lenticule be 5.08 px wide and lens 0 starts on a pixel boundary, lens 1 starts 0.08 px
+late, lens 12 a whole pixel late — so each rounds its boundaries somewhere slightly different and
+flips at a slightly different angle. Tilt that print and the change sweeps across it as a band: half
+the picture has switched and half has not. It reads as a wipe, and it is the most common reason a
+home-made lenticular looks broken.
+
+Give every lens a whole number of pixels and it goes away. Every lenticule then covers an identical
+run of pixel columns, every boundary sits at the same offset under every lens, and the sheet changes
+all at once. Rounding the pitch up to a whole number of pixels *per strip* is better still, since the
+views then get equal shares of the lens; where the press cannot carry that, whole pixels per lens is
+enough for the sheet to switch as one, with the strips inside a lens merely uneven (3, 3, 2, 3, 3, 2
+across a 16 px lens of six views) — and identically uneven under every lens, which is what matters.
+
+(The `- 1e-9` before that ceiling is real and not a flourish. A 25.4 mm sheet at 12 LPI computes as
+11.999999999999998 lenticules, and an exact fit that rounds up because of it costs half as many
+pixels again for nothing.) A diagonal sheet is welcome to more pixels than that — its staircase is as fine as the
 raster it is drawn on — but it does not get them behind your back, because the difference between a
 1063-pixel artwork and a 5669-pixel one is a factor of 28 in memory, render time and file size, and
 that is a decision rather than a detail. **Artwork px per strip** (or per view tile) is the dial:
@@ -909,9 +930,20 @@ b      = max(0, H - s)
 # ---- interlaced artwork ---------------------------------------------
 cells      = width_mm / p
 map_w      = round(width_mm / 25.4 * PPI)        # the printer's own raster
-art_w      = min(map_w,                          # never finer than the press
-                 max(ceil(cells * N * q),        # every strip of every lens
-                     max(view.width for view in views)))   # keep the sources
+want       = max(ceil(cells * N * q),            # every strip of every lens
+                 max(view.width for view in views))     # keep the sources
+
+# …then round the pitch so every lens gets the same whole number of pixels,
+# or the sheet wipes instead of flipping. Whole pixels per *strip* if the
+# press can carry it, whole pixels per *lens* if it cannot.
+per_lens   = max(N, ceil(want / cells / N - 1e-9) * N)   # nudged: see below
+if round(cells * per_lens) > map_w:
+    per_lens = max(1, round(map_w / cells))
+    while per_lens > 1 and round(cells * per_lens) > map_w:
+        per_lens -= 1
+art_w      = round(cells * per_lens)
+if art_w > map_w:                                # a lens thinner than a pixel
+    art_w  = round(map_w)
 art_h      = round(art_w * views[0].height / views[0].width)
 mm_per_px  = width_mm / art_w
 

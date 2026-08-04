@@ -298,7 +298,19 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
     run(calib.param, async () => {
       const spec = calibrationSpec(calib);
       const values = calibrationValues(spec);
-      const options = withConsent({ calibration: spec, bandGapMm: kind.bandGapMm });
+      // A calibration sheet renders on the printer's own raster, unlike an
+      // ordinary print. Every band has a *different* pitch, and no smaller
+      // raster can give all of them a whole number of pixels per lens at once —
+      // only the press raster can, because that is the raster the snapped
+      // pitches are whole in. Get this wrong and each band flips as a wipe
+      // rather than all at once, which is the very fault the sheet is being
+      // printed to look for. It costs a full-size render; the oversize prompt
+      // and the chunked progress are already here for exactly that.
+      const options = withConsent({
+        calibration: spec,
+        bandGapMm: kind.bandGapMm,
+        interlacedSize: depthSize ?? undefined,
+      });
       const art = await drive(kind.renderArt(views, options));
       // A snapped LPI sweep names itself in pixels per lens, because that is
       // what you read off the sheet and type back in — and because the LPI

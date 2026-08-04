@@ -495,13 +495,82 @@ const cappedAtPpi = (needed: number, ppiWidth: number): number =>
  *
  * The aspect ratio is the first frame's, as everywhere else.
  */
+/**
+ * Round an artwork width so that every lenticule gets the same whole number of
+ * pixels — and, where the press allows, the same whole number per strip.
+ *
+ * This is the difference between a sheet that flips and a sheet that wipes.
+ *
+ * The frame a pixel belongs to is `floor(frac(u / pitch) · N)`, so what decides
+ * where a strip boundary lands inside a lens is the *pixel offset* of that lens
+ * — and if a lenticule is 5.08 px wide, that offset is different for every lens
+ * on the sheet. Lens 0 starts on a pixel boundary, lens 1 starts 0.08 px late,
+ * lens 12 starts a whole pixel late. Each one therefore rounds its boundary to
+ * a different place and so flips at a slightly different angle: tilt the print
+ * and the change sweeps across it as a band, one part of the picture switching
+ * while the rest has not yet. It looks like a wipe, and it is the single most
+ * common reason a home-made lenticular reads as broken.
+ *
+ * Give every lens a whole number of pixels and that vanishes. Every lenticule
+ * covers an identical run of pixel columns, so every strip boundary sits at the
+ * same offset under every lens, and the whole sheet changes at once — which is
+ * what a lenticular is supposed to do, and what the eye reads as one image
+ * becoming another rather than as a curtain being drawn.
+ *
+ * Two grades of it, since only the first is always affordable:
+ *
+ *   • Whole pixels per *strip* — the pitch rounded up to a multiple of the
+ *     frame count. Every strip is then the same width as well, so no view is
+ *     quietly given more of the lens than its neighbours.
+ *   • Failing that (it would overrun the press), whole pixels per *lens*: the
+ *     strips inside a lens come out uneven — 3, 3, 2, 3, 3, 2 across a 16 px
+ *     lens with six views — but identically uneven under every lens, so the
+ *     sheet still switches as one.
+ *
+ * The remaining error is the rounding of the total width, which is under half a
+ * pixel across the whole sheet however many lenses it holds.
+ */
+export function alignedInterlaceWidth(
+  target: number,
+  lenticules: number,
+  strips: number,
+  capPx: number,
+): number {
+  const lenses = Math.max(1e-9, lenticules);
+  const widthFor = (perLens: number) => Math.max(1, Math.round(lenses * perLens));
+  const n = Math.max(1, Math.round(strips));
+
+  // Best case: round the pitch up to the next whole strip. The nudge before the
+  // ceiling is not cosmetic — a 25.4 mm sheet at 12 LPI computes 11.999999999999998
+  // lenticules, and without it an exact fit rounds up to the next whole strip
+  // and asks for half as many pixels again for nothing at all.
+  const equal = Math.max(n, Math.ceil(target / lenses / n - 1e-9) * n);
+  if (widthFor(equal) <= capPx) return widthFor(equal);
+
+  // The press is the ceiling, so take the widest whole pitch that fits under
+  // it. `round` rather than `floor` because the cap is itself a rounded figure:
+  // a 100 mm sheet at 1440 PPI is 5669 px, which is 31.998 lenticules' worth of
+  // a 32 px pitch, and flooring that would throw the pitch away over a rounding
+  // error in the sheet width.
+  let perLens = Math.max(1, Math.round(capPx / lenses));
+  while (perLens > 1 && widthFor(perLens) > capPx) perLens--;
+  // A lenticule the press cannot give a single pixel to is beyond alignment;
+  // the caller's own warnings cover that configuration.
+  return widthFor(perLens) <= capPx ? widthFor(perLens) : Math.max(1, Math.round(capPx));
+}
+
 export function interlacedSize(settings: LenticularSettings, frames: RasterImage[]): OutputSize {
   const first = frames[0];
   const lenticules = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
   const samples = Math.max(1, settings.stripSamples);
   const forStrips = Math.ceil(lenticules * frames.length * samples);
   const forArtwork = Math.max(...frames.map((f) => f.width));
-  const width = cappedAtPpi(Math.max(forStrips, forArtwork), outputSize(settings, first).width);
+  const width = alignedInterlaceWidth(
+    Math.max(forStrips, forArtwork),
+    lenticules,
+    frames.length,
+    outputSize(settings, first).width,
+  );
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
