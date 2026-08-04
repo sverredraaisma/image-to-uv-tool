@@ -161,21 +161,30 @@ export function cameraAxes(rotationDeg: [number, number, number]): {
   return { right: [m[0], m[1], m[2]], up: [m[3], m[4], m[5]], forward: [-m[6], -m[7], -m[8]] };
 }
 
-/** A camera that frames the whole cloud from the front, for a first look. */
-export function framingCamera(cloud: SplatValue, widthMm: number, viewDistanceMm: number): TransformValue {
+/**
+ * A camera that frames the whole cloud, for a first look.
+ *
+ * The camera's position is the sheet plane, and everything in front of that
+ * plane is discarded — so framing on the *centre* of the cloud would throw away
+ * its whole front half. It goes on the near face of the bounding sphere
+ * instead: the sheet just touches the scene, all of which is then behind the
+ * paper. The same placement the mesh nodes call a setback of zero, and the
+ * deepest window you can have without losing anything.
+ */
+export function framingCamera(cloud: SplatValue, widthMm: number, _viewDistanceMm = 400): TransformValue {
   const b = cloudBounds(cloud);
-  // Stand back far enough that the bounding sphere fits the sheet, in the same
-  // proportion the print will be viewed at.
-  const spanScene = Math.max(1e-6, b.radius * 2);
-  const scale = spanScene / Math.max(1, widthMm);
-  const backMm = viewDistanceMm;
+  const radius = Math.max(1e-6, b.radius);
+  // The sheet spans the cloud's width; scale is what converts the two.
+  const scale = (radius * 2) / Math.max(1, widthMm);
   const forward = cameraForward([0, 0, 0]);
   return {
     kind: 'transform',
+    // Back off from the centre by the radius, along the view direction, so the
+    // plane lands on the front of the scene rather than through the middle.
     position: [
-      b.centre[0] - forward[0] * backMm * scale,
-      b.centre[1] - forward[1] * backMm * scale,
-      b.centre[2] - forward[2] * backMm * scale,
+      b.centre[0] - forward[0] * radius,
+      b.centre[1] - forward[1] * radius,
+      b.centre[2] - forward[2] * radius,
     ],
     rotationDeg: [0, 0, 0],
     scale,

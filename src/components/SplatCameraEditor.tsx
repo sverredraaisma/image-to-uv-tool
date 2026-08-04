@@ -78,7 +78,7 @@ export function SplatCameraEditor({ nodeId }: { nodeId: string }) {
         heightMm,
         viewDistanceMm,
         splatBudget: budget,
-        nearClipMm: Math.max(0.1, num(cfg.nearClipMm, 5)),
+        frontMarginMm: Math.max(0, num(cfg.frontMarginMm, 0)),
       });
       if (canvas.width !== img.width || canvas.height !== img.height) {
         canvas.width = img.width;
@@ -90,7 +90,7 @@ export function SplatCameraEditor({ nodeId }: { nodeId: string }) {
       setBusyMs(Math.round(performance.now() - t0));
       setReady(true);
     },
-    [cloud, previewPx, widthMm, heightMm, viewDistanceMm, cfg.nearClipMm],
+    [cloud, previewPx, widthMm, heightMm, viewDistanceMm, cfg.frontMarginMm],
   );
 
   /** Redraw soon at preview quality, then again at full quality once idle. */
@@ -301,6 +301,12 @@ export function SplatCameraEditor({ nodeId }: { nodeId: string }) {
         and <strong>Shift</strong> for up and down, and the mouse to look. <strong>Esc</strong> gives the
         mouse back. Scroll to change how much of the scene the sheet spans. The canvas is the sheet: this is
         the head-on view of the print, not a separate preview.
+      </div>
+      <div className="splatcam-hint">
+        Where you stand <em>is</em> the sheet — whatever the camera sits on lands on the paper, in focus,
+        and everything nearer than that is dropped, because a print cannot show something in front of its
+        own surface. So flying forward pushes a slicing plane through the scene, and what you see is
+        exactly what will come off the press.
       </div>
     </div>
   );

@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { renderSplatViews, splatEyeOffsets, toCameraSpace, type SplatViewOptions } from './render';
+import {
+  describePlacementOf,
+  renderSplatViews,
+  splatEyeOffsets,
+  toCameraSpace,
+  type SplatViewOptions,
+} from './render';
 import { cameraAxes, cloudBounds, decimate, framingCamera } from './cloud';
 import { disparityAtDepth } from '../render3d';
 import type { RasterImage, SplatValue, TransformValue } from '../../types';
@@ -45,7 +51,7 @@ const options = (over: Partial<SplatViewOptions> = {}): SplatViewOptions => ({
   grid: 3,
   background: [255, 255, 255],
   supersample: 1,
-  nearClipMm: 1,
+  frontMarginMm: 0,
   ...over,
 });
 
@@ -74,10 +80,11 @@ function centroid(img: RasterImage): { x: number; y: number; mass: number } {
 }
 
 describe('splat view rendering', () => {
-  it('puts a splat on the sheet plane in the middle of every view', () => {
-    // A splat exactly D in front of the camera lands on the sheet, and the
-    // sheet plane is common to every view — that is the whole window camera.
-    const cloud = cloudOf([[0, 0, -400, 4, 0, 0, 0, 255]]);
+  it('puts a splat at the camera position dead centre in every view', () => {
+    // The camera stands on the sheet, so a splat level with it lands on the
+    // sheet — and the sheet plane is common to every view. This is both halves
+    // of the window camera in one assertion.
+    const cloud = cloudOf([[0, 0, 0, 4, 0, 0, 0, 255]]);
     const { views } = renderSplatViews(cloud, options({ views: 3 }));
     for (const v of views) {
       const c = centroid(v);
@@ -92,7 +99,7 @@ describe('splat view rendering', () => {
     // spans, a splat 200 mm back moves 98 px, which is off a 64 px sheet
     // entirely — which is itself the parallax limit the print nodes warn about.
     const backMm = 20;
-    const cloud = cloudOf([[0, 0, -(400 + backMm), 4, 0, 0, 0, 255]]);
+    const cloud = cloudOf([[0, 0, -backMm, 4, 0, 0, 0, 255]]);
     const o = options({ views: 2, coneDeg: 20 });
     const { views, offsetsMm } = renderSplatViews(cloud, o);
     const left = centroid(views[0]);
@@ -103,16 +110,23 @@ describe('splat view rendering', () => {
     expect(Math.abs(right.x - left.x)).toBeCloseTo(expected, 0);
   });
 
-  it('moves a splat in front of the sheet the other way', () => {
-    // In front of the sheet the parallax reverses sign — the pop-out case.
-    const front = cloudOf([[0, 0, -380, 4, 0, 0, 0, 255]]);
-    const behind = cloudOf([[0, 0, -420, 4, 0, 0, 0, 255]]);
-    const o = options({ views: 2, coneDeg: 20 });
-    const f = renderSplatViews(front, o).views;
-    const b = renderSplatViews(behind, o).views;
-    const dFront = centroid(f[1]).x - centroid(f[0]).x;
-    const dBehind = centroid(b[1]).x - centroid(b[0]).x;
-    expect(Math.sign(dFront)).toBe(-Math.sign(dBehind));
+  it('holds whatever the camera stands on perfectly still — that is what focus is', () => {
+    // A lenticular print is sharp exactly where the parallax is zero. The
+    // camera position is the sheet, so a splat there must not move by a pixel
+    // across the run, while one behind it must.
+    const o = options({ views: 5, coneDeg: 40 });
+    const atCamera = renderSplatViews(cloudOf([[0, 0, 0, 4, 0, 0, 0, 255]]), o);
+    const xs = atCamera.views.map((v) => centroid(v).x);
+    // Exactly still by the algebra — at z = 0 the projection is X = e + 1·(x −
+    // e) = x, and the eye drops out. What is left is a few thousandths of a
+    // pixel of raster noise, because the *ellipse* still shears with the eye
+    // even though its centre does not: a splat on the sheet has depth extent
+    // like any other.
+    for (const x of xs) expect(Math.abs(x - xs[0])).toBeLessThan(0.05);
+
+    const behind = renderSplatViews(cloudOf([[0, 0, -30, 4, 0, 0, 0, 255]]), o);
+    const moved = behind.views.map((v) => centroid(v).x);
+    expect(Math.abs(moved[4] - moved[0])).toBeGreaterThan(1);
   });
 
   it('draws the nearer splat over the farther one', () => {
@@ -133,22 +147,47 @@ describe('splat view rendering', () => {
     expect(at(views[0], 32, 32)[0]).toBeLessThan(255);
   });
 
-  it('respects the near clip rather than smearing a floater across the frame', () => {
+  it('drops everything in front of the sheet, because a print cannot show it', () => {
     const cloud = cloudOf([
-      [0, 0, -400, 4, 0, 0, 0, 255],
-      [0, 0, -1, 4, 0, 0, 0, 255], // 1 mm from the eye
+      [0, 0, -50, 4, 0, 0, 0, 255], // behind the sheet: printable
+      [0, 0, 0, 4, 0, 0, 0, 255], // on the sheet: printable
+      [0, 0, 30, 4, 0, 0, 0, 255], // in front of it: would come out of the page
+      [0, 0, 200, 4, 0, 0, 0, 255], // further out still
     ]);
-    const near = renderSplatViews(cloud, options({ views: 1, nearClipMm: 50 }));
-    const noClip = renderSplatViews(cloud, options({ views: 1, nearClipMm: 0.1 }));
-    expect(near.drawn).toBe(1);
-    expect(noClip.drawn).toBe(2);
-    expect(centroid(noClip.views[0]).mass).toBeGreaterThan(centroid(near.views[0]).mass);
+    const r = renderSplatViews(cloud, options({ views: 1 }));
+    expect(r.considered).toBe(2);
+    expect(r.culled).toBe(2);
+    // And nothing drawn is in front of the sheet.
+    expect(r.nearMm).toBeGreaterThanOrEqual(0);
+  });
+
+  it('pushes the cull plane deeper when asked', () => {
+    const cloud = cloudOf([
+      [0, 0, -5, 4, 0, 0, 0, 255],
+      [0, 0, -50, 4, 0, 0, 0, 255],
+      [0, 0, -200, 4, 0, 0, 0, 255],
+    ]);
+    expect(renderSplatViews(cloud, options({ views: 1 })).considered).toBe(3);
+    // 20 mm behind the sheet: the splat 5 mm back no longer qualifies.
+    expect(renderSplatViews(cloud, options({ views: 1, frontMarginMm: 20 })).considered).toBe(2);
+    expect(renderSplatViews(cloud, options({ views: 1, frontMarginMm: 100 })).considered).toBe(1);
+  });
+
+  it('survives a camera with the whole scene behind it', () => {
+    // Everything culled: blank paper and an honest count, not a crash.
+    const cloud = cloudOf([[0, 0, 100, 4, 0, 0, 0, 255]]);
+    const r = renderSplatViews(cloud, options({ views: 2 }));
+    expect(r.considered).toBe(0);
+    expect(r.culled).toBe(1);
+    expect(r.views).toHaveLength(2);
+    expect(at(r.views[0], 32, 32)).toEqual([255, 255, 255]);
+    expect(describePlacementOf(r)).toMatch(/Nothing survived/);
   });
 
   it('reports where the cloud sits relative to the sheet', () => {
     const cloud = cloudOf([
-      [0, 0, -450, 4, 0, 0, 0, 255],
-      [0, 0, -600, 4, 0, 0, 0, 255],
+      [0, 0, -50, 4, 0, 0, 0, 255],
+      [0, 0, -200, 4, 0, 0, 0, 255],
     ]);
     const r = renderSplatViews(cloud, options({ views: 1 }));
     // Behind the sheet is positive, as everywhere else in the tool.
@@ -158,8 +197,8 @@ describe('splat view rendering', () => {
 
   it('hands back a depth map with white nearest', () => {
     const cloud = cloudOf([
-      [-25, 0, -450, 8, 0, 0, 0, 255],
-      [25, 0, -900, 8, 0, 0, 0, 255],
+      [-25, 0, -50, 8, 0, 0, 0, 255],
+      [25, 0, -500, 8, 0, 0, 0, 255],
     ]);
     const { depth } = renderSplatViews(cloud, options({ views: 1 }));
     const nearPx = at(depth, 16, 32)[0];
@@ -245,12 +284,36 @@ describe('splat cloud helpers', () => {
     expect(decimate(many, 20)).toBe(many);
   });
 
-  it('gives a camera that frames the whole cloud from in front of it', () => {
+  it('frames the whole cloud with the sheet on its near face', () => {
     const t = framingCamera(cloud, 100, 400);
-    // Looking down −Z, so it stands on the +Z side of the scene's centre.
-    expect(t.position[2]).toBeGreaterThan(cloudBounds(cloud).centre[2]);
+    // Looking down −Z, so it stands on the +Z side of the scene's centre — far
+    // enough forward that the sheet plane touches the front of the scene
+    // rather than cutting through the middle of it.
+    const b = cloudBounds(cloud);
+    expect(t.position[2]).toBeCloseTo(b.centre[2] + b.radius, 6);
     expect(t.rotationDeg).toEqual([0, 0, 0]);
-    expect(t.scale).toBeGreaterThan(0);
+    expect(t.scale).toBeCloseTo((b.radius * 2) / 100, 6);
+  });
+
+  it('frames without culling anything — which is the whole point of framing there', () => {
+    // The default framing and the front-of-sheet cull have to agree, or opening
+    // the editor on a fresh cloud would throw half of it away.
+    const scene = cloudOf(
+      Array.from({ length: 40 }, (_, i) => [
+        (i % 5) - 2,
+        Math.floor(i / 5) - 4,
+        -(i % 7),
+        0.2,
+        0,
+        0,
+        0,
+        255,
+      ]),
+    );
+    const r = renderSplatViews(scene, options({ views: 1, camera: framingCamera(scene, 100, 400) }));
+    expect(r.culled).toBe(0);
+    expect(r.considered).toBe(scene.count);
+    expect(r.coverage).toBeGreaterThan(0);
   });
 
   it('flies along the axes it is facing', () => {

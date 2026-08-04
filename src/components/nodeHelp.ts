@@ -1028,7 +1028,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
 
   splatCamera: {
     summary:
-      'Fly through a splat scene and keep the spot you liked. Position, rotation and scale go out on one wire. The editor’s preview is the head-on view of the print itself — the canvas is the sheet, so what you frame is what gets printed.',
+      'Fly through a splat scene and keep the spot you liked. Position, rotation and scale go out on one wire. Where you stand *is* the sheet: whatever the camera sits on lands on the paper in focus, everything nearer is dropped, and the rest of the scene arranges itself behind. The editor’s canvas is that sheet, so what you frame is what gets printed.',
     uses: [
       {
         title: 'Compose the shot',
@@ -1045,6 +1045,9 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     tips: [
       'W A S D to move, Space and Shift for up and down, mouse to look. Click the picture to take the mouse; Esc gives it back.',
       'Scroll changes scale — how much of the scene the sheet spans — which is the only control here that is about the print rather than about where you are standing. Everything downstream is measured in millimetres of paper, and scale is what converts.',
+      'The camera position is the plane the print is focused on, not the viewer’s eye — the eye stands a viewing distance further back. A splat exactly at the camera has zero parallax across the whole run, which is what being in focus means for a lenticular print; everything behind it separates, and the further back it is the more it moves.',
+      'Everything in front of that plane is discarded, because a print cannot show something in front of its own surface — it would have to float off the paper, and the sheet’s edge would cut through it at the border. So flying forward pushes a slicing plane through the capture. Use it: fly until the clutter in front of your subject has peeled away.',
+      '“Frame the scene” puts the plane on the near face of the capture rather than through its middle, so the whole scene is behind the paper and nothing is culled — the deepest window you can have without losing anything.',
       'The preview thins the cloud while you are moving and redraws with all of it once you stop, so the picture you judge is the full-quality one.',
       'Depth costs parallax. Standing back to get a whole room in means the far wall moves further per view step than the lens can resolve — check the parallax figure in Splat → Views and move closer if it complains.',
     ],
@@ -1076,7 +1079,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     tips: [
       'This is the honest version of Image + Depth → Stereo Views. A heightmap has nothing behind itself and has to invent the strip a near edge uncovers; a splat scene has a real behind, so it does not.',
       'Cost scales with views × splats. A 15×15 grid is 225 full passes over the cloud — set the Splat budget under Advanced while you are finding the framing, then clear it for the final run.',
-      'Near clip drops splats right in front of the eye. Captures are full of floaters there, and one that passes through the eye projects across the whole frame.',
+      'Everything in front of the sheet is culled before a single view is drawn — the plane does not move as the eye slides, so the cull does not either. The Info output says how many splats went. “Cull plane” under Advanced pushes it deeper into the scene if you want to drop the foreground as well.',
       'Supersample defaults to 1 here, unlike the mesh renderer’s 2: a splat is already a smooth falloff rather than a hard-edged triangle, so there is very little aliasing left to average away.',
       'A run goes out right-eye-first for the lens; a grid goes out in the order Lens Grid Print names its cells. Both match what the print node expects, so the wire is one wire.',
     ],

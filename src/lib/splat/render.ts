@@ -53,11 +53,11 @@ export interface SplatViewOptions {
   /** Render at most this many splats — the editor's preview lever. */
   splatBudget?: number;
   /**
-   * Splats closer to the eye than this are dropped. A splat that passes through
-   * the eye projects to infinity, and a capture is always full of floaters that
-   * would do exactly that.
+   * How far behind the sheet the cull plane sits, mm. 0 is the sheet itself:
+   * everything that would come out of the print is dropped. Raising it pushes
+   * the plane into the scene, keeping only what is at least this far back.
    */
-  nearClipMm?: number;
+  frontMarginMm?: number;
 }
 
 export interface SplatViewRender {
@@ -72,9 +72,11 @@ export interface SplatViewRender {
   /** Where the drawn cloud sits relative to the sheet, mm behind it. */
   nearMm: number;
   farMm: number;
-  /** Splats drawn per view after the cull, and the cull's input. */
+  /** Splats drawn per view after the frame cull, and the cull's input. */
   drawn: number;
   considered: number;
+  /** Splats dropped for standing in front of the sheet. */
+  culled: number;
 }
 
 /** Smallest a splat may be drawn, in px². Below this it aliases into fireflies. */
@@ -94,15 +96,32 @@ export interface CameraSpaceCloud {
   /** Upper triangle of each 3×3 covariance: 00, 01, 02, 11, 12, 22. */
   cov: Float32Array;
   colours: Uint8ClampedArray;
+  /** How many splats the front-of-sheet cull dropped on the way in. */
+  culled: number;
 }
 
 /**
- * Move the cloud into the camera's frame, in millimetres of print.
+ * Move the cloud into the camera's frame, in millimetres of print, dropping
+ * whatever stands in front of the sheet.
  *
  * Two changes of basis at once, which is why it is worth doing in one pass: the
  * rotation into camera axes, and the division by `scale` that turns scene units
  * into millimetres on the sheet. After this the print geometry is the only
  * geometry left — the scene's own units never appear again.
+ *
+ * The camera's position *is* the sheet plane. Not the eye — the eye stands a
+ * viewing distance further back — so what you fly to is what lands on the
+ * paper, in focus, and the rest of the scene arranges itself behind it. It is
+ * the one placement that makes flying and framing the same act: a splat at the
+ * camera position has zero parallax across the whole run, which is exactly what
+ * "in focus" means for a lenticular print.
+ *
+ * And everything nearer than that plane is dropped here, once, rather than per
+ * view — the plane does not move as the eye slides, so neither does the cull.
+ * A print cannot show anything in front of its own surface: a splat there would
+ * have to appear to float off the paper, and the paper's edge would cut through
+ * it the moment it reached the border. Removing it is the honest answer, and it
+ * makes the camera a slicing plane you can push through the scene.
  *
  * The covariance goes through the same transform, but quadratically: Σ' = MΣMᵀ.
  * Rather than build Σ and multiply, `M` is folded straight into the ellipsoid's
@@ -111,30 +130,36 @@ export interface CameraSpaceCloud {
  */
 export function toCameraSpace(cloud: SplatValue, o: SplatViewOptions, budget?: number): CameraSpaceCloud {
   const step = budget && budget < cloud.count ? cloud.count / budget : 1;
-  const count = step > 1 ? Math.floor(cloud.count / step) : cloud.count;
+  const considered = step > 1 ? Math.floor(cloud.count / step) : cloud.count;
   const B = cameraBasis(o.camera.rotationDeg);
   const [cx, cy, cz] = o.camera.position;
   const perMm = 1 / Math.max(1e-9, o.camera.scale);
-  const D = Math.max(1e-6, o.viewDistanceMm);
+  // The cull plane, as a sheet-space z. 0 is the sheet; deeper is further back.
+  const cullAt = -Math.max(0, o.frontMarginMm ?? 0);
 
-  const xyz = new Float32Array(count * 3);
-  const cov = new Float32Array(count * 6);
-  const colours = new Uint8ClampedArray(count * 4);
+  const xyz = new Float32Array(considered * 3);
+  const cov = new Float32Array(considered * 6);
+  const colours = new Uint8ClampedArray(considered * 4);
 
-  for (let i = 0; i < count; i++) {
-    const s = step > 1 ? Math.min(cloud.count - 1, Math.floor(i * step)) : i;
+  let i = 0;
+  for (let k = 0; k < considered; k++) {
+    const s = step > 1 ? Math.min(cloud.count - 1, Math.floor(k * step)) : k;
     const wx = (cloud.positions[s * 3] - cx) * perMm;
     const wy = (cloud.positions[s * 3 + 1] - cy) * perMm;
     const wz = (cloud.positions[s * 3 + 2] - cz) * perMm;
-    // Camera axes: +x right, +y up, −z forward. A point D mm in front of the
-    // camera therefore lands on the sheet plane, which is what makes the print
-    // and the preview the same picture.
+    // Camera axes: +x right, +y up, −z forward. The camera sits on the sheet
+    // plane, so a point level with it lands at z = 0 and anything further along
+    // the view direction goes negative — behind the paper, where it belongs.
     const qx = B[0] * wx + B[1] * wy + B[2] * wz;
     const qy = B[3] * wx + B[4] * wy + B[5] * wz;
     const qz = B[6] * wx + B[7] * wy + B[8] * wz;
+    // The test is on the centre, so a splat straddling the plane keeps its
+    // whole ellipsoid — there is no way to cut one in half, and a fringe of
+    // half-emerged splats reads better than a hard edge through them.
+    if (qz > cullAt) continue;
     xyz[i * 3] = qx;
     xyz[i * 3 + 1] = qy;
-    xyz[i * 3 + 2] = D + qz;
+    xyz[i * 3 + 2] = qz;
 
     // A = B · R, columns then scaled by the ellipsoid radii.
     const rx = cloud.rotations[s * 4],
@@ -173,8 +198,18 @@ export function toCameraSpace(cloud: SplatValue, o: SplatViewOptions, budget?: n
     cov[i * 6 + 5] = a20 * a20 + a21 * a21 + a22 * a22;
 
     for (let a = 0; a < 4; a++) colours[i * 4 + a] = cloud.colours[s * 4 + a];
+    i++;
   }
-  return { count, xyz, cov, colours };
+  // Views over the filled prefix rather than copies: the cull usually keeps
+  // most of the cloud, and re-packing tens of megabytes to reclaim the tail
+  // would cost more than the tail is worth.
+  return {
+    count: i,
+    xyz: xyz.subarray(0, i * 3),
+    cov: cov.subarray(0, i * 6),
+    colours: colours.subarray(0, i * 4),
+    culled: considered - i,
+  };
 }
 
 /** One view's worth of scratch, reused across the run. */
@@ -226,7 +261,6 @@ function drawView(
   h: number,
 ): ViewAccum {
   const D = Math.max(1e-6, o.viewDistanceMm);
-  const nearClip = Math.max(0.001, o.nearClipMm ?? 1);
   const pxPerMm = w / Math.max(1e-6, o.widthMm);
   const halfW = o.widthMm / 2;
   // The raster's aspect is the sheet's, by construction — h/w = heightMm/widthMm
@@ -241,9 +275,9 @@ function drawView(
   for (let i = 0; i < cam.count; i++) {
     if (cam.colours[i * 4 + 3] === 0) continue;
     const z = cam.xyz[i * 3 + 2];
-    // Distance in front of the eye is D − z; anything at or through the eye
-    // plane projects to infinity.
-    if (D - z < nearClip) continue;
+    // Nothing survives `toCameraSpace` in front of the sheet, so the eye — a
+    // whole viewing distance further back — can never be reached, and there is
+    // no near plane left to clip against.
     const t = D / (D - z);
     const X = eyeX + t * (cam.xyz[i * 3] - eyeX);
     const Y = eyeY + t * (cam.xyz[i * 3 + 1] - eyeY);
@@ -487,6 +521,7 @@ export function* splatViewChunks(
     farMm,
     drawn,
     considered: cam.count,
+    culled: cam.culled,
   };
 }
 
@@ -520,26 +555,30 @@ export function renderSplatPreview(
     grid: 1,
     background: [255, 255, 255],
     supersample: 1,
-    nearClipMm: 1,
+    frontMarginMm: 0,
     ...o,
   }).views[0];
 }
 
-/** Where the drawn cloud ended up relative to the sheet, for the reports. */
+/**
+ * Where the drawn cloud ended up relative to the sheet, for the reports.
+ *
+ * It is always a window now — the cull guarantees it — so this says how deep a
+ * one, which is the number that decides whether the parallax is printable.
+ */
 export function describePlacementOf(render: SplatViewRender): string {
-  const near = render.nearMm;
-  const far = render.farMm;
-  if (near <= 0 && far <= 0) {
-    return `Everything drawn stands in front of the sheet (${(-near).toFixed(0)}–${(-far).toFixed(0)} mm) — ` +
-      'the print is one big pop-out and the paper edge will cut through it. Move the camera back.';
-  }
-  if (near < 0) {
+  if (render.considered === 0) {
     return (
-      `The cloud reaches ${(-near).toFixed(0)} mm out through the plate and ${far.toFixed(0)} mm into it. ` +
-      'Keep whatever is in front clear of the sheet edges.'
+      'Nothing survived: every splat stood in front of the sheet. The camera is inside the scene ' +
+      'looking out of it, or past it altogether — the sheet sits *at* the camera, so fly back to ' +
+      'put the scene in front of you.'
     );
   }
-  return `The cloud sits ${near.toFixed(0)}–${far.toFixed(0)} mm behind the sheet, all of it — a window.`;
+  return (
+    `The cloud sits ${render.nearMm.toFixed(0)}–${render.farMm.toFixed(0)} mm behind the sheet, all of ` +
+    'it — a window. Nothing crosses the plane, so nothing can float in front of the paper edge and be ' +
+    'cut off by it, and the edges of the sheet occlude the scene as you move.'
+  );
 }
 
 /** Keep a negative setback sane, re-exported so the nodes need one import. */

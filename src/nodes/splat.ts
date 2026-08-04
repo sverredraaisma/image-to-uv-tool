@@ -173,9 +173,11 @@ export const splatCameraNode: NodeDefinition = {
   description:
     'Fly a camera through a splat scene and keep where you stopped. Open the editor and use W/A/S/D to ' +
     'move, Space and Shift for up and down, and the mouse to look — the preview is the head-on view of ' +
-    'the print itself, framed by the sheet outline, so what you compose is what gets printed. Scroll to ' +
-    'change how much of the scene the sheet spans. Position, rotation and scale go out on one wire into ' +
-    'Splat → Views. Wire one cloud into several cameras to print the same capture from several places.',
+    'the print itself, so what you compose is what gets printed. Where you stand is the sheet: whatever ' +
+    'the camera sits on lands on the paper in focus, and everything nearer is dropped, so flying forward ' +
+    'pushes a slicing plane through the capture. Scroll to change how much of the scene the sheet spans. ' +
+    'Position, rotation and scale go out on one wire into Splat → Views. Wire one cloud into several ' +
+    'cameras to print the same capture from several places.',
   autoRun: true,
   customEditor: 'splatCamera',
   inputs: [{ id: 'splat', label: 'Splat cloud', type: 'splat', required: true }],
@@ -271,7 +273,7 @@ export function splatViewOptionsFromConfig(config: NodeConfig, camera: Transform
     background: hexToRgb(str(config.background, '#ffffff')),
     supersample: Math.min(3, Math.max(1, Math.round(num(config.supersample, 1)))),
     splatBudget: Math.max(0, Math.round(num(config.splatBudget, 0))) || undefined,
-    nearClipMm: Math.max(0.001, num(config.nearClipMm, 5)),
+    frontMarginMm: Math.max(0, num(config.frontMarginMm, 0)),
   };
 }
 
@@ -290,7 +292,14 @@ export const viewCount = (o: SplatViewOptions): number =>
 export function describeSplatViews(
   config: NodeConfig,
   o: SplatViewOptions,
-  render: { nearMm: number; farMm: number; coverage: number; drawn: number; considered: number },
+  render: {
+    nearMm: number;
+    farMm: number;
+    coverage: number;
+    drawn: number;
+    considered: number;
+    culled: number;
+  },
   disparity: { mm: number; lenslets: number },
   placement: string,
 ): string {
@@ -313,7 +322,10 @@ export function describeSplatViews(
     `Scale ${o.camera.scale} scene units per mm — the sheet spans ` +
       `${(o.camera.scale * o.widthMm).toFixed(3)} units of the scene`,
     placement,
-    `Drew ${render.drawn.toLocaleString()} of ${render.considered.toLocaleString()} splats, covering ` +
+    `Cull: dropped ${render.culled.toLocaleString()} splats standing in front of the sheet` +
+      (num(config.frontMarginMm, 0) > 0 ? ` or within ${num(config.frontMarginMm, 0)} mm behind it` : '') +
+      `, kept ${render.considered.toLocaleString()}`,
+    `Drew ${render.drawn.toLocaleString()} of ${render.considered.toLocaleString()} kept splats, covering ` +
       `${(render.coverage * 100).toFixed(0)}% of the frame`,
     `Parallax ${disparity.lenslets.toFixed(2)} lenslets per view step at the far edge of the cloud ` +
       `(${disparity.mm.toFixed(3)} mm at ${lpi} LPI)`,
@@ -333,7 +345,19 @@ export function describeSplatViews(
         `looks like anyway — the sheet plane stays sharp. Past ${MAX_HAZE_LENSLETS} it doubles.`,
     );
   }
-  if (render.coverage < 0.2) {
+  if (render.considered === 0) {
+    lines.push(
+      '⚠ Every splat was culled. The camera position *is* the sheet, and the whole scene is in front ' +
+        'of it — fly backwards until the scene is ahead of you, or press “Frame the scene”.',
+    );
+  } else if (render.culled > render.considered) {
+    lines.push(
+      `· More of the scene was culled than kept. That is normal once the camera is inside a capture — ` +
+        `the sheet is a plane through it and everything nearer than that plane cannot be printed — but ` +
+        `if you meant to have the whole scene, fly back until it is all ahead of you.`,
+    );
+  }
+  if (render.coverage < 0.2 && render.considered > 0) {
     lines.push(
       `⚠ The cloud covers only ${(render.coverage * 100).toFixed(0)}% of the frame — mostly paper. ` +
         `Reframe in the Splat Camera editor, or lower the scale so the sheet spans less of the scene.`,
@@ -362,7 +386,8 @@ export const splatViewsNode: NodeDefinition = {
     'window either way, with the sheet plane pin-sharp and everything off it separating as you move. ' +
     'Unlike the heightmap route, nothing here is invented: a splat scene is a real 3D scene, so an edge ' +
     'moving aside uncovers what was actually behind it. Wire a Splat Camera into Camera to say where ' +
-    'you are standing. Manual: click Run.',
+    'you are standing — that camera is the sheet plane, and anything in front of it is culled, since a ' +
+    'print cannot show what would come out of the paper. Manual: click Run.',
   autoRun: false,
   inputs: [
     { id: 'splat', label: 'Splat cloud', type: 'splat', required: true },
@@ -406,9 +431,9 @@ export const splatViewsNode: NodeDefinition = {
     { kind: 'number', key: 'supersample', label: 'Supersample (1–3)', min: 1, max: 3, step: 1, advanced: true },
     {
       kind: 'number',
-      key: 'nearClipMm',
-      label: 'Near clip (mm in front of the eye)',
-      min: 0.1,
+      key: 'frontMarginMm',
+      label: 'Cull plane (mm behind the sheet)',
+      min: 0,
       step: 1,
       advanced: true,
     },
@@ -442,9 +467,9 @@ export const splatViewsNode: NodeDefinition = {
     // than a hard-edged triangle, so there is far less aliasing to average away
     // and the fourfold cost buys very little.
     supersample: 1,
-    // Captures are full of floaters right in front of the camera; anything
-    // nearer than this would smear across the whole frame.
-    nearClipMm: 5,
+    // 0 is the sheet itself: everything that would come out of the print is
+    // dropped. Raise it to push the cull deeper into the scene.
+    frontMarginMm: 0,
     splatBudget: 0,
     mirrorViews: true,
     flipDepth: false,

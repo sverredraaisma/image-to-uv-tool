@@ -273,6 +273,23 @@ describe('splat nodes', () => {
     expect((out.info as { text: string }).text).toMatch(/scene units per mm/);
   });
 
+  it('reports the front-of-sheet cull, and warns when it took everything', async () => {
+    const c = cloud(); // four splats, 400–420 mm down −Z from the origin
+    // A camera standing past the scene: everything is behind it, so everything
+    // is in front of the sheet and none of it can print.
+    const past = camera({ position: [0, 0, -1000] });
+    const out = await splatViewsNode.compute(ctx({ splat: c, camera: past }, viewsConfig()));
+    const text = (out.info as { text: string }).text;
+    expect(text).toMatch(/dropped 4 splats standing in front of the sheet/);
+    expect(text).toMatch(/⚠ Every splat was culled/);
+
+    // And from a camera on the near face, nothing is dropped.
+    const infront = camera({ position: [0, 0, -390] });
+    const kept = (await splatViewsNode.compute(ctx({ splat: c, camera: infront }, viewsConfig())))
+      .info as { text: string };
+    expect(kept.text).toMatch(/dropped 0 splats/);
+  });
+
   it('warns when the cloud barely covers the sheet', async () => {
     // A camera a long way off makes the scene a speck.
     const far = camera({ position: [0, 0, 40000], scale: 100 });
