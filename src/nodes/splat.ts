@@ -38,6 +38,26 @@ import { MAX_HAZE_LENSLETS, coneFromConfig } from './model3d';
 import { MAX_STEP_LENSLETS, MAX_VIEWS, MIN_VIEWS } from './modelStereo';
 import { asSplat, asTransform, bool, num, str } from './helpers';
 
+/**
+ * The uploaded file's bytes, whichever way this graph stored them.
+ *
+ * New uploads are kept as raw bytes and this is a straight read. The data-URL
+ * paths are for graphs saved before that: a splat file big enough to matter
+ * cannot survive base64 — 1.37× on top of a few hundred megabytes, and past
+ * ~390 MB the encoded string is longer than the engine will allocate at all —
+ * but a small one saved the old way should still open.
+ */
+async function uploadedBytes(config: NodeConfig): Promise<Uint8Array | null> {
+  const bytesRef = str(config.bytesRef);
+  if (isBlobRef(bytesRef)) {
+    const bytes = await platform.getBytes(bytesRef);
+    if (bytes) return bytes;
+  }
+  let src = str(config.src);
+  if (!src && isBlobRef(config.srcRef)) src = (await platform.getBlob(config.srcRef)) ?? '';
+  return src ? dataUrlToBytes(src) : null;
+}
+
 /** Bytes behind an uploaded file's data URL. */
 function dataUrlToBytes(src: string): Uint8Array {
   const comma = src.indexOf(',');
@@ -118,17 +138,12 @@ export const splatInputNode: NodeDefinition = {
     { id: 'info', label: 'Info', type: 'text' },
   ],
   configFields: [],
-  defaultConfig: () => ({ src: '', srcRef: '', name: '' }),
+  defaultConfig: () => ({ bytesRef: '', src: '', srcRef: '', name: '' }),
   compute: async ({ config, onProgress, signal }) => {
-    // Same storage shape as Image Input and 3D Model Input: inline bytes on
-    // legacy graphs, otherwise an out-of-band blob reference.
-    let src = str(config.src);
-    if (!src && isBlobRef(config.srcRef)) src = (await platform.getBlob(config.srcRef)) ?? '';
-    if (!src) return { out: undefined, info: undefined };
-
-    onProgress?.('Reading splat file…');
-    const bytes = dataUrlToBytes(src);
     const name = str(config.name);
+    const bytes = await uploadedBytes(config);
+    if (!bytes) return { out: undefined, info: undefined };
+    onProgress?.('Reading splat file…');
 
     // A SOG bundle is a ZIP of textures rather than a list of splats, so it
     // needs its own reader — and its own module, which a graph reading plain

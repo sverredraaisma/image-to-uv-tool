@@ -24,6 +24,15 @@ export interface Platform {
   putBlob(dataUrl: string): Promise<string>;
   /** Resolve a blob reference back to its data URL (null if unknown). */
   getBlob(ref: string): Promise<string | null>;
+  /**
+   * Store raw bytes out of band, returning a reference. For uploads too large
+   * to make a data URL of — a splat capture is routinely hundreds of megabytes,
+   * where base64 costs 1.37× on top and can exceed the engine's maximum string
+   * length outright.
+   */
+  putBytes(bytes: Uint8Array): Promise<string>;
+  /** Resolve a reference from {@link putBytes} back to its bytes. */
+  getBytes(ref: string): Promise<Uint8Array | null>;
   /** Optional: run a heavy image op off the main thread (Web Worker pool). */
   runImageOp?(name: string, img: RasterImage, config: NodeConfig): Promise<RasterImage>;
   /** Optional: build a heightmap STL off the main thread (Web Worker pool). */
@@ -42,6 +51,8 @@ export const platform: Platform = {
   fetchImage: notReady,
   putBlob: notReady,
   getBlob: notReady,
+  putBytes: notReady,
+  getBytes: notReady,
 };
 
 export function setPlatform(p: Partial<Platform>): void {

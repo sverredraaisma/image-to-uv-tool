@@ -47,7 +47,7 @@ export function createPipelineLibrary(backend: BlobBackend): PipelineLibrary {
     },
     async load(name) {
       const raw = await backend.get(key(name));
-      if (!raw) return null;
+      if (typeof raw !== 'string') return null; // text-only store
       try {
         const parsed = JSON.parse(raw);
         return isSavedPipeline(parsed) ? parsed : null;

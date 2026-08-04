@@ -24,7 +24,7 @@
 
 import type { SplatValue } from '../../types';
 import type { ChunkProgress } from '../chunked';
-import { MAX_SPLATS, decimate } from './cloud';
+import { MAX_SPLATS } from './cloud';
 
 /**
  * The zeroth spherical-harmonic basis function, 1/(2√π).
@@ -161,20 +161,30 @@ function readScalar(view: DataView, at: number, type: string): number {
   }
 }
 
-/** How many splats will be read from a file of this size, before decimation. */
-const kept = (count: number) => Math.min(count, MAX_SPLATS * 4);
+/**
+ * How to walk a file of `count` splats while keeping at most {@link MAX_SPLATS}.
+ *
+ * The stride is applied *while reading*, not afterwards. Reading everything and
+ * thinning at the end would allocate four or five times the arrays it keeps —
+ * on a capture large enough to need thinning, that is the allocation most
+ * likely to fail — and it buys nothing, because an even stride over the whole
+ * file is the same set of splats whichever end you do it from.
+ */
+function walk(count: number): { total: number; step: number; dropped: number } {
+  const total = Math.min(count, MAX_SPLATS);
+  return { total, step: count > MAX_SPLATS ? count / MAX_SPLATS : 1, dropped: count - total };
+}
 
 /**
  * Decode a PLY splat file, a band of rows at a time.
  *
- * The row cap is generous rather than absent: a 4-million-splat file is read in
- * full and then thinned to {@link MAX_SPLATS}, because thinning after reading
- * samples the whole scene evenly, while stopping early would keep whichever
- * corner of it the trainer happened to write first.
+ * A file past {@link MAX_SPLATS} is strided rather than truncated — see
+ * {@link walk}. Stopping early would keep whichever corner of the scene the
+ * trainer happened to write first; a stride keeps all of it, at lower density.
  */
 export function* parsePlyChunks(bytes: Uint8Array, name = ''): Generator<ChunkProgress, SplatValue> {
   const header = parsePlyHeader(bytes);
-  const total = kept(header.count);
+  const { total, step, dropped } = walk(header.count);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const p = header.properties;
 
@@ -201,7 +211,8 @@ export function* parsePlyChunks(bytes: Uint8Array, name = ''): Generator<ChunkPr
 
   const BAND = 50_000;
   for (let i = 0; i < total; i++) {
-    const row = header.dataStart + i * header.stride;
+    const src = step > 1 ? Math.min(header.count - 1, Math.floor(i * step)) : i;
+    const row = header.dataStart + src * header.stride;
     if (row + header.stride > bytes.byteLength) {
       throw new Error(`PLY ends after ${i.toLocaleString()} of ${header.count.toLocaleString()} splats.`);
     }
@@ -238,17 +249,7 @@ export function* parsePlyChunks(bytes: Uint8Array, name = ''): Generator<ChunkPr
     }
   }
 
-  const cloud: SplatValue = {
-    kind: 'splat',
-    count: total,
-    positions,
-    scales,
-    rotations,
-    colours,
-    name,
-    droppedCount: header.count - total,
-  };
-  return decimate(cloud, MAX_SPLATS);
+  return { kind: 'splat', count: total, positions, scales, rotations, colours, name, droppedCount: dropped };
 }
 
 /** Bytes per splat in the .splat format: 12 position, 12 scale, 4 colour, 4 rotation. */
@@ -271,7 +272,7 @@ export function* parseSplatChunks(bytes: Uint8Array, name = ''): Generator<Chunk
     );
   }
   const count = bytes.byteLength / SPLAT_RECORD_BYTES;
-  const total = kept(count);
+  const { total, step, dropped } = walk(count);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
   const positions = new Float32Array(total * 3);
@@ -281,7 +282,7 @@ export function* parseSplatChunks(bytes: Uint8Array, name = ''): Generator<Chunk
 
   const BAND = 50_000;
   for (let i = 0; i < total; i++) {
-    const at = i * SPLAT_RECORD_BYTES;
+    const at = (step > 1 ? Math.min(count - 1, Math.floor(i * step)) : i) * SPLAT_RECORD_BYTES;
     for (let a = 0; a < 3; a++) {
       positions[i * 3 + a] = view.getFloat32(at + a * 4, true);
       scales[i * 3 + a] = view.getFloat32(at + 12 + a * 4, true);
@@ -302,17 +303,7 @@ export function* parseSplatChunks(bytes: Uint8Array, name = ''): Generator<Chunk
     }
   }
 
-  const cloud: SplatValue = {
-    kind: 'splat',
-    count: total,
-    positions,
-    scales,
-    rotations,
-    colours,
-    name,
-    droppedCount: count - total,
-  };
-  return decimate(cloud, MAX_SPLATS);
+  return { kind: 'splat', count: total, positions, scales, rotations, colours, name, droppedCount: dropped };
 }
 
 /** Which of the two decoders a file wants, by its magic rather than its name. */

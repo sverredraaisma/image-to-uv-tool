@@ -14,6 +14,8 @@ import { nodePorts } from '../engine/ports';
 import { isCompatible } from '../engine/compatibility';
 import { mapsSequencesByDefault } from '../engine/sequenceMap';
 import { makeZip } from '../lib/zip';
+import { createBlobStore, memoryBackend } from '../lib/blobStore';
+import { MAX_SPLATS } from '../lib/splat/cloud';
 import { platform, setPlatform } from '../lib/platform';
 import type { ComputeContext, DataValue, RasterImage, SequenceValue, SplatValue, TransformValue } from '../types';
 // The source of the files whose import graph this suite pins. `?raw` keeps it
@@ -351,5 +353,70 @@ describe('the splat code stays split out of the main bundle', () => {
     // heavy module in behind it.
     const heavy = staticImports(cloudSource).filter((i) => /parse|render/.test(i.from));
     expect(heavy.filter((i) => !i.typeOnly)).toEqual([]);
+  });
+});
+
+describe('loading a large file', () => {
+  /** A binary PLY of `count` splats, all distinguishable by their x position. */
+  function plyOf(count: number): Uint8Array {
+    const props = [
+      'x', 'y', 'z', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity',
+      'scale_0', 'scale_1', 'scale_2', 'rot_0', 'rot_1', 'rot_2', 'rot_3',
+    ];
+    const header =
+      `ply\nformat binary_little_endian 1.0\nelement vertex ${count}\n` +
+      props.map((p) => `property float ${p}\n`).join('') +
+      'end_header\n';
+    const head = new TextEncoder().encode(header);
+    const body = new Float32Array(count * props.length);
+    for (let i = 0; i < count; i++) {
+      body[i * props.length] = i; // x = the splat's index in the file
+      body[i * props.length + 10] = 1; // rot_0 = w
+    }
+    const out = new Uint8Array(head.length + body.byteLength);
+    out.set(head, 0);
+    out.set(new Uint8Array(body.buffer), head.length);
+    return out;
+  }
+
+  it('reads the bytes an upload stored, without a data URL anywhere', async () => {
+    const store = createBlobStore(memoryBackend());
+    const restore = { putBytes: platform.putBytes, getBytes: platform.getBytes };
+    setPlatform({ putBytes: store.putBytes, getBytes: store.getBytes });
+    try {
+      // What NodeView does for a splat upload: raw bytes in, a short ref out.
+      const ref = await platform.putBytes(plyOf(3));
+      const out = await splatInputNode.compute(ctx({}, { bytesRef: ref, name: 'scene.ply' }));
+      const cloud = out.out as SplatValue;
+      expect(cloud.count).toBe(3);
+      expect([...cloud.positions.filter((_, i) => i % 3 === 0)]).toEqual([0, 1, 2]);
+    } finally {
+      setPlatform(restore);
+    }
+  });
+
+  it('still opens a graph that stored a data URL the old way', async () => {
+    const bytes = plyOf(2);
+    const b64 = btoa(String.fromCharCode(...bytes));
+    const out = await splatInputNode.compute(
+      ctx({}, { src: `data:application/octet-stream;base64,${b64}`, name: 'old.ply' }),
+    );
+    expect((out.out as SplatValue).count).toBe(2);
+  });
+
+  it('strides a file past the cap instead of reading it all and throwing most away', async () => {
+    // The allocation that matters: a cloud over the budget must never build
+    // arrays bigger than the budget on the way to being thinned.
+    const { parseSplatFile } = await import('../lib/splat/parse');
+    const over = MAX_SPLATS + 1000;
+    const cloud = parseSplatFile(plyOf(over), 'big.ply');
+    expect(cloud.count).toBe(MAX_SPLATS);
+    expect(cloud.droppedCount).toBe(over - MAX_SPLATS);
+    // The arrays are exactly the size of what was kept — not of what was read.
+    expect(cloud.positions.length).toBe(MAX_SPLATS * 3);
+    // And the stride spans the whole file rather than its first slice: the last
+    // splat kept comes from near the end of the file.
+    const lastX = cloud.positions[(MAX_SPLATS - 1) * 3];
+    expect(lastX).toBeGreaterThan(over * 0.99);
   });
 });
