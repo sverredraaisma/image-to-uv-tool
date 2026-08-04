@@ -4,6 +4,7 @@ import {
   MAX_OUTPUT_PIXELS,
   MAX_OVERSIZE_PIXELS,
   OversizeOutputError,
+  calibrationPixelsPerLens,
   calibrationValues,
   chunkCount,
   chunkRows,
@@ -592,9 +593,22 @@ describe('switchFrames', () => {
     expect([...frames[1].data]).toEqual([0, 0, 0, 255]);
   });
 
-  it('ramps evenly through grey for more frames', () => {
-    expect(switchFrames(3).map((f) => f.data[0])).toEqual([255, 128, 0]);
-    expect(switchFrames(5).map((f) => f.data[0])).toEqual([255, 191, 128, 64, 0]);
+  it('alternates black and white rather than ramping through grey', () => {
+    // The fastest switch the view count allows, so any crosstalk between
+    // neighbouring views shows up as a grey that was never printed. A ramp
+    // would ask the lens to resolve a gradient — which is what a lens that has
+    // failed produces anyway, so the working and broken bands would look alike.
+    expect(switchFrames(3).map((f) => f.data[0])).toEqual([255, 0, 255]);
+    expect(switchFrames(5).map((f) => f.data[0])).toEqual([255, 0, 255, 0, 255]);
+    expect(switchFrames(8).map((f) => f.data[0])).toEqual([255, 0, 255, 0, 255, 0, 255, 0]);
+  });
+
+  it('is pure black and white, with nothing in between', () => {
+    for (const n of [2, 3, 7, 12]) {
+      for (const frame of switchFrames(n)) {
+        expect([0, 255]).toContain(frame.data[0]);
+      }
+    }
   });
 
   it('never returns fewer than two frames', () => {
@@ -718,5 +732,75 @@ describe('pitch as pixels per lens', () => {
       stripSamples: 2,
     };
     expect(lensGeometry(settings).pitchPx).toBe(pixelsPerLens(settings));
+  });
+});
+
+describe('snapping an LPI sweep to whole pixels per lens', () => {
+  const spec = (over: Partial<CalibrationSpec> = {}): CalibrationSpec => ({
+    param: 'lpi',
+    min: 40,
+    max: 50,
+    bands: 9,
+    ppi: 1440,
+    snapPpl: true,
+    ...over,
+  });
+
+  it('lands every band on a whole number of pixels', () => {
+    for (const lpi of calibrationValues(spec())) {
+      const ppl = 1440 / lpi;
+      expect(ppl).toBeCloseTo(Math.round(ppl), 9);
+    }
+  });
+
+  it('sweeps the whole pitches the range actually contains', () => {
+    // 40–50 LPI at 1440 PPI is 36 px down to 28.8 px, so the whole pitches in
+    // range are 36 … 29 — eight of them, from nine evenly spaced samples.
+    expect(calibrationPixelsPerLens(spec()).map(Math.round)).toEqual([36, 35, 34, 33, 32, 31, 30, 29]);
+  });
+
+  it('collapses bands that would print the same pitch twice', () => {
+    // A narrow range holds few whole pitches however many bands are asked for;
+    // printing one of them twice would measure nothing.
+    const narrow = calibrationPixelsPerLens(spec({ min: 44, max: 46, bands: 9 }));
+    expect(narrow.map(Math.round)).toEqual([33, 32, 31]);
+    expect(new Set(narrow).size).toBe(narrow.length);
+  });
+
+  it('leaves the sweep alone when snapping is off, or the raster is unknown', () => {
+    const raw = calibrationValues(spec({ snapPpl: false }));
+    expect(raw).toHaveLength(9);
+    expect(raw[0]).toBe(40);
+    expect(raw[8]).toBe(50);
+    // Without a PPI there is no raster to snap to, so it cannot silently guess.
+    expect(calibrationValues(spec({ ppi: undefined }))).toEqual(raw);
+  });
+
+  it('only touches the LPI sweep', () => {
+    const height = calibrationValues(spec({ param: 'height', min: 0.6, max: 1.4, bands: 5 }));
+    expect(height).toHaveLength(5);
+    height.forEach((v, i) => expect(v).toBeCloseTo(0.6 + i * 0.2, 9));
+    expect(calibrationPixelsPerLens(spec({ param: 'ri' }))).toEqual([]);
+  });
+
+  it('reports the pitches a raw sweep lands on too, fractions and all', () => {
+    // Same range unsnapped: 36 px at one end, 28.8 at the other — and nothing
+    // in between that a raster can repeat.
+    const raw = calibrationPixelsPerLens(spec({ snapPpl: false }));
+    expect(raw[0]).toBeCloseTo(36, 9);
+    expect(raw[8]).toBeCloseTo(28.8, 9);
+    expect(raw.filter((v) => Math.abs(v - Math.round(v)) < 1e-9)).toHaveLength(2);
+  });
+
+  it('renders a snapped sweep with one band per distinct pitch', () => {
+    const s = settings({ ppi: 1440, widthMm: 25.4, lpi: 45 });
+    const calibration = spec({ min: 44, max: 46, bands: 9 });
+    const r = renderLenticular([RED, BLUE], s, {
+      interlacedSize: ART,
+      calibration,
+    });
+    // Three distinct pitches in that range, so three bands on the sheet.
+    expect(r.bands).toHaveLength(3);
+    expect(r.bands.map((b) => Math.round(1440 / (b.value ?? 0)))).toEqual([33, 32, 31]);
   });
 });

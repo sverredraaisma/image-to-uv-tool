@@ -309,14 +309,62 @@ export interface CalibrationSpec {
    * the height it needs to focus at all, and compares a broken lens.
    */
   autoHeight?: boolean;
+  /**
+   * LPI sweeps only: move every band to the nearest pitch that is a whole
+   * number of printed pixels wide.
+   *
+   * Without it a sweep is not measuring only what it claims to. An evenly
+   * spaced run of LPI values lands almost entirely on fractional pitches, and a
+   * fractional pitch makes every lenticule in that band slightly different from
+   * its neighbour — so a band can read badly because the pitch is wrong, or
+   * because the pitch does not fit the raster, and the sheet cannot tell you
+   * which. Snapping removes the second cause, and what is left is the lens.
+   *
+   * Bands that snap onto the same pitch collapse into one, so a snapped sweep
+   * can have fewer bands than asked for: there are only so many whole pitches
+   * between two LPI values, and printing one of them twice measures nothing.
+   */
+  snapPpl?: boolean;
+  /** The raster {@link snapPpl} snaps against. Without it, snapping is a no-op. */
+  ppi?: number;
 }
 
-/** The value each band of a calibration sheet is printed at. */
+/**
+ * The value each band of a calibration sheet is printed at.
+ *
+ * Evenly spaced across the range, except for a snapped LPI sweep — see
+ * {@link CalibrationSpec.snapPpl}, which both moves the values and can return
+ * fewer of them than `bands` asked for.
+ */
 export function calibrationValues(spec: CalibrationSpec): number[] {
   const bands = Math.max(2, Math.round(spec.bands));
   const lo = Math.min(spec.min, spec.max);
   const hi = Math.max(spec.min, spec.max);
-  return Array.from({ length: bands }, (_, i) => lo + ((hi - lo) * i) / (bands - 1));
+  const even = Array.from({ length: bands }, (_, i) => lo + ((hi - lo) * i) / (bands - 1));
+  if (spec.param !== 'lpi' || !spec.snapPpl || !spec.ppi || spec.ppi <= 0) return even;
+
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const lpi of even) {
+    const ppl = snapPixelsPerLens(spec.ppi / Math.max(1e-6, lpi));
+    if (seen.has(ppl)) continue;
+    seen.add(ppl);
+    out.push(lpiForPixelsPerLens(spec.ppi, ppl));
+  }
+  return out;
+}
+
+/**
+ * How many printed pixels each band of a sweep gives one lenticule.
+ *
+ * The number to write down when you have picked a band off the sheet: it is
+ * what you set the print back to, and — snapped — it is a whole number you can
+ * read off without a calculator. Empty for the sweeps where pitch is not what
+ * is changing.
+ */
+export function calibrationPixelsPerLens(spec: CalibrationSpec): number[] {
+  if (spec.param !== 'lpi' || !spec.ppi || spec.ppi <= 0) return [];
+  return calibrationValues(spec).map((lpi) => spec.ppi! / Math.max(1e-6, lpi));
 }
 
 /**
@@ -359,15 +407,29 @@ export function withCalibrationValue<T extends LenticularSettings>(
 }
 
 /**
- * Solid frames that read as a hard switch: frame 0 white through to black on
- * the last. With two frames that is simply white then black — the target for
- * checking *where* a print flips, with none of the artwork's own detail in the
- * way. 1×1 because a lenticular render samples frames normalised.
+ * Solid frames that read as a hard switch: white, black, white, black across
+ * the run, so every adjacent pair is a full-contrast flip.
+ *
+ * Alternating rather than ramped, and the difference is the whole usefulness of
+ * the sheet. A ramp from white to black asks the lens to resolve a *gradient*,
+ * and a gradient is what a lens that has failed produces anyway — the two look
+ * alike, so a band that is blurring and a band that is working read the same at
+ * a glance. Alternating asks the opposite question: it puts the fastest switch
+ * the view count allows under the lens, and then any crosstalk between
+ * neighbouring views is a mid-grey that was never printed. So the band you want
+ * is simply the one that stays black and white as you tilt it, and the ones
+ * that have given up are visibly grey. Nothing to interpret.
+ *
+ * With an odd view count two frames of the same colour have to sit next to each
+ * other somewhere; that seam is the one place a tilt does not flip, and it
+ * falls where the last view wraps back to the first at the edge of the cone.
+ *
+ * 1×1 because a lenticular render samples frames normalised.
  */
 export function switchFrames(count: number): RasterImage[] {
   const n = Math.max(2, Math.round(count));
   return Array.from({ length: n }, (_, i) => {
-    const v = Math.round(255 * (1 - i / (n - 1)));
+    const v = i % 2 === 0 ? 255 : 0;
     return createImage(1, 1, [v, v, v, 255]);
   });
 }

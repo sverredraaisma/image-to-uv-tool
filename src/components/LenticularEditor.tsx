@@ -6,6 +6,7 @@ import { downloadBlob } from '../lib/download';
 import { runChunked } from '../lib/chunked';
 import { encodeGray16Png } from '../lib/png16';
 import {
+  calibrationPixelsPerLens,
   calibrationValues,
   clampGrid,
   gridCellCounts,
@@ -175,6 +176,39 @@ function PitchControl({
 }
 
 /**
+ * The pitches a snapped LPI sweep actually lands on, in printed pixels per lens.
+ *
+ * Worth printing on screen rather than leaving in a tooltip, because it is the
+ * list you work from once the sheet is in your hand: you pick the band that
+ * flips cleanest, count along to its position, and this says what to set the
+ * print to. The LPI it corresponds to is rarely a number anyone would choose —
+ * 28 px at 1440 PPI is 51.43 LPI — which is exactly why the pixel figure is
+ * the one to carry around.
+ */
+function SnappedPitches({ spec, asked }: { spec: CalibrationSpec; asked: number }) {
+  const ppls = calibrationPixelsPerLens(spec);
+  if (!ppls.length) return null;
+  const whole = ppls.map((v) => Math.round(v));
+  const wanted = Math.max(2, Math.round(asked));
+  return (
+    <p className="lenticular-note">
+      The LPI sweep is snapped to whole pixels per lens, so every band is a pitch the raster can actually
+      repeat. Bands, left to right:{' '}
+      <strong className="calib-pitches">{whole.join(' · ')}</strong> px per lens
+      {whole.length < wanted && (
+        <>
+          {' '}
+          — {wanted - whole.length} of the {wanted} bands asked for collapsed onto pitches already in the
+          sweep, because there are only {whole.length} whole ones between those LPI values. Widen the range
+          for more.
+        </>
+      )}
+      . Turn off <em>LPI calib.: snap to whole pixels</em> under Advanced to sweep raw LPI instead.
+    </p>
+  );
+}
+
+/**
  * Shared editor body for both print nodes: the solved lens geometry, plus the
  * downloads that can't travel down a wire — the 16-bit gloss depth map (the
  * canvas is 8-bit, and 8 bits over a 0.9 mm stack terraces the lens) and the
@@ -193,12 +227,15 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
   const mm = (v: number) => `${v.toFixed(3)} mm`;
 
   const autoHeight = bool(config.lpiAutoHeight, true);
+  const snapPpl = bool(config.lpiSnapPpl, true);
   const calibrationSpec = (calib: (typeof CALIBRATIONS)[number]): CalibrationSpec => ({
     param: calib.param,
     min: num(config[calib.minKey], 0),
     max: num(config[calib.maxKey], 0),
     bands: Math.max(2, Math.round(num(config.calibBands, 9))),
     autoHeight,
+    snapPpl,
+    ppi: settings.ppi,
   });
 
   const downloadDepth16 = (map: DepthMapResult, name: string) => {
@@ -263,11 +300,20 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
       const values = calibrationValues(spec);
       const options = withConsent({ calibration: spec, bandGapMm: kind.bandGapMm });
       const art = await drive(kind.renderArt(views, options));
-      const stem = `${kind.slug}-calib-${calib.param}-${slug(values[0])}-to-${slug(values[values.length - 1])}-${values.length}bands`;
+      // A snapped LPI sweep names itself in pixels per lens, because that is
+      // what you read off the sheet and type back in — and because the LPI
+      // values it lands on are things like 51.428.
+      const ppls = calibrationPixelsPerLens(spec);
+      const stem =
+        calib.param === 'lpi' && snapPpl && ppls.length
+          ? `${kind.slug}-calib-lpi-${slug(ppls[0])}-to-${slug(ppls[ppls.length - 1])}px-${values.length}bands`
+          : `${kind.slug}-calib-${calib.param}-${slug(values[0])}-to-${slug(values[values.length - 1])}-${values.length}bands`;
       downloadBlob(await platform.encodePngBlob(art), `${stem}-interlaced.png`);
 
-      // The same sheet with the artwork replaced by a hard white→black switch:
-      // where the print flips, with none of the art's own detail in the way.
+      // The same sheet with the artwork replaced by alternating black and white
+      // views: the fastest switch the view count allows, so a band that is
+      // holding its views apart stays black and white and one that is not goes
+      // grey. None of the art's own detail is in the way.
       // Forced onto the artwork's raster so the two sheets overlay exactly.
       const switched = await drive(
         kind.renderArt(kind.switchViews(), {
@@ -338,9 +384,16 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
       <p className="lenticular-note">
         Each sheet sweeps one setting across {Math.max(2, Math.round(num(config.calibBands, 9)))} bands (min →
         max, set under Advanced) while every other setting stays as it is here. Print one, and read off the
-        band that flips cleanest. Each button downloads three files: the interlaced artwork, a white→black{' '}
-        <em>switch</em> sheet on the same raster (the flip with no artwork detail in the way), and the 16-bit
-        depth map.
+        band that flips cleanest. Each button downloads three files: the interlaced artwork, a{' '}
+        <em>switch</em> sheet on the same raster, and the 16-bit depth map.
+      </p>
+      <p className="lenticular-note">
+        The switch sheet is the one to judge by. Its views alternate pure black and pure white, so every
+        adjacent pair is the fastest flip the view count allows — and any two views the lens fails to keep
+        apart average into a grey that was never printed. So the band you want is simply the one that stays
+        black and white as you tilt it; the ones that have given up are visibly, unmistakably grey. There is
+        no gradient to interpret, which is the point: a lens that has failed produces a gradient all by
+        itself.
       </p>
       {autoHeight ? (
         <p className="lenticular-note">
@@ -359,22 +412,24 @@ function PrintEditor({ config, kind }: { config: NodeConfig; kind: PrintKind }) 
       <div className="lenticular-actions">
         {CALIBRATIONS.map((calib) => {
           const values = calibrationValues(calibrationSpec(calib));
+          const round3 = (v: number) => Math.round(v * 1000) / 1000;
           return (
             <button
               key={calib.param}
               type="button"
               className="btn"
               disabled={!ready || !!busy}
-              title={values.map((v) => Math.round(v * 1000) / 1000).join(', ')}
+              title={values.map(round3).join(', ')}
               onClick={() => downloadCalibration(calib)}
             >
               {busy === calib.param
                 ? 'Rendering…'
-                : `${calib.label}: ${values[0]} → ${values[values.length - 1]}`}
+                : `${calib.label}: ${round3(values[0])} → ${round3(values[values.length - 1])}`}
             </button>
           );
         })}
       </div>
+      {snapPpl && <SnappedPitches spec={calibrationSpec(CALIBRATIONS[2])} asked={num(config.calibBands, 9)} />}
     </div>
   );
 }

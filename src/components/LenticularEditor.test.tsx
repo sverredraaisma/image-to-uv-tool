@@ -85,7 +85,8 @@ describe('LenticularEditor', () => {
 
   it('labels each calibration button with its own min → max range', () => {
     const id = s().addNode('lenticular');
-    s().updateNodeConfig(id, { lpiMin: 30, lpiMax: 70 });
+    // Raw LPI, so this stays a test of the labels rather than of the snap.
+    s().updateNodeConfig(id, { lpiMin: 30, lpiMax: 70, lpiSnapPpl: false });
     render(<LenticularEditor nodeId={id} />);
     expect(screen.getByRole('button', { name: 'Height: 0.6 → 1.4' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'RI: 1.4 → 1.6' })).toBeInTheDocument();
@@ -123,6 +124,7 @@ describe('LenticularEditor', () => {
 
   it('downloads all three sheets of a calibration set', async () => {
     const id = await graphWithFrames();
+    s().updateNodeConfig(id, { lpiSnapPpl: false }); // the raw sweep, for the names
     const names: string[] = [];
     vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() });
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
@@ -150,7 +152,7 @@ describe('LenticularEditor', () => {
   it('holds the height across the LPI sweep when auto height is off', async () => {
     const id = await graphWithFrames();
     const names: string[] = [];
-    s().updateNodeConfig(id, { lpiAutoHeight: false });
+    s().updateNodeConfig(id, { lpiAutoHeight: false, lpiSnapPpl: false });
     vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() });
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
       this: HTMLAnchorElement,
@@ -304,5 +306,58 @@ describe('pitch as pixels per lens', () => {
     s().updateNodeConfig(id, { lpi: 100 / 9 }); // 9 px per lens, 2 views
     render(<LenticularEditor nodeId={id} />);
     expect(screen.getAllByText(/2 views do not divide 9 px/)[0]).toBeInTheDocument();
+  });
+});
+
+describe('the snapped LPI sweep', () => {
+  /** A print-realistic node: 1440 PPI, so the pitches are the ones you'd use. */
+  const press = () => {
+    const id = s().addNode('lenticular'); // 1440 PPI, LPI calib 40 → 50
+    return id;
+  };
+
+  it('lists the pixel sizes it snapped each band to', () => {
+    render(<LenticularEditor nodeId={press()} />);
+    expect(screen.getByText(/snapped to whole pixels per lens/)).toBeInTheDocument();
+    // 40–50 LPI at 1440 PPI: 36 px down to 29.
+    expect(screen.getByText('36 · 35 · 34 · 33 · 32 · 31 · 30 · 29')).toBeInTheDocument();
+  });
+
+  it('says when bands collapsed because the range has no more whole pitches', () => {
+    const id = press();
+    s().updateNodeConfig(id, { lpiMin: 44, lpiMax: 46 });
+    render(<LenticularEditor nodeId={id} />);
+    expect(screen.getByText('33 · 32 · 31')).toBeInTheDocument();
+    expect(screen.getByText(/6 of the 9 bands asked for collapsed/)).toBeInTheDocument();
+  });
+
+  it('says nothing when the sweep is left raw', () => {
+    const id = press();
+    s().updateNodeConfig(id, { lpiSnapPpl: false });
+    render(<LenticularEditor nodeId={id} />);
+    expect(screen.queryByText(/snapped to whole pixels per lens/)).not.toBeInTheDocument();
+  });
+
+  it('labels the button and the files in pixels, not in awkward LPI', async () => {
+    const id = await graphWithFrames(); // 100 PPI, 10 LPI
+    s().updateNodeConfig(id, { lpiMin: 40, lpiMax: 50 });
+    const names: string[] = [];
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      names.push(this.download);
+    });
+    setPlatform({ encodePngBlob: async () => new Blob([new Uint8Array([1])], { type: 'image/png' }) });
+
+    render(<LenticularEditor nodeId={id} />);
+    // At 100 PPI the 40–50 LPI range holds only 3 px and 2 px per lens, so the
+    // sweep is two bands — and the file says so in pixels, because the LPI it
+    // lands on (33.333) is not a number anyone would type back in.
+    await userEvent.click(screen.getByRole('button', { name: /^LPI:/ }));
+    await waitFor(() => expect(names).toHaveLength(3));
+    expect(names[0]).toBe('lenticular-calib-lpi-3-to-2px-2bands-interlaced.png');
+    click.mockRestore();
+    vi.unstubAllGlobals();
   });
 });

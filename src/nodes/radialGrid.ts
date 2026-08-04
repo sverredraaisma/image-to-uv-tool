@@ -152,6 +152,12 @@ export const radialGridNode: NodeDefinition = {
       label: 'LPI calib.: auto height (match viewing angle)',
       advanced: true,
     },
+    {
+      kind: 'boolean',
+      key: 'lpiSnapPpl',
+      label: 'LPI calib.: snap to whole pixels per lens',
+      advanced: true,
+    },
   ],
   defaultConfig: () => ({
     views: DEFAULT_RADIAL_VIEWS,
@@ -175,6 +181,10 @@ export const radialGridNode: NodeDefinition = {
     lpiMin: 40,
     lpiMax: 50,
     lpiAutoHeight: true,
+    // On by default: an evenly spaced LPI sweep lands almost entirely on
+    // fractional pitches, and a fractional pitch is a second variable the
+    // sheet cannot separate from the one it is meant to be measuring.
+    lpiSnapPpl: true,
   }),
   compute: async ({ inputs, config, onProgress, signal, allowOversize }) => {
     const gathered = gatherRadialViews(inputs, config);
