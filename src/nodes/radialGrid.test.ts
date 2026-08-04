@@ -171,16 +171,18 @@ describe('radial interlace', () => {
 
   it('sizes the artwork for the wedges, capped at what the press can print', () => {
     const s = settings();
-    // 10 cells × 4 views × 2 samples ÷ π: enough that a wedge is two pixels
-    // wide at the rim, which is where a wedge is widest.
-    expect(radialInterlacedSize(s, RING).width).toBe(26);
+    // 10 cells × 4 views × 2 samples ÷ π = 26 px: enough that a wedge is two
+    // pixels wide at the rim, which is where a wedge is widest. Then rounded
+    // up to 3 whole pixels per cell, so every cap divides identically.
+    expect(radialInterlacedSize(s, RING).width).toBe(30);
     // No orientation helps a radial edge, so none of them changes the size…
     expect(radialInterlacedSize({ ...s, orientationDeg: 0 }, RING).width).toBe(
       radialInterlacedSize({ ...s, orientationDeg: 23 }, RING).width,
     );
     // …but more samples do, and they stop at the 100 px the press can print.
     expect(radialInterlacedSize({ ...s, stripSamples: 8 }, RING).width).toBe(100); // capped, wanted 102
-    expect(radialInterlacedSize({ ...s, stripSamples: 4 }, RING).width).toBe(51);
+    // 51 px of floor at four samples, rounded up to 6 whole pixels per cell.
+    expect(radialInterlacedSize({ ...s, stripSamples: 4 }, RING).width).toBe(60);
   });
 
   it('prints the same lens array as the grid does', () => {
@@ -239,12 +241,12 @@ describe('radial node', () => {
   it('renders both halves and reports the geometry', async () => {
     const out = await radialGridNode.compute(ctx(fourInputs, config()));
     // The artwork is sized by the wedges; the lens map keeps the PPI raster.
-    expect((out.interlaced as RasterImage).width).toBe(26);
+    expect((out.interlaced as RasterImage).width).toBe(30);
     expect((out.depth as RasterImage).width).toBe(100);
     const info = (out.info as TextValue).text;
     expect(info).toContain('4 views around the circle, one every 90.0°');
     expect(info).toContain('Head-on all 4 merge');
-    expect(info).toContain('Artwork on the minimal raster: 26 px of the 100 px');
+    expect(info).toContain('Artwork on the minimal raster: 30 px of the 100 px');
     expect(info).toContain('wedge seams');
   });
 
@@ -259,3 +261,36 @@ describe('radial node', () => {
     expect(info).toContain('even at the rim');
   });
 });
+
+describe('every cap on the same pixel grid', () => {
+  const cellsOf = (s: RadialSettings) => (s.widthMm * s.lpi) / 25.4;
+
+  it('gives every cap the same whole number of pixels across', () => {
+    for (const s of [
+      settings(),
+      settings({ stripSamples: 4 }),
+      settings({ views: 6, ppi: 1000 }),
+      settings({ lpi: 13, ppi: 1200 }),
+    ]) {
+      const width = radialInterlacedSize(s, radialRing(s)).width;
+      const cells = cellsOf(s);
+      const perCell = Math.round(width / cells);
+      expect(Math.abs(width - cells * perCell)).toBeLessThan(1);
+    }
+  });
+
+  it('rounds up rather than losing a wedge, and stops at the press', () => {
+    const s = settings({ ppi: 1000 });
+    const floorPx = Math.ceil((cellsOf(s) * 4 * 2) / Math.PI);
+    const width = radialInterlacedSize(s, RING).width;
+    expect(width).toBeGreaterThanOrEqual(floorPx);
+    expect(radialInterlacedSize(settings({ ppi: 100, stripSamples: 8 }), RING).width).toBeLessThanOrEqual(
+      100,
+    );
+  });
+});
+
+/** A ring of the size a settings object asks for, for the sizing tests. */
+function radialRing(s: RadialSettings): RasterImage[] {
+  return Array.from({ length: clampRadialViews(s.views) }, () => RIGHT);
+}

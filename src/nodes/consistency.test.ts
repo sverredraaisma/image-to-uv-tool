@@ -3,7 +3,7 @@ import '../nodes'; // register built-ins
 import { allNodeDefs } from '../engine/registry';
 
 const defs = allNodeDefs().filter((d) => !d.type.startsWith('test.'));
-const VALID_PORT_TYPES = new Set(['image', 'mask', 'text', 'stl', 'sequence']);
+const VALID_PORT_TYPES = new Set(['image', 'mask', 'text', 'stl', 'sequence', 'splat', 'transform']);
 // Pipeline nodes resolve their ports per-instance (from config) via nodePorts,
 // so their static definition ports are intentionally empty.
 const DYNAMIC_PORT_TYPES = new Set(['pipeline', 'pipelineInput', 'pipelineOutput']);

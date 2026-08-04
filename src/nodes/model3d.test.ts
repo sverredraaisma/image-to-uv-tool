@@ -229,8 +229,9 @@ describe('feeding Lens Grid Print from one wire', () => {
     const out = await lensGridNode.compute(
       ctx({ views: rendered.views }, { ...lensGridNode.defaultConfig(), widthMm: 25.4, ppi: 100, lpi: 10 }),
     );
-    // 10 cells × 3 tiles × 2 samples ÷ √3/2 = 70 px, under the 100 px cap.
-    expect((out.interlaced as RasterImage).width).toBe(70);
+    // 10 cells × 3 tiles × 2 samples ÷ √3/2 = 70 px of floor, rounded up to 9
+    // whole pixels per cell (3 per tile column) and still under the 100 px cap.
+    expect((out.interlaced as RasterImage).width).toBe(90);
     if (out.info?.kind === 'text') expect(out.info.text).toContain('3×3 grid = 9 views');
     else throw new Error('expected a text info output');
   });

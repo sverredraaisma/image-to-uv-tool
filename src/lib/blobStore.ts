@@ -6,9 +6,17 @@
 // The store logic is backend-agnostic (inject a BlobBackend) so it is fully
 // unit-testable without IndexedDB; the browser wires in `indexedDbBackend()`.
 
+/**
+ * What a backend stores. Data URLs for images and meshes, raw bytes for
+ * anything big enough that base64 is not affordable — a splat capture is
+ * routinely hundreds of megabytes, where the 1.37× of base64 is the difference
+ * between loading and an allocation failure. IndexedDB stores either natively.
+ */
+export type BlobValue = string | Uint8Array;
+
 export interface BlobBackend {
-  get(key: string): Promise<string | null>;
-  put(key: string, value: string): Promise<void>;
+  get(key: string): Promise<BlobValue | null>;
+  put(key: string, value: BlobValue): Promise<void>;
   keys(): Promise<string[]>;
   delete(key: string): Promise<void>;
 }
@@ -37,11 +45,41 @@ export function contentHash(s: string): string {
   return REF_PREFIX + hex(h1) + hex(h2) + s.length.toString(16);
 }
 
+/**
+ * Content hash of a byte array, in the same shape as {@link contentHash}.
+ *
+ * Four bytes at a time through a DataView: the byte-at-a-time loop that serves
+ * strings would be 300 million iterations for a 300 MB capture, which is a
+ * visible stall on the upload. Reading uint32s makes it a quarter of that, and
+ * the tail is folded in byte-wise so no input length is a special case.
+ */
+export function bytesHash(bytes: Uint8Array): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x811c9dc5 ^ 0x9e3779b9;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const whole = bytes.byteLength - (bytes.byteLength % 4);
+  for (let i = 0; i < whole; i += 4) {
+    const word = view.getUint32(i, true);
+    h1 = Math.imul(h1 ^ word, 16777619);
+    h2 = Math.imul(h2 ^ word, 2246822519);
+  }
+  for (let i = whole; i < bytes.byteLength; i++) {
+    h1 = Math.imul(h1 ^ bytes[i], 16777619);
+    h2 = Math.imul(h2 ^ bytes[i], 2246822519);
+  }
+  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, '0');
+  return REF_PREFIX + hex(h1) + hex(h2) + bytes.byteLength.toString(16);
+}
+
 export interface BlobStore {
   /** Store a data URL, returning its content-hash reference (deduped). */
   put(dataUrl: string): Promise<string>;
   /** Resolve a reference back to its data URL (null if unknown). */
   get(ref: string): Promise<string | null>;
+  /** Store raw bytes, returning their content-hash reference (deduped). */
+  putBytes(bytes: Uint8Array): Promise<string>;
+  /** Resolve a reference back to raw bytes (null if unknown or not bytes). */
+  getBytes(ref: string): Promise<Uint8Array | null>;
   /** Delete every stored blob whose ref is not in `keep`. */
   gc(keep: Iterable<string>): Promise<number>;
 }
@@ -53,8 +91,19 @@ export function createBlobStore(backend: BlobBackend): BlobStore {
       if ((await backend.get(ref)) == null) await backend.put(ref, dataUrl);
       return ref;
     },
-    get(ref) {
-      return backend.get(ref);
+    async get(ref) {
+      const value = await backend.get(ref);
+      return typeof value === 'string' ? value : null;
+    },
+    async putBytes(bytes) {
+      const ref = bytesHash(bytes);
+      if ((await backend.get(ref)) == null) await backend.put(ref, bytes);
+      return ref;
+    },
+    async getBytes(ref) {
+      const value = await backend.get(ref);
+      if (value == null || typeof value === 'string') return null;
+      return value;
     },
     async gc(keep) {
       const keepSet = keep instanceof Set ? keep : new Set(keep);
@@ -71,8 +120,8 @@ export function createBlobStore(backend: BlobBackend): BlobStore {
 }
 
 /** In-memory backend — the default fallback and the test double. */
-export function memoryBackend(seed?: Map<string, string>): BlobBackend {
-  const map = seed ?? new Map<string, string>();
+export function memoryBackend(seed?: Map<string, BlobValue>): BlobBackend {
+  const map = seed ?? new Map<string, BlobValue>();
   return {
     get: (k) => Promise.resolve(map.get(k) ?? null),
     put: (k, v) => {
@@ -111,7 +160,7 @@ export function indexedDbBackend(dbName = 'node-image-tool-blobs', storeName = '
   };
 
   return {
-    get: (k) => tx<string | null>('readonly', (s) => s.get(k)).then((v) => v ?? null),
+    get: (k) => tx<BlobValue | null>('readonly', (s) => s.get(k)).then((v) => v ?? null),
     put: (k, v) => tx('readwrite', (s) => s.put(v, k)).then(() => undefined),
     keys: () => tx<IDBValidKey[]>('readonly', (s) => s.getAllKeys()).then((ks) => ks.map(String)),
     delete: (k) => tx('readwrite', (s) => s.delete(k)).then(() => undefined),

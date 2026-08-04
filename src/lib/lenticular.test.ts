@@ -4,6 +4,8 @@ import {
   MAX_OUTPUT_PIXELS,
   MAX_OVERSIZE_PIXELS,
   OversizeOutputError,
+  alignedInterlaceWidth,
+  calibrationPixelsPerLens,
   calibrationValues,
   chunkCount,
   chunkRows,
@@ -17,6 +19,10 @@ import {
   interlacedSize,
   lensGeometry,
   outputSize,
+  pixelsPerLens,
+  lpiForPixelsPerLens,
+  pplFit,
+  snapPixelsPerLens,
   renderDepthMap,
   renderInterlaced,
   renderLenticular,
@@ -588,9 +594,22 @@ describe('switchFrames', () => {
     expect([...frames[1].data]).toEqual([0, 0, 0, 255]);
   });
 
-  it('ramps evenly through grey for more frames', () => {
-    expect(switchFrames(3).map((f) => f.data[0])).toEqual([255, 128, 0]);
-    expect(switchFrames(5).map((f) => f.data[0])).toEqual([255, 191, 128, 64, 0]);
+  it('alternates black and white rather than ramping through grey', () => {
+    // The fastest switch the view count allows, so any crosstalk between
+    // neighbouring views shows up as a grey that was never printed. A ramp
+    // would ask the lens to resolve a gradient — which is what a lens that has
+    // failed produces anyway, so the working and broken bands would look alike.
+    expect(switchFrames(3).map((f) => f.data[0])).toEqual([255, 0, 255]);
+    expect(switchFrames(5).map((f) => f.data[0])).toEqual([255, 0, 255, 0, 255]);
+    expect(switchFrames(8).map((f) => f.data[0])).toEqual([255, 0, 255, 0, 255, 0, 255, 0]);
+  });
+
+  it('is pure black and white, with nothing in between', () => {
+    for (const n of [2, 3, 7, 12]) {
+      for (const frame of switchFrames(n)) {
+        expect([0, 255]).toContain(frame.data[0]);
+      }
+    }
   });
 
   it('never returns fewer than two frames', () => {
@@ -638,5 +657,259 @@ describe('describeGeometry', () => {
     expect(describeGeometry(s, lensGeometry(s), 4, depth, art)).toContain(
       'the printed lens will be terraced',
     );
+  });
+});
+
+describe('pitch as pixels per lens', () => {
+  const at = (ppi: number, lpi: number, widthMm = 100) => ({ ppi, lpi, widthMm });
+
+  it('is PPI over LPI, and inverts exactly', () => {
+    // The pairing every lenticular tutorial uses, and the reason 1440/45 is the
+    // default in this tool: it is a whole 32 px per lens.
+    expect(pixelsPerLens(at(1440, 45))).toBe(32);
+    expect(lpiForPixelsPerLens(1440, 32)).toBe(45);
+    // Round-trips at values that do not divide, too.
+    expect(pixelsPerLens({ ppi: 1440, lpi: lpiForPixelsPerLens(1440, 28.8) })).toBeCloseTo(28.8, 9);
+  });
+
+  it('spots a pitch that does not land on the pixel grid', () => {
+    const good = pplFit(at(1440, 45));
+    expect(good.whole).toBe(true);
+    expect(good.parity).toBe('even');
+    expect(good.driftPx).toBe(0);
+
+    // 50 LPI at 1440 PPI is 28.8 px: four fifths of a pixel adrift per lens.
+    const bad = pplFit(at(1440, 50));
+    expect(bad.whole).toBe(false);
+    expect(bad.parity).toBeNull();
+    // ~197 lenses across 100 mm, each 0.2 px off — the pattern slides right
+    // across the sheet, which is the banding the editor warns about.
+    expect(bad.lensCount).toBeCloseTo(196.85, 1);
+    expect(bad.driftPx).toBeCloseTo(39.4, 1);
+  });
+
+  it('reads the parity, which is where the lens axis falls', () => {
+    expect(pplFit(at(1440, 45)).parity).toBe('even'); // 32
+    expect(pplFit(at(1440, 480)).parity).toBe('odd'); // 3
+  });
+
+  it('says whether the views divide the lens evenly', () => {
+    // 32 px over 8 views is 4 px each, exactly.
+    expect(pplFit(at(1440, 45), 8).pxPerView).toBe(4);
+    // Over 12 it is 2.67, so the strips under one lens are not all alike.
+    expect(pplFit(at(1440, 45), 12).pxPerView).toBeNull();
+    expect(pplFit(at(1440, 45), 0).pxPerView).toBeNull();
+  });
+
+  it('snaps to the nearest whole pitch, or the nearest of a parity', () => {
+    expect(snapPixelsPerLens(28.8)).toBe(29);
+    expect(snapPixelsPerLens(28.8, 'even')).toBe(28);
+    expect(snapPixelsPerLens(28.8, 'odd')).toBe(29);
+    expect(snapPixelsPerLens(31.4, 'even')).toBe(32);
+    expect(snapPixelsPerLens(31.4, 'odd')).toBe(31);
+    // Already there: snapping is idempotent.
+    expect(snapPixelsPerLens(32, 'even')).toBe(32);
+    expect(snapPixelsPerLens(33, 'odd')).toBe(33);
+  });
+
+  it('never snaps below a pitch that could show two views', () => {
+    // Under 2 px a lenticule cannot carry a flip at all.
+    expect(snapPixelsPerLens(0.4)).toBe(2);
+    expect(snapPixelsPerLens(1, 'even')).toBe(2);
+    expect(snapPixelsPerLens(0.1, 'odd')).toBe(3);
+  });
+
+  it('agrees with the geometry the lens is actually solved from', () => {
+    // pitchPx and pixelsPerLens must not drift apart — they are the same
+    // quantity, and the editor shows both.
+    const settings: LenticularSettings = {
+      widthMm: 100,
+      ppi: 1200,
+      lpi: 40,
+      phase: 0,
+      heightMm: 0.9,
+      ri: 1.5,
+      orientationDeg: 0,
+      stripSamples: 2,
+    };
+    expect(lensGeometry(settings).pitchPx).toBe(pixelsPerLens(settings));
+  });
+});
+
+describe('snapping an LPI sweep to whole pixels per lens', () => {
+  const spec = (over: Partial<CalibrationSpec> = {}): CalibrationSpec => ({
+    param: 'lpi',
+    min: 40,
+    max: 50,
+    bands: 9,
+    ppi: 1440,
+    snapPpl: true,
+    ...over,
+  });
+
+  it('lands every band on a whole number of pixels', () => {
+    for (const lpi of calibrationValues(spec())) {
+      const ppl = 1440 / lpi;
+      expect(ppl).toBeCloseTo(Math.round(ppl), 9);
+    }
+  });
+
+  it('sweeps the whole pitches the range actually contains', () => {
+    // 40–50 LPI at 1440 PPI is 36 px down to 28.8 px, so the whole pitches in
+    // range are 36 … 29 — eight of them, from nine evenly spaced samples.
+    expect(calibrationPixelsPerLens(spec()).map(Math.round)).toEqual([36, 35, 34, 33, 32, 31, 30, 29]);
+  });
+
+  it('collapses bands that would print the same pitch twice', () => {
+    // A narrow range holds few whole pitches however many bands are asked for;
+    // printing one of them twice would measure nothing.
+    const narrow = calibrationPixelsPerLens(spec({ min: 44, max: 46, bands: 9 }));
+    expect(narrow.map(Math.round)).toEqual([33, 32, 31]);
+    expect(new Set(narrow).size).toBe(narrow.length);
+  });
+
+  it('leaves the sweep alone when snapping is off, or the raster is unknown', () => {
+    const raw = calibrationValues(spec({ snapPpl: false }));
+    expect(raw).toHaveLength(9);
+    expect(raw[0]).toBe(40);
+    expect(raw[8]).toBe(50);
+    // Without a PPI there is no raster to snap to, so it cannot silently guess.
+    expect(calibrationValues(spec({ ppi: undefined }))).toEqual(raw);
+  });
+
+  it('only touches the LPI sweep', () => {
+    const height = calibrationValues(spec({ param: 'height', min: 0.6, max: 1.4, bands: 5 }));
+    expect(height).toHaveLength(5);
+    height.forEach((v, i) => expect(v).toBeCloseTo(0.6 + i * 0.2, 9));
+    expect(calibrationPixelsPerLens(spec({ param: 'ri' }))).toEqual([]);
+  });
+
+  it('reports the pitches a raw sweep lands on too, fractions and all', () => {
+    // Same range unsnapped: 36 px at one end, 28.8 at the other — and nothing
+    // in between that a raster can repeat.
+    const raw = calibrationPixelsPerLens(spec({ snapPpl: false }));
+    expect(raw[0]).toBeCloseTo(36, 9);
+    expect(raw[8]).toBeCloseTo(28.8, 9);
+    expect(raw.filter((v) => Math.abs(v - Math.round(v)) < 1e-9)).toHaveLength(2);
+  });
+
+  it('renders a snapped sweep with one band per distinct pitch', () => {
+    const s = settings({ ppi: 1440, widthMm: 25.4, lpi: 45 });
+    const calibration = spec({ min: 44, max: 46, bands: 9 });
+    const r = renderLenticular([RED, BLUE], s, {
+      interlacedSize: ART,
+      calibration,
+    });
+    // Three distinct pitches in that range, so three bands on the sheet.
+    expect(r.bands).toHaveLength(3);
+    expect(r.bands.map((b) => Math.round(1440 / (b.value ?? 0)))).toEqual([33, 32, 31]);
+  });
+});
+
+describe('every lens switches at once', () => {
+  /**
+   * Which frame each pixel of one row takes, read straight off the render by
+   * matching the flat colour back to the frame that produced it.
+   */
+  function stripPattern(art: RasterImage, frames: RasterImage[]): number[] {
+    const out: number[] = [];
+    for (let x = 0; x < art.width; x++) {
+      const [r, g, b] = pixelAt(art, x, Math.floor(art.height / 2));
+      let best = 0;
+      let bestErr = Infinity;
+      frames.forEach((f, i) => {
+        const err = Math.abs(f.data[0] - r) + Math.abs(f.data[1] - g) + Math.abs(f.data[2] - b);
+        if (err < bestErr) {
+          bestErr = err;
+          best = i;
+        }
+      });
+      out.push(best);
+    }
+    return out;
+  }
+
+  it('gives every lenticule the same whole number of pixels', () => {
+    // A source resolution that divides nothing: the raster grows to the next
+    // size that does rather than taking it as-is.
+    const odd = solid([9, 9, 9], 905, 905);
+    const s = settings({ widthMm: 25.4, ppi: 1000, lpi: 10 });
+    const size = interlacedSize(s, [RED, odd]);
+    const lenticules = (25.4 * 10) / 25.4;
+    expect(size.width / lenticules).toBe(Math.round(size.width / lenticules));
+    // …and it went up to reach it, never down past what the sources hold.
+    expect(size.width).toBeGreaterThanOrEqual(905);
+  });
+
+  it('repeats the strip pattern exactly, lens for lens', () => {
+    // The property the whole thing is for: lens 0 and lens 7 must divide into
+    // frames at the same pixel offsets, or they flip at different angles and
+    // the sheet wipes instead of switching.
+    const s = settings({ widthMm: 25.4, ppi: 400, lpi: 10, stripSamples: 3 });
+    const frames = [RED, GREEN, BLUE];
+    const size = interlacedSize(s, frames);
+    const art = renderInterlaced(frames, s, { interlacedSize: size });
+    const pattern = stripPattern(art, frames);
+    const perLens = size.width / 10;
+    expect(perLens).toBe(Math.round(perLens));
+    const first = pattern.slice(0, perLens);
+    for (let lens = 1; lens < 10; lens++) {
+      expect(pattern.slice(lens * perLens, (lens + 1) * perLens)).toEqual(first);
+    }
+  });
+
+  it('gives every frame an equal share of the lens when the press allows', () => {
+    const s = settings({ widthMm: 25.4, ppi: 400, lpi: 10, stripSamples: 3 });
+    const frames = [RED, GREEN, BLUE];
+    const art = renderInterlaced(frames, s, { interlacedSize: interlacedSize(s, frames) });
+    const pattern = stripPattern(art, frames);
+    const counts = [0, 0, 0];
+    for (const frame of pattern) counts[frame]++;
+    expect(counts[0]).toBe(counts[1]);
+    expect(counts[1]).toBe(counts[2]);
+  });
+
+  it('falls back to whole pixels per lens when equal strips would overrun the press', () => {
+    // 32 px per lens over 12 views: 2.67 px a strip, and rounding up to 3 would
+    // need 36 px — more than the press has. So the strips come out uneven…
+    const lenticules = 100;
+    const cap = 3200;
+    const width = alignedInterlaceWidth(3200, lenticules, 12, cap);
+    expect(width).toBeLessThanOrEqual(cap);
+    // …but the pitch is still whole, which is what keeps the sheet switching
+    // as one.
+    expect(width / lenticules).toBe(Math.round(width / lenticules));
+    expect(width / lenticules).toBe(32);
+  });
+
+  it('grows to the next whole strip, and stops at the press', () => {
+    // 1000 px over 100 lenses is 10 px each, which four views cannot share
+    // evenly — so it goes up to 12, the next multiple of 4.
+    expect(alignedInterlaceWidth(1000, 100, 4, 1200)).toBe(1200);
+    // Already exact: left alone.
+    expect(alignedInterlaceWidth(1200, 100, 4, 2000)).toBe(1200);
+    expect(alignedInterlaceWidth(800, 100, 4, 2000)).toBe(800);
+    // A lenticule the press cannot give one pixel to: capped, and left alone.
+    expect(alignedInterlaceWidth(2000, 500, 2, 100)).toBe(100);
+  });
+
+  it('keeps the switch sheet on the same grid as the artwork it accompanies', () => {
+    // The test print has to have the property it is printed to check for.
+    const s = settings({ widthMm: 25.4, ppi: 400, lpi: 10, stripSamples: 3 });
+    const frames = [RED, GREEN, BLUE];
+    const size = interlacedSize(s, frames);
+    const sw = switchFrames(frames.length);
+    const sheet = renderInterlaced(sw, s, { interlacedSize: size });
+    expect([sheet.width, sheet.height]).toEqual([size.width, size.height]);
+    const pattern = stripPattern(sheet, sw);
+    const perLens = size.width / 10;
+    const first = pattern.slice(0, perLens);
+    for (let lens = 1; lens < 10; lens++) {
+      expect(pattern.slice(lens * perLens, (lens + 1) * perLens)).toEqual(first);
+    }
+    // And it is the alternating target, so the strips are pure black and white.
+    for (let x = 0; x < sheet.width; x++) {
+      expect([0, 255]).toContain(pixelAt(sheet, x, 5)[0]);
+    }
   });
 });

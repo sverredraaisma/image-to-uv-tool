@@ -173,6 +173,92 @@ export function lensGeometry(settings: LenticularSettings): LensGeometry {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Pitch as pixels per lens
+// ---------------------------------------------------------------------------
+//
+// LPI is how lens sheets are sold, so it is what the nodes store. But it is the
+// wrong number to *choose* one by here, because this tool prints its own lens:
+// the depth map is rastered at PPI, on the same grid as the interlace, and a
+// lens is only as repeatable as that grid lets it be.
+//
+// The number that governs that is PPI / LPI — how many printed pixels one
+// lenticule spans. Give it a whole value and every lens on the sheet is
+// identical: same pixel columns under each, same sag profile, same phase. Give
+// it 28.8 and no two neighbours are alike — the strip boundaries land at a
+// different subpixel offset under each lens, drifting a whole pixel every five
+// of them, and that drift is a slow bright/dark banding across the print that
+// no amount of care with the artwork removes.
+//
+// Even or odd then decides where the lens axis falls. Even splits the lenticule
+// symmetrically, with the axis on a pixel boundary — which is what an even
+// number of views wants, half the strips either side. Odd puts one pixel
+// centred on the axis, which is the head-on view, and is what an odd view count
+// wants so that its middle frame is genuinely the middle.
+
+/** How many printed pixels one lenticule spans. The number to design by. */
+export const pixelsPerLens = (settings: Pick<LenticularSettings, 'ppi' | 'lpi'>): number =>
+  Math.max(1e-6, settings.ppi) / Math.max(1e-6, settings.lpi);
+
+/** The LPI that gives exactly this many pixels per lens at this PPI. */
+export const lpiForPixelsPerLens = (ppi: number, ppl: number): number =>
+  Math.max(1e-6, ppi) / Math.max(1e-6, ppl);
+
+/** Whether a pixels-per-lens figure wants an even split, an odd one, or anything. */
+export type PplParity = 'any' | 'even' | 'odd';
+
+/**
+ * Nearest whole pixels-per-lens of the requested parity, never below 2.
+ *
+ * Below 2 px a lenticule cannot show two views at all, so there is nothing to
+ * interlace; the clamp is what keeps a snap from proposing a lens that could
+ * not print a flip.
+ */
+export function snapPixelsPerLens(ppl: number, parity: PplParity = 'any'): number {
+  const target = Math.max(2, ppl);
+  if (parity === 'any') return Math.max(2, Math.round(target));
+  const step = 2;
+  const offset = parity === 'even' ? 0 : 1;
+  const snapped = Math.round((target - offset) / step) * step + offset;
+  return Math.max(parity === 'odd' ? 3 : 2, snapped);
+}
+
+/** What a pixels-per-lens figure means for the consistency of the print. */
+export interface PplFit {
+  ppl: number;
+  /** Whole pixels per lens: every lenticule identical. */
+  whole: boolean;
+  /** Only meaningful when whole. */
+  parity: 'even' | 'odd' | null;
+  /**
+   * How far the strip pattern drifts across the whole sheet, in pixels — the
+   * accumulated error of a fractional pitch over every lens on the print.
+   */
+  driftPx: number;
+  /** Lenses the sheet holds at this pitch. */
+  lensCount: number;
+  /** Pixels each view gets under one lens, when it divides evenly. */
+  pxPerView: number | null;
+}
+
+/** Measure a pitch against the raster it has to print on. */
+export function pplFit(settings: Pick<LenticularSettings, 'ppi' | 'lpi' | 'widthMm'>, views = 0): PplFit {
+  const ppl = pixelsPerLens(settings);
+  const fraction = ppl - Math.round(ppl);
+  const whole = Math.abs(fraction) < 1e-9;
+  const lensCount = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
+  const perView = views > 0 ? ppl / views : 0;
+  return {
+    ppl,
+    whole,
+    parity: whole ? (Math.round(ppl) % 2 === 0 ? 'even' : 'odd') : null,
+    // Each lens is off by `fraction`; the error accumulates along the sheet.
+    driftPx: Math.abs(fraction) * lensCount,
+    lensCount,
+    pxPerView: views > 0 && Math.abs(perView - Math.round(perView)) < 1e-9 ? perView : null,
+  };
+}
+
 export interface OutputSize {
   width: number;
   height: number;
@@ -223,14 +309,62 @@ export interface CalibrationSpec {
    * the height it needs to focus at all, and compares a broken lens.
    */
   autoHeight?: boolean;
+  /**
+   * LPI sweeps only: move every band to the nearest pitch that is a whole
+   * number of printed pixels wide.
+   *
+   * Without it a sweep is not measuring only what it claims to. An evenly
+   * spaced run of LPI values lands almost entirely on fractional pitches, and a
+   * fractional pitch makes every lenticule in that band slightly different from
+   * its neighbour — so a band can read badly because the pitch is wrong, or
+   * because the pitch does not fit the raster, and the sheet cannot tell you
+   * which. Snapping removes the second cause, and what is left is the lens.
+   *
+   * Bands that snap onto the same pitch collapse into one, so a snapped sweep
+   * can have fewer bands than asked for: there are only so many whole pitches
+   * between two LPI values, and printing one of them twice measures nothing.
+   */
+  snapPpl?: boolean;
+  /** The raster {@link snapPpl} snaps against. Without it, snapping is a no-op. */
+  ppi?: number;
 }
 
-/** The value each band of a calibration sheet is printed at. */
+/**
+ * The value each band of a calibration sheet is printed at.
+ *
+ * Evenly spaced across the range, except for a snapped LPI sweep — see
+ * {@link CalibrationSpec.snapPpl}, which both moves the values and can return
+ * fewer of them than `bands` asked for.
+ */
 export function calibrationValues(spec: CalibrationSpec): number[] {
   const bands = Math.max(2, Math.round(spec.bands));
   const lo = Math.min(spec.min, spec.max);
   const hi = Math.max(spec.min, spec.max);
-  return Array.from({ length: bands }, (_, i) => lo + ((hi - lo) * i) / (bands - 1));
+  const even = Array.from({ length: bands }, (_, i) => lo + ((hi - lo) * i) / (bands - 1));
+  if (spec.param !== 'lpi' || !spec.snapPpl || !spec.ppi || spec.ppi <= 0) return even;
+
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const lpi of even) {
+    const ppl = snapPixelsPerLens(spec.ppi / Math.max(1e-6, lpi));
+    if (seen.has(ppl)) continue;
+    seen.add(ppl);
+    out.push(lpiForPixelsPerLens(spec.ppi, ppl));
+  }
+  return out;
+}
+
+/**
+ * How many printed pixels each band of a sweep gives one lenticule.
+ *
+ * The number to write down when you have picked a band off the sheet: it is
+ * what you set the print back to, and — snapped — it is a whole number you can
+ * read off without a calculator. Empty for the sweeps where pitch is not what
+ * is changing.
+ */
+export function calibrationPixelsPerLens(spec: CalibrationSpec): number[] {
+  if (spec.param !== 'lpi' || !spec.ppi || spec.ppi <= 0) return [];
+  return calibrationValues(spec).map((lpi) => spec.ppi! / Math.max(1e-6, lpi));
 }
 
 /**
@@ -273,15 +407,29 @@ export function withCalibrationValue<T extends LenticularSettings>(
 }
 
 /**
- * Solid frames that read as a hard switch: frame 0 white through to black on
- * the last. With two frames that is simply white then black — the target for
- * checking *where* a print flips, with none of the artwork's own detail in the
- * way. 1×1 because a lenticular render samples frames normalised.
+ * Solid frames that read as a hard switch: white, black, white, black across
+ * the run, so every adjacent pair is a full-contrast flip.
+ *
+ * Alternating rather than ramped, and the difference is the whole usefulness of
+ * the sheet. A ramp from white to black asks the lens to resolve a *gradient*,
+ * and a gradient is what a lens that has failed produces anyway — the two look
+ * alike, so a band that is blurring and a band that is working read the same at
+ * a glance. Alternating asks the opposite question: it puts the fastest switch
+ * the view count allows under the lens, and then any crosstalk between
+ * neighbouring views is a mid-grey that was never printed. So the band you want
+ * is simply the one that stays black and white as you tilt it, and the ones
+ * that have given up are visibly grey. Nothing to interpret.
+ *
+ * With an odd view count two frames of the same colour have to sit next to each
+ * other somewhere; that seam is the one place a tilt does not flip, and it
+ * falls where the last view wraps back to the first at the edge of the cone.
+ *
+ * 1×1 because a lenticular render samples frames normalised.
  */
 export function switchFrames(count: number): RasterImage[] {
   const n = Math.max(2, Math.round(count));
   return Array.from({ length: n }, (_, i) => {
-    const v = Math.round(255 * (1 - i / (n - 1)));
+    const v = i % 2 === 0 ? 255 : 0;
     return createImage(1, 1, [v, v, v, 255]);
   });
 }
@@ -310,21 +458,6 @@ export function stripsOffPixelGrid(settings: LenticularSettings): boolean {
 }
 
 /**
- * The printer's raster as a *ceiling* on a piece of artwork.
- *
- * Nothing is gained by a pixel the press cannot place: the sheet is printed at
- * `ppi`, so a pixel finer than that raster is resampled away on its way to the
- * paper, having cost memory and render time to make. Whatever the interlace and
- * the sources ask for, this is where it stops.
- *
- * Note which way round it works. The PPI raster is not a floor — a sheet that
- * needs fewer pixels ships fewer, and only artwork that would otherwise come out
- * *larger* than the press can print is brought down to it.
- */
-const cappedAtPpi = (needed: number, ppiWidth: number): number =>
-  Math.max(1, Math.min(Math.max(1, Math.round(needed)), Math.max(1, ppiWidth)));
-
-/**
  * Smallest raster that still holds everything the interlaced sheet knows.
  *
  * The interlaced artwork carries no lens geometry — it is flat ink that the
@@ -335,7 +468,11 @@ const cappedAtPpi = (needed: number, ppiWidth: number): number =>
  *     every lenticule, so no strip can be skipped by an unlucky phase;
  *   • the artwork: never resample the highest-resolution frame downwards.
  *
- * …and {@link cappedAtPpi} bounds it from above.
+ * …and the printer's own raster bounds it from above, because a pixel finer
+ * than the press can place is resampled away on the way to the paper having
+ * cost memory and render time to make. {@link alignedInterlaceWidth} applies
+ * that ceiling, and the alignment, in one step — the two decisions interact,
+ * since the whole pitch it rounds to has to be one the press can carry.
  *
  * Diagonal strip edges ({@link stripsOffPixelGrid}) are the one thing more
  * pixels would still buy, since the staircase along them is only as fine as the
@@ -347,13 +484,82 @@ const cappedAtPpi = (needed: number, ppiWidth: number): number =>
  *
  * The aspect ratio is the first frame's, as everywhere else.
  */
+/**
+ * Round an artwork width so that every lenticule gets the same whole number of
+ * pixels — and, where the press allows, the same whole number per strip.
+ *
+ * This is the difference between a sheet that flips and a sheet that wipes.
+ *
+ * The frame a pixel belongs to is `floor(frac(u / pitch) · N)`, so what decides
+ * where a strip boundary lands inside a lens is the *pixel offset* of that lens
+ * — and if a lenticule is 5.08 px wide, that offset is different for every lens
+ * on the sheet. Lens 0 starts on a pixel boundary, lens 1 starts 0.08 px late,
+ * lens 12 starts a whole pixel late. Each one therefore rounds its boundary to
+ * a different place and so flips at a slightly different angle: tilt the print
+ * and the change sweeps across it as a band, one part of the picture switching
+ * while the rest has not yet. It looks like a wipe, and it is the single most
+ * common reason a home-made lenticular reads as broken.
+ *
+ * Give every lens a whole number of pixels and that vanishes. Every lenticule
+ * covers an identical run of pixel columns, so every strip boundary sits at the
+ * same offset under every lens, and the whole sheet changes at once — which is
+ * what a lenticular is supposed to do, and what the eye reads as one image
+ * becoming another rather than as a curtain being drawn.
+ *
+ * Two grades of it, since only the first is always affordable:
+ *
+ *   • Whole pixels per *strip* — the pitch rounded up to a multiple of the
+ *     frame count. Every strip is then the same width as well, so no view is
+ *     quietly given more of the lens than its neighbours.
+ *   • Failing that (it would overrun the press), whole pixels per *lens*: the
+ *     strips inside a lens come out uneven — 3, 3, 2, 3, 3, 2 across a 16 px
+ *     lens with six views — but identically uneven under every lens, so the
+ *     sheet still switches as one.
+ *
+ * The remaining error is the rounding of the total width, which is under half a
+ * pixel across the whole sheet however many lenses it holds.
+ */
+export function alignedInterlaceWidth(
+  target: number,
+  lenticules: number,
+  strips: number,
+  capPx: number,
+): number {
+  const lenses = Math.max(1e-9, lenticules);
+  const widthFor = (perLens: number) => Math.max(1, Math.round(lenses * perLens));
+  const n = Math.max(1, Math.round(strips));
+
+  // Best case: round the pitch up to the next whole strip. The nudge before the
+  // ceiling is not cosmetic — a 25.4 mm sheet at 12 LPI computes 11.999999999999998
+  // lenticules, and without it an exact fit rounds up to the next whole strip
+  // and asks for half as many pixels again for nothing at all.
+  const equal = Math.max(n, Math.ceil(target / lenses / n - 1e-9) * n);
+  if (widthFor(equal) <= capPx) return widthFor(equal);
+
+  // The press is the ceiling, so take the widest whole pitch that fits under
+  // it. `round` rather than `floor` because the cap is itself a rounded figure:
+  // a 100 mm sheet at 1440 PPI is 5669 px, which is 31.998 lenticules' worth of
+  // a 32 px pitch, and flooring that would throw the pitch away over a rounding
+  // error in the sheet width.
+  let perLens = Math.max(1, Math.round(capPx / lenses));
+  while (perLens > 1 && widthFor(perLens) > capPx) perLens--;
+  // A lenticule the press cannot give a single pixel to is beyond alignment;
+  // the caller's own warnings cover that configuration.
+  return widthFor(perLens) <= capPx ? widthFor(perLens) : Math.max(1, Math.round(capPx));
+}
+
 export function interlacedSize(settings: LenticularSettings, frames: RasterImage[]): OutputSize {
   const first = frames[0];
   const lenticules = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
   const samples = Math.max(1, settings.stripSamples);
   const forStrips = Math.ceil(lenticules * frames.length * samples);
   const forArtwork = Math.max(...frames.map((f) => f.width));
-  const width = cappedAtPpi(Math.max(forStrips, forArtwork), outputSize(settings, first).width);
+  const width = alignedInterlaceWidth(
+    Math.max(forStrips, forArtwork),
+    lenticules,
+    frames.length,
+    outputSize(settings, first).width,
+  );
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -963,9 +1169,33 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
     (cells * clampGrid(settings.grid) * samples) / rowScaleOf(clampPacking(settings.packing)),
   );
   const forArtwork = Math.max(...views.map((v) => v.width));
-  const width = cappedAtPpi(Math.max(forViews, forArtwork), outputSize(settings, first).width);
+  // Whole pixels per cell across, and a whole number per tile column where the
+  // press allows — so every cell divides into views at the same offsets and the
+  // sheet switches as one. See {@link alignedInterlaceWidth}, and the note on
+  // hex rows below.
+  const width = alignedInterlaceWidth(
+    Math.max(forViews, forArtwork),
+    cells,
+    clampGrid(settings.grid),
+    outputSize(settings, first).width,
+  );
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
+
+/**
+ * Can this packing put whole pixels between rows as well as between columns?
+ *
+ * Square can: the row pitch *is* the column pitch, and the raster keeps the
+ * sheet's aspect, so aligning across aligns down for free.
+ *
+ * Hex cannot, and not for want of trying — its rows sit √3/2 of a pitch apart,
+ * and √3/2 is irrational, so no whole column pitch has a whole row pitch. A hex
+ * sheet is therefore aligned across and drifting down: tilt it left and right
+ * and it switches as one, tilt it up and down and the change sweeps through the
+ * rows. That is the price of the 15% more lenslets hex buys, it is exact rather
+ * than a matter of degree, and Square packing is the way out of it.
+ */
+export const packingAlignsRows = (packing: LensPacking): boolean => rowScaleOf(packing) === 1;
 
 function requireGridViews(views: RasterImage[], grid: number): number {
   const n = clampGrid(grid);
@@ -1308,7 +1538,16 @@ export function radialInterlacedSize(settings: RadialSettings, views: RasterImag
   // the rim, where it subtends (π/N) of a cell diameter.
   const forWedges = Math.ceil((cells * clampRadialViews(settings.views) * samples) / Math.PI);
   const forArtwork = Math.max(...views.map((v) => v.width));
-  const width = cappedAtPpi(Math.max(forWedges, forArtwork), outputSize(settings, first).width);
+  // Whole pixels per cell, so every cap divides into wedges identically and the
+  // whole sheet turns at once. No per-wedge divisor, unlike the other two: a
+  // wedge is an angle, not a column, so there is no horizontal count that would
+  // make them equal — the cell pitch is the only thing to align.
+  const width = alignedInterlaceWidth(
+    Math.max(forWedges, forArtwork),
+    cells,
+    1,
+    outputSize(settings, first).width,
+  );
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -1589,7 +1828,14 @@ export function describeRadialGeometry(
     `Head-on all ${n} merge: every wedge meets at the centre of its lenslet, so the eye averages the ` +
       `whole set. Tilt in any direction and the view owning that bearing takes the sheet`,
     `${packing === 'hex' ? 'Hexagonal' : 'Square'} lenslet packing — ` +
-      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
+      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap` +
+      (packingAlignsRows(packing)
+        ? '; its rows sit a whole pitch apart, so the artwork lands on whole pixels down the sheet as ' +
+          'well as across and the whole print switches at once in both axes'
+        : '; its rows sit √3/2 of a pitch apart, and √3/2 is irrational — so no raster can put whole ' +
+          'pixels between rows as well as between columns. Tilting left and right switches the sheet ' +
+          'as one; tilting up and down sweeps the change through the rows. Square packing is the way ' +
+          'out of that, at 15% fewer lenslets'),
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
     describeArtRaster(settings.ppi, artSize, depthSize, {
@@ -1642,7 +1888,14 @@ export function describeGridGeometry(
   const lines = [
     `${grid}×${grid} grid = ${grid * grid} views · ${settings.widthMm} mm wide`,
     `${packing === 'hex' ? 'Hexagonal' : 'Square'} lenslet packing — ` +
-      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
+      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap` +
+      (packingAlignsRows(packing)
+        ? '; its rows sit a whole pitch apart, so the artwork lands on whole pixels down the sheet as ' +
+          'well as across and the whole print switches at once in both axes'
+        : '; its rows sit √3/2 of a pitch apart, and √3/2 is irrational — so no raster can put whole ' +
+          'pixels between rows as well as between columns. Tilting left and right switches the sheet ' +
+          'as one; tilting up and down sweeps the change through the rows. Square packing is the way ' +
+          'out of that, at 15% fewer lenslets'),
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
     describeArtRaster(

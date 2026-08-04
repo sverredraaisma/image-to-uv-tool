@@ -37,7 +37,15 @@ export interface KeyedStore {
 }
 
 function keyedStore(backend: BlobBackend): KeyedStore {
-  return { get: (k) => backend.get(k), put: (k, v) => backend.put(k, v) };
+  return {
+    // These stores only ever hold text; anything else under the key is
+    // corrupt, and a miss is the right answer for a cache.
+    get: async (k) => {
+      const value = await backend.get(k);
+      return typeof value === 'string' ? value : null;
+    },
+    put: (k, v) => backend.put(k, v),
+  };
 }
 
 /** App-wide AI result cache (its own IndexedDB store; memory fallback). */

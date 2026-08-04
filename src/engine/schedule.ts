@@ -62,8 +62,15 @@ export function findReadyAutoNodes(
   return ready;
 }
 
-const kindForPort = (t: PortSpec['type']): DataValue['kind'] =>
-  t === 'text' ? 'text' : t === 'stl' ? 'stl' : t === 'sequence' ? 'sequence' : 'image';
+const KINDS: Partial<Record<PortSpec['type'], DataValue['kind']>> = {
+  text: 'text',
+  stl: 'stl',
+  sequence: 'sequence',
+  splat: 'splat',
+  transform: 'transform',
+};
+
+const kindForPort = (t: PortSpec['type']): DataValue['kind'] => KINDS[t] ?? 'image';
 
 /**
  * Can this value stand in for a port of that kind when bypassing? Exact kind

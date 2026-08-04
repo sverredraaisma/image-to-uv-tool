@@ -51,6 +51,10 @@ export function ValuePreview({
     inner = <span className="preview-text">{value.text.slice(0, 24) || '""'}</span>;
   } else if (value.kind === 'stl') {
     inner = <span className="preview-text">STL · {value.triangleCount}△</span>;
+  } else if (value.kind === 'splat') {
+    inner = <span className="preview-text">{Math.round(value.count / 1000)}k splats</span>;
+  } else if (value.kind === 'transform') {
+    inner = <span className="preview-text">📷 {value.rotationDeg[1].toFixed(0)}°</span>;
   } else {
     inner = <span className="preview-empty">?</span>;
   }

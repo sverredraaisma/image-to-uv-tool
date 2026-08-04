@@ -15,6 +15,8 @@ const TYPE_OPTIONS: ConfigField = {
     { value: 'mask', label: 'Mask' },
     { value: 'text', label: 'Text' },
     { value: 'stl', label: 'STL' },
+    { value: 'splat', label: 'Splat cloud' },
+    { value: 'transform', label: 'Camera' },
   ],
 };
 

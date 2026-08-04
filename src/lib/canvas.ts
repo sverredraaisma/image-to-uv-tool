@@ -199,6 +199,8 @@ export const browserPlatform: Platform = {
   fetchImage,
   putBlob: (dataUrl) => blobStore.put(dataUrl),
   getBlob: (ref) => blobStore.get(ref),
+  putBytes: (bytes) => blobStore.putBytes(bytes),
+  getBytes: (ref) => blobStore.getBytes(ref),
   runImageOp: workerPool.runImageOp,
   generateStl: workerPool.generateStl,
 };

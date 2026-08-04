@@ -14,6 +14,10 @@ const ACCEPTS: Record<PortType, PortType[]> = {
   text: ['text'],
   stl: ['stl'],
   sequence: ['sequence', 'image', 'mask'],
+  // Both stand alone: a splat cloud is nothing like a raster, and a camera
+  // placement is nothing like anything else.
+  splat: ['splat'],
+  transform: ['transform'],
 };
 
 /** Can an output of `outputType` connect into an input of `inputType`? */

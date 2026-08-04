@@ -100,6 +100,12 @@ export const lenticularNode: NodeDefinition = {
       label: 'LPI calib.: auto height (match viewing angle)',
       advanced: true,
     },
+    {
+      kind: 'boolean',
+      key: 'lpiSnapPpl',
+      label: 'LPI calib.: snap to whole pixels per lens',
+      advanced: true,
+    },
   ],
   defaultConfig: () => ({
     widthMm: 100,
@@ -121,6 +127,10 @@ export const lenticularNode: NodeDefinition = {
     // On by default: a fixed height across an LPI sweep compares lenses with
     // different viewing cones, and coarse bands may not focus at all.
     lpiAutoHeight: true,
+    // On by default: an evenly spaced LPI sweep lands almost entirely on
+    // fractional pitches, and a fractional pitch is a second variable the
+    // sheet cannot separate from the one it is meant to be measuring.
+    lpiSnapPpl: true,
   }),
   compute: async ({ inputs, config, onProgress, signal, allowOversize }) => {
     const frames = asImages(inputs.frames);

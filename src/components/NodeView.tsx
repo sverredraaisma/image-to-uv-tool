@@ -80,7 +80,9 @@ export function NodeView({ id, selected }: NodeProps) {
               accept: '.stl,.obj,model/stl,model/obj,application/sla,application/vnd.ms-pki.stl',
               label: 'Upload mesh (STL/OBJ)…',
             }
-          : null;
+          : node.type === 'splatInput'
+            ? { accept: '.ply,.sog,.splat', label: 'Upload splat scene (PLY/SOG/SPLAT)…', raw: true }
+            : null;
 
   const portClass = (side: ConnectionSide, portId: string) => {
     let cls = `port port-${side}`;
@@ -220,6 +222,29 @@ export function NodeView({ id, selected }: NodeProps) {
                   const file = e.target.files?.[0];
                   if (!file) return;
                   const reader = new FileReader();
+                  reader.onerror = () => addToast('error', `Could not read ${file.name}`);
+
+                  // Splat captures go in as raw bytes; everything else as a data
+                  // URL. Base64 costs 1.37× on top of a file that is already
+                  // hundreds of megabytes, and past ~390 MB the encoded string
+                  // exceeds the engine's maximum string length outright — which
+                  // is an "allocation size overflow" before the parser has seen
+                  // a single byte. Images and meshes are small enough that the
+                  // data URL they need anyway is the simpler path.
+                  if (upload.raw) {
+                    reader.onload = async () => {
+                      const bytes = new Uint8Array(reader.result as ArrayBuffer);
+                      try {
+                        const ref = await platform.putBytes(bytes);
+                        updateNodeConfig(id, { bytesRef: ref, srcRef: '', src: '', name: file.name });
+                      } catch {
+                        addToast('error', `Could not store ${file.name} — it may be too large`);
+                      }
+                    };
+                    reader.readAsArrayBuffer(file);
+                    return;
+                  }
+
                   reader.onload = async () => {
                     const dataUrl = reader.result as string;
                     // Offload the (large) bytes to the blob store and keep only a
@@ -232,7 +257,6 @@ export function NodeView({ id, selected }: NodeProps) {
                       updateNodeConfig(id, { src: dataUrl, srcRef: '', name: file.name });
                     }
                   };
-                  reader.onerror = () => addToast('error', `Could not read ${file.name}`);
                   reader.readAsDataURL(file);
                 }}
               />

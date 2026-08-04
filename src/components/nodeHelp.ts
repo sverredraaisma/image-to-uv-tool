@@ -929,7 +929,10 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     ],
     tips: [
       'Frames must fit one lenticule: PPI ÷ LPI ÷ strip samples. At 1440 PPI and 45 LPI that is 32 frames at one sample each.',
+      'Set the pitch by pixels per lens rather than by LPI, in the editor. PPI ÷ LPI is what decides whether every lens on the sheet is identical: give it a whole number and each lenticule covers the same pixel columns, so the interlace never drifts. 1440 ÷ 45 is a clean 32, but 50 LPI on the same press is 28.8, and that fifth of a pixel accumulates into visible banding across the print. The editor shows the figure, warns when it is fractional, and snaps to the nearest whole, even or odd value — even puts the lens axis on a pixel boundary (what an even view count wants), odd puts one pixel on the axis for a true head-on view.',
       'The depth map is on the PPI raster (it is the lens); the interlaced artwork ships at the smallest raster that keeps the interlace and your sources, and never more than the press can print — scale it to the sheet at print time. Turning the array puts the strip edges on diagonals, where more pixels do buy sharper edges: raise Artwork px per strip, up to that PPI cap.',
+      'The calibration sheets come with a switch sheet whose views alternate pure black and white — the fastest flip the view count allows. Judge by that one: any two views the lens cannot keep apart average into a grey that was never printed, so the band you want is the one that stays black and white as you tilt it, and the failures are unmistakably grey. The LPI sweep also snaps each band to a whole number of pixels per lens by default, so a band cannot read badly merely because its pitch does not fit the raster; the editor lists the pixel sizes it landed on, which is what you set the print back to.',
+      'The artwork raster is rounded so every lenticule gets the same whole number of pixels. That is what makes the whole sheet change at once: the frame a pixel belongs to comes from its offset within its lens, so a lenticule 5.08 px wide starts at a different subpixel under every lens, rounds its strip boundaries somewhere slightly different, and flips at a slightly different angle — the print wipes across instead of switching. Where the press allows it the pitch is rounded up to a whole number of pixels per strip too, so no view gets a wider share of the lens than its neighbours.',
       'Manual node: a 100 mm sheet at 1440 PPI is a ~32 MP render, so it only runs when you press Run ▶.',
       'A sheet whose raster comes out over 80 MP is not refused — the tool tells you how big it would be and how many chunks it would take, and you decide. Say yes and it renders a band of rows at a time, with a progress bar on the node and Cancel ✕ working between chunks. The same goes for the calibration sheets in the editor.',
     ],
@@ -949,11 +952,13 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       },
     ],
     tips: [
+      'Set the pitch by pixels per lens rather than by LPI, in the editor. PPI ÷ LPI is what decides whether every lens on the sheet is identical: give it a whole number and each lenticule covers the same pixel columns, so the interlace never drifts. 1440 ÷ 45 is a clean 32, but 50 LPI on the same press is 28.8, and that fifth of a pixel accumulates into visible banding across the print. The editor shows the figure, warns when it is fractional, and snaps to the nearest whole, even or odd value — even puts the lens axis on a pixel boundary (what an even view count wants), odd puts one pixel on the axis for a true head-on view.',
       'Each view resolves to a single pixel per lenslet whatever the grid size, so more views cost artwork raster and light per view rather than sharpness — start at grid 2 or 3 by hand, and go large only when a renderer is feeding the wire.',
       'What caps the grid is the printed dot: the lenslet’s own pixels divide by N, and under about two dots per view tile the views bleed together at every angle instead of switching. Info warns when that happens — at 1440 PPI and 45 LPI a 15×15 is just inside it.',
       'Ports are named for where the view is seen from: Left · Up, Centre (neutral), Right · Down — and Left 7 · Up 7 out at the corners of a big grid. Past 4×4 there are no per-cell ports at all; 25 handles on one node is not a way anyone would wire a print.',
       'A big sheet is a big render: over 80 MP the node asks first, then runs in chunks with a progress bar, and Cancel ✕ works between them.',
       'Hex packing needs ~15% more artwork than square (the closer rows), and puts every tile edge on a diagonal. The artwork is not silently promoted to the printer’s raster for it — raise Artwork px per view tile if those edges look stepped on your press, up to the PPI cap.',
+      'Hex packing cannot align its rows, and that is a proof rather than a tolerance: its rows sit √3/2 of a pitch apart and √3/2 is irrational, so no raster has whole pixels between rows as well as between columns. A hex sheet switches as one when you tilt it left and right, and sweeps through the rows when you tilt it up and down. Square packing aligns both ways — it is the choice to make when the vertical flip matters more than the 15% extra lenslets.',
       'Hexagonal packing (the default) offsets every other row and pulls the rows √3/2 as far apart: the densest way to pack equal circles, so ~15% more lenslets fit and only 9% of the sheet is left flat instead of 21%. Switch to Square grid if you are laminating a ready-made square lens array.',
       'Wire Model → Grid Views into the All views input and the whole grid arrives on one edge, in order. A cell port wired individually overrides its view, so you can retouch just one.',
     ],
@@ -1003,6 +1008,120 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       'STL carries no colour at all, so its views come out in one material colour — set that and the light under Advanced in the render node. Export as OBJ instead and the mesh can bring texture coordinates or vertex colours with it.',
       'A textured OBJ needs its image on a wire, not a .mtl file: connect any image node to the render node’s Texture input. Nothing can fetch the sibling files a .mtl names from inside a browser tab.',
       'A dense scan can be millions of triangles; decimate it first. Nothing here needs more detail than the print resolves — about 177×153 per view at 100 mm and 45 LPI.',
+    ],
+  },
+
+  splatInput: {
+    summary:
+      'Reads a Gaussian splat scene — a capture stored as a few hundred thousand translucent ellipsoids rather than as geometry — and puts the cloud on a wire. .ply is what every trainer writes, .sog is the compact bundle worth using for anything large, and .splat is the older web format.',
+    uses: [
+      {
+        title: 'Print a place you scanned',
+        detail:
+          'A phone capture through Polycam or Luma, trained into splats, becomes a lenticular print of the room with real parallax.',
+        chain: ['Gaussian Splat Input', 'Splat Camera', 'Splat → Views', 'Lenticular Print'],
+      },
+    ],
+    tips: [
+      'Prefer .sog for anything large. It is the same scene about 20× smaller, because it sorts the cloud so that neighbouring splats land next to each other in an image and then lets an ordinary image codec do the work — a 1.4 GB PLY becomes a few tens of megabytes. Only the single-file bundle is read, not the loose folder form; splat-transform will bundle one for you.',
+      'Nothing is thinned on import any more. The whole cloud is kept, and Splat → Views thins what it draws *after* culling — so the splats in front of the camera get the entire budget instead of a share of it. Thinning at the door would have spent it on every room of a scanned house at once, including the ones you never point at. There is still a ceiling of 8 million splats, but that is a memory backstop rather than a quality decision.',
+      'Only the base colour of each splat is kept. The higher spherical-harmonic bands are what make a surface change colour with the angle you look from, and they are 45 floats a splat — more memory than a browser tab has to spare. The print loses its moving highlights and nothing else.',
+      'The file’s units and origin do not matter. The Splat Camera’s scale is the one number that ties the scene to a physical sheet.',
+      'Which way is *up* does matter, and it is the first thing to check if a scene looks wrong. Nearly every capture is trained from a COLMAP reconstruction, whose world space has +Y pointing down and +Z forward — the opposite of the Y-up convention this tool renders in — so a raw .ply loads perfectly, in focus, and upside down. Up axis defaults to correcting that. Set it to Y up for a file some exporter has already turned, or Z up for a Blender-style export. It is a rotation either way, never a mirror, so the scene cannot come out inside out.',
+      'The parser and the renderer are downloaded the first time you run a splat node, not when the app loads.',
+    ],
+  },
+
+  splatCamera: {
+    summary:
+      'Fly through a splat scene and keep the spot you liked. Position, rotation and scale go out on one wire. Where you stand *is* the sheet: whatever the camera sits on lands on the paper in focus, everything nearer is dropped, and the rest of the scene arranges itself behind. The editor’s canvas is that sheet, so what you frame is what gets printed.',
+    uses: [
+      {
+        title: 'Compose the shot',
+        detail:
+          'Open the editor, fly to where the scene looks best, close it. The camera is saved on the node and the render node picks it up.',
+        chain: ['Gaussian Splat Input', 'Splat Camera', 'Splat → Views'],
+      },
+      {
+        title: 'Several prints from one capture',
+        detail:
+          'Wire the same cloud into two or three cameras and each one is a different print of the same scan, with no re-import.',
+      },
+    ],
+    tips: [
+      'W A S D to move, Space and Shift for up and down, mouse to look. Click the picture to take the mouse; Esc gives it back.',
+      'Scroll changes scale — how much of the scene the sheet spans — which is the only control here that is about the print rather than about where you are standing. Everything downstream is measured in millimetres of paper, and scale is what converts.',
+      'The camera position is the plane the print is focused on, not the viewer’s eye — the eye stands a viewing distance further back. A splat exactly at the camera has zero parallax across the whole run, which is what being in focus means for a lenticular print; everything behind it separates, and the further back it is the more it moves.',
+      'Everything in front of that plane is discarded, because a print cannot show something in front of its own surface — it would have to float off the paper, and the sheet’s edge would cut through it at the border. So flying forward pushes a slicing plane through the capture. Use it: fly until the clutter in front of your subject has peeled away.',
+      '“Frame the scene” puts the plane on the near face of the capture rather than through its middle, so the whole scene is behind the paper and nothing is culled — the deepest window you can have without losing anything.',
+      'The preview thins the cloud while you are moving and redraws with all of it once you stop, so the picture you judge is the full-quality one.',
+      'Depth costs parallax. Standing back to get a whole room in means the far wall moves further per view step than the lens can resolve — check the parallax figure in Splat → Views and move closer if it complains.',
+    ],
+  },
+
+  splatViews: {
+    summary:
+      'Renders a splat scene from every eye position a lens shows, and sends the whole run down one wire — a horizontal run for a Lenticular Print, or a square grid for a Lens Grid Print. The sheet is a window: its plane prints pin-sharp and everything off it separates as you move.',
+    uses: [
+      {
+        title: 'Lenticular print of a scan',
+        detail:
+          'A dozen views across the lens’s own cone, straight into the print node. Nothing is invented — an edge moving aside uncovers what was really behind it.',
+        chain: ['Splat Camera', 'Splat → Views', 'Lenticular Print'],
+      },
+      {
+        title: 'Look-around print of a scan',
+        detail:
+          'Switch the layout to a grid and the same scene prints with parallax in both axes, from one capture.',
+        chain: ['Splat Camera', 'Splat → Views', 'Lens Grid Print'],
+      },
+      {
+        title: 'Relief from a capture',
+        detail:
+          'The Depth output is the centre view’s composite depth, so the gloss chain can emboss the same scene it prints.',
+        chain: ['Splat → Views', 'Gloss Preview'],
+      },
+    ],
+    tips: [
+      'This is the honest version of Image + Depth → Stereo Views. A heightmap has nothing behind itself and has to invent the strip a near edge uncovers; a splat scene has a real behind, so it does not.',
+      'Cost scales with views × splats. A 15×15 grid is 225 full passes over the cloud — set the Splat budget under Advanced while you are finding the framing, then clear it for the final run. The budget is spent after the culls, so it buys density in frame: on a capture where a tenth of the scene is on the paper, the same budget draws ten times as densely as thinning the cloud up front would.',
+      'Two culls run before a single view is drawn, and both are eye-independent so neither has to be repeated per view: everything in front of the sheet, and everything that cannot land on the paper in any view of the run. The Info output breaks down what each removed. “Cull plane” under Advanced pushes the first one deeper into the scene if you want the foreground gone as well.',
+      'Supersample defaults to 1 here, unlike the mesh renderer’s 2: a splat is already a smooth falloff rather than a hard-edged triangle, so there is very little aliasing left to average away.',
+      'A run goes out right-eye-first for the lens; a grid goes out in the order Lens Grid Print names its cells. Both match what the print node expects, so the wire is one wire.',
+    ],
+  },
+
+  depthStereo: {
+    summary:
+      'Warps one picture and its heightmap into the whole run of views a Lenticular Print needs, on one wire. Each pixel slides sideways by an amount its depth decides — the same projection Model → Stereo Views uses, but from a relief rather than a mesh, so a photograph with a depth map prints in 3D without any geometry at all.',
+    uses: [
+      {
+        title: 'A photograph, in depth',
+        detail:
+          'Estimate depth from the picture itself and print it: no model, no second camera, no re-shoot.',
+        chain: ['Image Input', 'Depth Anything v2', 'Image + Depth → Stereo Views', 'Lenticular Print'],
+      },
+      {
+        title: 'Generated art with real parallax',
+        detail:
+          'Generate the artwork, run a depth estimate over it, and the flat render gains a window it never had. Cheap enough to try on anything, since only the depth pass costs credits.',
+        chain: ['Prompt Input', 'a text→image node', 'Depth Anything v2', 'Image + Depth → Stereo Views'],
+      },
+      {
+        title: 'Paint the depth by hand',
+        detail:
+          'Any greyscale image works as the heightmap — a gradient, a mask, a blurred selection. White is the plane nearest you, so a white subject on a black ground lifts it off the background by exactly the Depth range.',
+        chain: ['Image Input', 'Curves', 'Image + Depth → Stereo Views'],
+      },
+    ],
+    tips: [
+      'A heightmap has nothing behind itself. Slide a near edge sideways and it uncovers ground the camera never saw, so the node fills that strip by stretching the background it uncovered — silhouettes stay crisp, the wall behind them smears. Info reports what percentage of each view had to be invented; a few tenths is normal, past ~3% the edges visibly drag.',
+      'No real depth map has a one-pixel cliff — an estimator ramps across a silhouette over two or three pixels, and the picture is antialiased over the same ones, so those pixels are a blend of subject and background. They are what smears if you let them: the node measures the edge over a window instead, and repaints the whole gap from the plateau beyond it. *Edge jump* under Advanced is where a surface turning away stops counting as a surface; lower it if a subject still drags a halo behind it, raise it if a steeply receding floor is coming out in flat bands.',
+      'That is why Depth range is 5 mm and not 50. Depth here is bought with invented pixels, not with render time — the opposite of the mesh node, where depth is free and only the parallax limit bites.',
+      'White = near. If your map comes out the other way round (some estimators publish far-is-white), tick *Heightmap: white is far* rather than inverting it upstream, so the Depth output still means what the gloss chain expects.',
+      'Depth blur is worth the 1 px it defaults to: an 8-bit depth map bands, and every band boundary is a place where two neighbouring pixels land a pixel apart and tear. Raise it to 3–4 for a noisy estimate; lower it to 0 only for a map you drew yourself.',
+      'The depth map is a relief, so it cannot rotate anything — you get parallax and occlusion, not a new angle on the subject. For a real turn, use Model → Stereo Views with a mesh.',
+      'The views go out right-eye-first, because a lenticule shows its leftmost strip to an eye on the right and Lenticular Print interlaces in the order frames arrive. Turn off *Order for the lens* under Advanced if you ever need the raw left-to-right run.',
     ],
   },
 

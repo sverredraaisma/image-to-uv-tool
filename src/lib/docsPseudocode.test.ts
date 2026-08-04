@@ -50,7 +50,14 @@ function docImplementation(views: RasterImage[], p: LenticularSettings) {
 
   const cells = width_mm / pitch;
   const map_w = Math.round((width_mm / 25.4) * PPI);
-  const art_w = Math.min(map_w, Math.max(Math.ceil(cells * N * q), ...views.map((v) => v.width)));
+  const want = Math.max(Math.ceil(cells * N * q), ...views.map((v) => v.width));
+  let per_lens = Math.max(N, Math.ceil(want / cells / N - 1e-9) * N);
+  if (Math.round(cells * per_lens) > map_w) {
+    per_lens = Math.max(1, Math.round(map_w / cells));
+    while (per_lens > 1 && Math.round(cells * per_lens) > map_w) per_lens--;
+  }
+  let art_w = Math.round(cells * per_lens);
+  if (art_w > map_w) art_w = Math.round(map_w);
   const art_h = Math.round((art_w * views[0].height) / views[0].width);
   const art = createImage(art_w, art_h, [255, 255, 255, 255]);
   let mmPerPx = width_mm / art_w;

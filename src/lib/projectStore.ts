@@ -26,7 +26,7 @@ export function createProjectStore(backend: BlobBackend): ProjectStore {
     },
     async load(name) {
       const raw = await backend.get(key(name));
-      if (!raw) return null;
+      if (typeof raw !== 'string') return null; // text-only store
       try {
         return JSON.parse(raw) as SavedGraph;
       } catch {

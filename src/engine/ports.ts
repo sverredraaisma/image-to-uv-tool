@@ -15,7 +15,15 @@ import {
   radialViews,
 } from '../lib/lenticular';
 
-const PORT_TYPES: readonly PortType[] = ['image', 'mask', 'text', 'stl', 'sequence'];
+const PORT_TYPES: readonly PortType[] = [
+  'image',
+  'mask',
+  'text',
+  'stl',
+  'sequence',
+  'splat',
+  'transform',
+];
 
 export function asPortType(v: unknown, fallback: PortType = 'image'): PortType {
   return typeof v === 'string' && (PORT_TYPES as readonly string[]).includes(v) ? (v as PortType) : fallback;
