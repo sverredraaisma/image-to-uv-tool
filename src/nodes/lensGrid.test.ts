@@ -8,6 +8,7 @@ import {
   nodePorts,
   summariseMissing,
 } from '../engine/ports';
+import { packingAlignsRows } from '../lib/lenticular';
 import { getNodeDef } from '../engine/registry';
 import { EXAMPLES } from '../components/examples';
 import { createImage } from '../lib/image';
@@ -221,18 +222,21 @@ describe('gridInterlacedSize', () => {
   });
 
   it('adds the hex row spacing back, so a tile keeps its samples down too', () => {
-    // 40 ÷ √3/2: without it the closer rows would only get 1.7 px per tile.
+    // 40 ÷ √3/2 = 47 px of floor, then rounded up to a whole number of pixels
+    // per cell — 6 across 10 cells, which is 3 per tile column.
     const s = settings({ ppi: 1000 }); // clear of the cap, so the floor shows
-    expect(gridInterlacedSize(s, QUAD).width).toBe(47);
-    expect(gridInterlacedSize({ ...s, grid: 3 }, QUAD).width).toBe(70);
+    expect(gridInterlacedSize(s, QUAD).width).toBe(60);
+    // 70 px of floor at grid 3, rounded up to 9 px per cell: 3 per tile again.
+    expect(gridInterlacedSize({ ...s, grid: 3 }, QUAD).width).toBe(90);
   });
 
   it('leaves diagonal tile edges on the small raster rather than jumping to PPI', () => {
     // Staggered rows put every tile edge on a diagonal, which more pixels would
     // place better — but that is a choice (raise the samples), not a jump from
-    // 47 px to the 100 px lens raster behind the user's back.
-    expect(gridInterlacedSize(settings(), QUAD).width).toBe(47);
-    expect(gridInterlacedSize(settings({ stripSamples: 4 }), QUAD).width).toBe(93);
+    // 60 px to the 100 px lens raster behind the user's back.
+    expect(gridInterlacedSize(settings(), QUAD).width).toBe(60);
+    // 93 px of floor at four samples, rounded up to 10 px per cell.
+    expect(gridInterlacedSize(settings({ stripSamples: 4 }), QUAD).width).toBe(100);
     // A turned square array is just as diagonal, and treated the same way.
     expect(gridInterlacedSize(square({ orientationDeg: 23 }), QUAD).width).toBe(40);
     // …as is one on the axes, where every tile edge already lands on a pixel.
@@ -337,12 +341,12 @@ describe('Lens Grid node', () => {
     const out = await lensGridNode.compute(ctx(fourInputs, config()));
     const interlaced = out.interlaced as RasterImage;
     // The interlace needs 47 px; the lens map is on the printer's own 100.
-    expect(interlaced.width).toBe(47);
+    expect(interlaced.width).toBe(60); // 6 whole px per cell, 3 per tile column
     expect((out.depth as RasterImage).width).toBe(100);
     if (out.info?.kind === 'text') {
       expect(out.info.text).toContain('2×2 grid = 4 views');
       expect(out.info.text).toContain('Hexagonal lenslet packing — 90.7% of the sheet under a cap');
-      expect(out.info.text).toContain('Artwork on the minimal raster: 47 px of the 100 px');
+      expect(out.info.text).toContain('Artwork on the minimal raster: 60 px of the 100 px');
       expect(out.info.text).toContain('staggered view-tile edges');
       // Closer rows, so a hex sheet fits 12 rows of lenslets where it fits 10
       // columns — the packing gain, spent on vertical resolution.
@@ -557,9 +561,71 @@ describe('the loading-spinner example', () => {
     const interlaced = result.interlaced as RasterImage;
     expect((result.depth as RasterImage).width).toBe(1181); // 50 mm at 600 PPI
     // The artwork sizes itself: the 512 px sources and the interlace floor are
-    // both under the 1181 px the press can print, so that is what it ships at.
-    expect(interlaced.width).toBe(512);
+    // both under the 1181 px the press can print. 512 is not a whole number of
+    // pixels per cell, so it rounds up to the nearest that is — every cell then
+    // divides into views at the same offsets and the sheet switches as one.
+    expect(interlaced.width).toBe(531);
+    // Whole pixels per cell, to within the rounding of the total width — which
+    // is under one pixel across the whole sheet however many cells it holds.
+    const cells = (50 * 45) / 25.4;
+    const perCell = Math.round(interlaced.width / cells);
+    expect(Math.abs(interlaced.width - cells * perCell)).toBeLessThan(1);
     if (result.info?.kind === 'text') expect(result.info.text).not.toContain('⚠');
     else throw new Error('expected a text info output');
+  });
+});
+
+describe('every lenslet on the same pixel grid', () => {
+  const cellsOf = (s: LensGridSettings) => (s.widthMm * s.lpi) / 25.4;
+
+  it('gives every cell the same whole number of pixels across', () => {
+    for (const s of [
+      settings({ ppi: 1000 }),
+      settings({ ppi: 1000, grid: 3 }),
+      square({ ppi: 1000 }),
+      settings({ ppi: 1000, stripSamples: 3 }),
+    ]) {
+      const width = gridInterlacedSize(s, QUAD).width;
+      const cells = cellsOf(s);
+      const perCell = Math.round(width / cells);
+      // Whole, to within the rounding of the total width — which is under one
+      // pixel across the sheet however many cells it holds.
+      expect(Math.abs(width - cells * perCell)).toBeLessThan(1);
+    }
+  });
+
+  it('gives every tile column an equal share of the cell when the press allows', () => {
+    for (const grid of [2, 3, 4]) {
+      const s = settings({ ppi: 4000, grid });
+      const width = gridInterlacedSize(s, QUAD).width;
+      const perCell = Math.round(width / cellsOf(s));
+      expect(perCell % grid).toBe(0);
+    }
+  });
+
+  it('rounds up rather than throwing detail away', () => {
+    const s = settings({ ppi: 1000 });
+    const floorPx = Math.ceil((cellsOf(s) * 2 * 2) / (Math.sqrt(3) / 2));
+    expect(gridInterlacedSize(s, QUAD).width).toBeGreaterThanOrEqual(floorPx);
+  });
+
+  it('never goes past the press', () => {
+    const s = settings({ ppi: 100 }); // a 100 px sheet
+    expect(gridInterlacedSize(s, QUAD).width).toBeLessThanOrEqual(100);
+    const big = createImage(4000, 4000);
+    expect(gridInterlacedSize(s, [big, big, big, big]).width).toBeLessThanOrEqual(100);
+  });
+
+  it('can only align the rows of a square array, and says so', () => {
+    // Square rows sit a whole pitch apart, so aligning across aligns down for
+    // free. Hex rows sit √3/2 of a pitch apart, and √3/2 is irrational — no
+    // whole column pitch has a whole row pitch, ever. That is a proof, not a
+    // tolerance, and Square packing is the way out of it.
+    expect(packingAlignsRows('square')).toBe(true);
+    expect(packingAlignsRows('hex')).toBe(false);
+    for (let perCell = 1; perCell <= 200; perCell++) {
+      const rowPitch = perCell * (Math.sqrt(3) / 2);
+      expect(Math.abs(rowPitch - Math.round(rowPitch))).toBeGreaterThan(1e-6);
+    }
   });
 });

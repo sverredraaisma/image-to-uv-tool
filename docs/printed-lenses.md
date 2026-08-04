@@ -300,6 +300,16 @@ views then get equal shares of the lens; where the press cannot carry that, whol
 enough for the sheet to switch as one, with the strips inside a lens merely uneven (3, 3, 2, 3, 3, 2
 across a 16 px lens of six views) — and identically uneven under every lens, which is what matters.
 
+The lens grid and the radial array are sized the same way — whole pixels per *cell*, and a whole
+number per tile column where the press allows it — with one difference that is worth knowing before
+you choose a packing. A square array's rows sit one pitch apart, the same as its columns, and the
+artwork keeps the sheet's aspect: align it across and it is aligned down for free, so the print
+switches as one in both axes. A hex array's rows sit √3/2 of a pitch apart, and √3/2 is irrational,
+so **no raster has whole pixels between rows as well as between columns**. A hex sheet is therefore
+aligned across and drifting down: tilt it left and right and it switches together, tilt it up and
+down and the change sweeps through the rows. That is the price of the 15% more lenslets hex buys —
+exact, not a matter of degree — and square packing is the way out of it.
+
 (The `- 1e-9` before that ceiling is real and not a flourish. A 25.4 mm sheet at 12 LPI computes as
 11.999999999999998 lenticules, and an exact fit that rounds up because of it costs half as many
 pixels again for nothing.) A diagonal sheet is welcome to more pixels than that — its staircase is as fine as the

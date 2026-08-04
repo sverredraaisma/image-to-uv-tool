@@ -458,21 +458,6 @@ export function stripsOffPixelGrid(settings: LenticularSettings): boolean {
 }
 
 /**
- * The printer's raster as a *ceiling* on a piece of artwork.
- *
- * Nothing is gained by a pixel the press cannot place: the sheet is printed at
- * `ppi`, so a pixel finer than that raster is resampled away on its way to the
- * paper, having cost memory and render time to make. Whatever the interlace and
- * the sources ask for, this is where it stops.
- *
- * Note which way round it works. The PPI raster is not a floor — a sheet that
- * needs fewer pixels ships fewer, and only artwork that would otherwise come out
- * *larger* than the press can print is brought down to it.
- */
-const cappedAtPpi = (needed: number, ppiWidth: number): number =>
-  Math.max(1, Math.min(Math.max(1, Math.round(needed)), Math.max(1, ppiWidth)));
-
-/**
  * Smallest raster that still holds everything the interlaced sheet knows.
  *
  * The interlaced artwork carries no lens geometry — it is flat ink that the
@@ -483,7 +468,11 @@ const cappedAtPpi = (needed: number, ppiWidth: number): number =>
  *     every lenticule, so no strip can be skipped by an unlucky phase;
  *   • the artwork: never resample the highest-resolution frame downwards.
  *
- * …and {@link cappedAtPpi} bounds it from above.
+ * …and the printer's own raster bounds it from above, because a pixel finer
+ * than the press can place is resampled away on the way to the paper having
+ * cost memory and render time to make. {@link alignedInterlaceWidth} applies
+ * that ceiling, and the alignment, in one step — the two decisions interact,
+ * since the whole pitch it rounds to has to be one the press can carry.
  *
  * Diagonal strip edges ({@link stripsOffPixelGrid}) are the one thing more
  * pixels would still buy, since the staircase along them is only as fine as the
@@ -1180,9 +1169,33 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
     (cells * clampGrid(settings.grid) * samples) / rowScaleOf(clampPacking(settings.packing)),
   );
   const forArtwork = Math.max(...views.map((v) => v.width));
-  const width = cappedAtPpi(Math.max(forViews, forArtwork), outputSize(settings, first).width);
+  // Whole pixels per cell across, and a whole number per tile column where the
+  // press allows — so every cell divides into views at the same offsets and the
+  // sheet switches as one. See {@link alignedInterlaceWidth}, and the note on
+  // hex rows below.
+  const width = alignedInterlaceWidth(
+    Math.max(forViews, forArtwork),
+    cells,
+    clampGrid(settings.grid),
+    outputSize(settings, first).width,
+  );
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
+
+/**
+ * Can this packing put whole pixels between rows as well as between columns?
+ *
+ * Square can: the row pitch *is* the column pitch, and the raster keeps the
+ * sheet's aspect, so aligning across aligns down for free.
+ *
+ * Hex cannot, and not for want of trying — its rows sit √3/2 of a pitch apart,
+ * and √3/2 is irrational, so no whole column pitch has a whole row pitch. A hex
+ * sheet is therefore aligned across and drifting down: tilt it left and right
+ * and it switches as one, tilt it up and down and the change sweeps through the
+ * rows. That is the price of the 15% more lenslets hex buys, it is exact rather
+ * than a matter of degree, and Square packing is the way out of it.
+ */
+export const packingAlignsRows = (packing: LensPacking): boolean => rowScaleOf(packing) === 1;
 
 function requireGridViews(views: RasterImage[], grid: number): number {
   const n = clampGrid(grid);
@@ -1525,7 +1538,16 @@ export function radialInterlacedSize(settings: RadialSettings, views: RasterImag
   // the rim, where it subtends (π/N) of a cell diameter.
   const forWedges = Math.ceil((cells * clampRadialViews(settings.views) * samples) / Math.PI);
   const forArtwork = Math.max(...views.map((v) => v.width));
-  const width = cappedAtPpi(Math.max(forWedges, forArtwork), outputSize(settings, first).width);
+  // Whole pixels per cell, so every cap divides into wedges identically and the
+  // whole sheet turns at once. No per-wedge divisor, unlike the other two: a
+  // wedge is an angle, not a column, so there is no horizontal count that would
+  // make them equal — the cell pitch is the only thing to align.
+  const width = alignedInterlaceWidth(
+    Math.max(forWedges, forArtwork),
+    cells,
+    1,
+    outputSize(settings, first).width,
+  );
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
 }
 
@@ -1806,7 +1828,14 @@ export function describeRadialGeometry(
     `Head-on all ${n} merge: every wedge meets at the centre of its lenslet, so the eye averages the ` +
       `whole set. Tilt in any direction and the view owning that bearing takes the sheet`,
     `${packing === 'hex' ? 'Hexagonal' : 'Square'} lenslet packing — ` +
-      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
+      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap` +
+      (packingAlignsRows(packing)
+        ? '; its rows sit a whole pitch apart, so the artwork lands on whole pixels down the sheet as ' +
+          'well as across and the whole print switches at once in both axes'
+        : '; its rows sit √3/2 of a pitch apart, and √3/2 is irrational — so no raster can put whole ' +
+          'pixels between rows as well as between columns. Tilting left and right switches the sheet ' +
+          'as one; tilting up and down sweeps the change through the rows. Square packing is the way ' +
+          'out of that, at 15% fewer lenslets'),
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
     describeArtRaster(settings.ppi, artSize, depthSize, {
@@ -1859,7 +1888,14 @@ export function describeGridGeometry(
   const lines = [
     `${grid}×${grid} grid = ${grid * grid} views · ${settings.widthMm} mm wide`,
     `${packing === 'hex' ? 'Hexagonal' : 'Square'} lenslet packing — ` +
-      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap`,
+      `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap` +
+      (packingAlignsRows(packing)
+        ? '; its rows sit a whole pitch apart, so the artwork lands on whole pixels down the sheet as ' +
+          'well as across and the whole print switches at once in both axes'
+        : '; its rows sit √3/2 of a pitch apart, and √3/2 is irrational — so no raster can put whole ' +
+          'pixels between rows as well as between columns. Tilting left and right switches the sheet ' +
+          'as one; tilting up and down sweeps the change through the rows. Square packing is the way ' +
+          'out of that, at 15% fewer lenslets'),
     `Depth map ${depthSize.width}×${depthSize.height} px @ ${settings.ppi} PPI · ` +
       `artwork ${artSize.width}×${artSize.height} px (scale to fit at print time)`,
     describeArtRaster(
