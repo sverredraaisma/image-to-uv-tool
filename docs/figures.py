@@ -87,11 +87,12 @@ class Lens:
         ri: float,
         ppi: float = 1440.0,
         profile: str = "ellipse",
+        focus: str = "axis",
     ):
         n = max(1.0001, ri)
         h = max(1e-6, height_mm)
         self.lpi, self.n, self.H, self.ppi = lpi, n, h, ppi
-        self.profile_name = profile
+        self.profile_name, self.focus_name = profile, focus
         self.pitch = 25.4 / lpi
         self.pitch_px = ppi / lpi
         half = self.pitch / 2
@@ -104,13 +105,74 @@ class Lens:
         wanted_r = h * (n - 1) / n
         self.min_height = n * reach * self.pitch / (2 * (n - 1))
         self.feasible = wanted_r >= reach * half
-        self.radius = wanted_r if self.feasible else reach * half
+        self.axial_radius = wanted_r if self.feasible else reach * half
+        self.radius = self.axial_radius
+        # The ray through the lens axis meets the surface square on, so where it
+        # lands — and so where the print repeats — is set by the pitch and the
+        # stack height, not by the radius. Same for either focus below.
+        sin_in = half / math.hypot(half, h)
+        self.view_angle = 2 * math.degrees(math.asin(min(1.0, n * sin_in)))
+        if focus == "cone" and self.feasible:
+            self.radius = self._best_radius()
         self.sag = float(conic_sag(half, self.radius, self.K))
         self.focus = n * self.radius / (n - 1)
         self.base = max(0.0, h - self.sag)
         self.total = self.base + self.sag
-        sin_in = half / math.hypot(half, self.focus)
-        self.view_angle = 2 * math.degrees(math.asin(min(1.0, n * sin_in)))
+
+    # --- the trace, which is what "focus for the cone" is solved against ----
+
+    def landings(self, theta_deg=0.0, rays=41, radius=None):
+        """Where a parallel bundle from `theta_deg` lands on the artwork, mm."""
+        R = self.radius if radius is None else radius
+        th = math.radians(theta_deg)
+        d = (-math.sin(th), -math.cos(th))
+        half = self.pitch / 2
+        out = []
+        for off in np.linspace(-half * 0.99, half * 0.99, rays):
+            y = self.H - float(conic_sag(abs(off), R, self.K))
+            disc = max(1e-12, 1 - (1 + self.K) * off * off / (R * R))
+            slope = off / (R * math.sqrt(disc))
+            nl = math.hypot(slope, 1.0)
+            normal = (slope / nl, 1.0 / nl)
+            eta = 1.0 / self.n
+            cos_i = -(d[0] * normal[0] + d[1] * normal[1])
+            k = 1 - eta * eta * (1 - cos_i * cos_i)
+            if k < 0:
+                continue
+            f = eta * cos_i - math.sqrt(k)
+            ins = (eta * d[0] + f * normal[0], eta * d[1] + f * normal[1])
+            if ins[1] >= 0:
+                continue
+            out.append(off + (y / -ins[1]) * ins[0])
+        return out
+
+    def spot_mm(self, theta_deg=0.0, rays=41, radius=None):
+        """How wide that bundle lands — the blur one view is smeared over."""
+        lands = self.landings(theta_deg, rays, radius)
+        return (max(lands) - min(lands)) if lands else 0.0
+
+    def worst_spot_mm(self, rays=41, radius=None):
+        half = self.view_angle / 2
+        return max(self.spot_mm(f * half, rays, radius) for f in (0, 0.25, 0.5, 0.75, 1))
+
+    def _best_radius(self):
+        """Golden-section for the radius whose worst blur across the cone is least."""
+        phi = (math.sqrt(5) - 1) / 2
+        lo, hi = self.axial_radius, self.axial_radius * 1.6
+        c, dd = hi - phi * (hi - lo), lo + phi * (hi - lo)
+        fc, fd = self.worst_spot_mm(25, c), self.worst_spot_mm(25, dd)
+        for _ in range(24):
+            if hi - lo <= self.axial_radius * 1e-4:
+                break
+            if fc < fd:
+                hi, dd, fd = dd, c, fc
+                c = hi - phi * (hi - lo)
+                fc = self.worst_spot_mm(25, c)
+            else:
+                lo, c, fc = c, dd, fd
+                dd = lo + phi * (hi - lo)
+                fd = self.worst_spot_mm(25, dd)
+        return (lo + hi) / 2
 
     def surface(self, d):
         """Height of the surface above the *artwork*, at offset d from the axis."""
@@ -1182,9 +1244,10 @@ def fig_aberration():
     L = DEFAULT
     half = L.pitch / 2
     K_ELL = -1 / L.n**2
-    # The vertex radius whose *best* focus, rather than whose paraxial focus,
-    # falls on the artwork — found by search, in the sweep below.
-    R_BEST = 0.3470
+    # The radii whose *worst blur across the cone*, rather than whose paraxial
+    # focus, is what they were solved for — the same search the tool runs.
+    R_BEST = Lens(45, 0.9, 1.5, profile="circle", focus="cone").radius
+    R_BEST_ELL = Lens(45, 0.9, 1.5, focus="cone").radius
     fine = np.linspace(-half * 0.99, half * 0.99, 401)
     drawn = np.linspace(-half * 0.99, half * 0.99, 17)
 
@@ -1218,10 +1281,10 @@ def fig_aberration():
     bx = fig.add_subplot(gs[0, 2])
     angles = np.linspace(0, L.view_angle / 2, 28)
     designs = (
-        ("circle, focus on the artwork — as printed", dict(R=L.radius, K=0.0), INK, "-"),
-        ("circle, radius set for best focus", dict(R=R_BEST, K=0.0), SUB, (0, (4, 3))),
-        ("ellipse K = −1/n², same radius", dict(R=L.radius, K=K_ELL), ART, "-"),
-        ("ellipse, radius re-optimised", dict(R=0.3460, K=K_ELL), GLOSS, (0, (1, 2))),
+        ("circle, focus on the axis", dict(R=L.radius, K=0.0), INK, "-"),
+        ("circle, focus for the cone", dict(R=R_BEST, K=0.0), SUB, (0, (4, 3))),
+        ("ellipse, focus on the axis — the default", dict(R=L.radius, K=K_ELL), ART, "-"),
+        ("ellipse, focus for the cone", dict(R=R_BEST_ELL, K=K_ELL), GLOSS, (0, (1, 2))),
     )
     for label, kw, col, ls in designs:
         bx.plot(
@@ -1230,8 +1293,7 @@ def fig_aberration():
             color=col, lw=1.8, ls=ls, label=label,
         )
     bx.axhline(strip, color=WARN, lw=1.2)
-    bx.text(L.view_angle / 2 * 0.53, strip * 1.12, "one strip at 12 views — past this is crosstalk",
-            fontsize=8.6, color=WARN)
+    bx.text(0.6, strip * 1.16, "one strip at 12 views — past this is crosstalk", fontsize=8.6, color=WARN)
     bx.set_xlabel("viewing angle off head-on (°)")
     bx.set_ylabel("blur at the artwork (µm)")
     bx.set_xlim(0, L.view_angle / 2)

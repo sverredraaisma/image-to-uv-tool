@@ -215,13 +215,22 @@ focuses at the wrong depth is blurry, not ruined, and seeing it is more useful t
 ## How wide the view is
 
 The cone you can move through before the image stops flipping is set by the marginal ray: the one
-from the focus out through the edge of the lens, refracted back into air.
+from the artwork out through the edge of the lens, refracted back into air.
 
 ![The viewing cone](images/06-viewing-cone.png)
 
 ```
 sin(θ/2) = n · sin( arctan( (p/2) / H ) )
 ```
+
+Note which `H` that is: the **stack height**, the apex-to-artwork distance — not the focal length.
+The two are equal whenever the lens is solved to focus on the artwork, which is why the distinction
+rarely comes up, but they are not the same thing and the cone follows the stack. The ray through the
+lenticule's own axis meets the surface square on, so it refracts as if through a flat plane and lands
+`H·tan(asin(sinθ/n))` from the axis _whatever the radius is_; the cone is where that walks off the
+lenticule and the print starts repeating. So a lens whose radius has been chosen for something other
+than the axial focus — [as one option below does](#the-blur-the-lens-itself-adds) — has exactly the
+same cone as one that hasn't.
 
 Both this and the feasibility floor depend on the pitch and the height **only through their ratio**.
 Halve both and nothing changes — same lens shape, same margin, same cone. That has two consequences
@@ -284,12 +293,15 @@ the raster could carry.
 
 Four things reduce it, and they are not equally good:
 
-| Surface                                            | Blur head-on        | Worst across the cone | What it costs    |
-| -------------------------------------------------- | ------------------- | --------------------- | ---------------- |
-| circle, focus on the artwork _(the obvious shape)_ | 269 µm · 5.7 strips | 446 µm · 9.5 strips   | —                |
-| circle, radius set for **best focus**              | 30 µm · 0.6         | 174 µm · 3.7          | ~13% of the cone |
-| **ellipse**, `K = −1/n²` _(what the tool prints)_  | **0 µm**            | 167 µm · 3.6          | nothing          |
-| ellipse, radius re-optimised over the cone         | 85 µm · 1.8         | **86 µm · 1.8**       | ~13% of the cone |
+| Surface and focus                                       | Blur head-on        | Worst across the cone | Height floor |
+| ------------------------------------------------------- | ------------------- | --------------------- | ------------ |
+| circle, focus on the axis _(the obvious lens)_          | 269 µm · 5.7 strips | 446 µm · 9.5 strips   | 0.847 mm     |
+| circle, focus for the cone                              | 85 µm · 1.8         | 85 µm · 1.8           | 0.847 mm     |
+| **ellipse**, focus on the axis _(what the tool prints)_ | **0 µm**            | 167 µm · 3.6          | **0.631 mm** |
+| ellipse, focus for the cone                             | 85 µm · 1.8         | **85 µm · 1.8**       | **0.631 mm** |
+
+None of the four costs any viewing cone: the cone is set by the pitch and the stack height, and the
+radius has nothing to do with it — see [how wide the view is](#how-wide-the-view-is).
 
 **Change the shape.** An ellipse, not a circle, is the exact answer for the on-axis point: for one
 refracting surface bringing collimated light to a focus inside a medium of index `n`, the conic that
@@ -307,13 +319,29 @@ made. Here **the profile is a height map** — an aspheric costs exactly as many
 the tool prints one, and `Lens surface` on the print nodes is how you go back to a circle. It also
 lowers the height floor by a quarter, which is the [second thing it buys](#when-it-cant-work).
 
-**Move the focus.** The one worth knowing if you are stuck with a circle: put the artwork at the
-circle of least
-confusion instead of at the paraxial focus. For this lenticule the tightest plane is 180 µm above the
-paraxial focus, so solving the radius from `best focus = H` rather than `paraxial focus = H` — R
-0.347 mm instead of 0.300 — turns 269 µm into **30 µm**, a ninefold improvement for a different
-number in the same formula. It is not free: the lens is weaker, so by the marginal-ray measure this
-document uses the cone narrows from 53.3° to 46.2°.
+**Move the focus.** The second lever, and the second setting: `Focus for` on the print nodes. Rather
+than putting the vertex focus on the artwork, solve the radius so that the *worst* blur anywhere in
+the cone is as small as it can be. Spherical aberration lands the outer rays short, so a longer
+radius — 0.346 mm rather than 0.300 — brings the whole bundle together at the artwork instead: the
+circle of least confusion, put where the picture is. The tool searches for it, over the same trace
+that produced the numbers above.
+
+It flattens the curve completely. The ellipse's 0 µm head-on and 167 at the rim become **85 µm
+everywhere**, and the whole cone is then equally good rather than a sweet spot with edges. Watch the
+same sweep with it:
+
+![The view sweep, focused for the whole cone](images/18-sweep-even-focus.gif)
+
+Two things are visible there that the numbers do not say. The caps are shallower — that is the longer
+radius. And the bundle straddles a strip boundary at nearly every angle, because 85 µm is 1.8 strips
+of a twelve-view print: an even focus makes every view equally slightly blended, where the axial one
+makes the middle of the cone perfect and the edges poor. Which you want depends on the print. It also
+means the even focus suits **fewer views**: at six views a strip is 94 µm and 85 fits inside it, so
+the same lens that cannot cleanly resolve twelve resolves six across the entire cone.
+
+And an honest note the table makes plain: once the focus is solved for the cone, **the shape stops
+mattering for blur** — the circle lands within a micron of the ellipse. What the ellipse still buys
+there is the height floor, which is a quarter lower and does not care how the focus was chosen.
 
 **Stop the aperture down.** Blur falls fast with aperture — 80% of the pitch gives 88 µm, 60% gives
 30 µm — which is the standard advice in the display literature: increasing the radius of curvature or
@@ -1201,6 +1229,7 @@ apart, that test fails.
 | Clean at one edge, smeared at the other         | Pitch mismatch (laminated lens, or RIP scaling)                                                                | Run the LPI calibration                                                                                         |
 | Two views visible at once                       | Focus too long, or the ink slumped                                                                             | More height, or cure harder                                                                                     |
 | Views blended at every angle, worst off-axis    | A circular surface: it cannot focus its own aperture, and spreads a view over ~6 strips                        | Set Lens surface to Ellipse — same height, same cone, no cost                                                    |
+| Sharp head-on, softening towards the edges      | Coma — the residual an ellipse leaves, which grows with the angle                                              | Focus for: the whole cone; or fewer views, which widens the strip                                               |
 | Depth inverted, motion feels wrong              | Pseudoscopic — views not mirrored                                                                              | Mirror both view indices                                                                                        |
 | Stair-stepping on the lens surface              | 8-bit relief, or too few pixels per lens                                                                       | Emit 16-bit; raise PPI or lower LPI to ≥ 8 px per lens                                                          |
 | A view missing from some lenses                 | Artwork raster too small, a tile fell between pixels                                                           | Raise samples per tile to 2 or more                                                                             |

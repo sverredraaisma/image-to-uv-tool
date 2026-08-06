@@ -58,7 +58,7 @@ import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Circle, Rectangle, Wedge
 
-from figures import CIRCLE, DEFAULT, FAINT, GLOSS, GLOSS_FILL, INK, RAY, SUB, WARN, clean, conic_sag
+from figures import DEFAULT, FAINT, GLOSS, GLOSS_FILL, INK, Lens, RAY, SUB, WARN, clean, conic_sag
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
 
@@ -324,8 +324,15 @@ def main():
         "--surface", choices=("ellipse", "circle"), default="ellipse",
         help="which lens to trace: the ellipse the tool prints, or the circle it used to",
     )
+    ap.add_argument(
+        "--focus", choices=("axis", "cone"), default="axis",
+        help="where the radius puts the focus: on the axis (default), or evenest across the cone",
+    )
     args = ap.parse_args()
-    lens = CIRCLE if args.surface == "circle" else DEFAULT
+    # The same solve the tool runs, for whichever surface and focus is asked
+    # for — DEFAULT is already ellipse-on-axis, but say it in full so the
+    # frames are never quietly something else.
+    lens = Lens(45, 0.9, 1.5, profile=args.surface, focus=args.focus)
 
     os.makedirs(args.out, exist_ok=True)
     angles = np.arange(-args.span, args.span + 1e-9, args.step)
