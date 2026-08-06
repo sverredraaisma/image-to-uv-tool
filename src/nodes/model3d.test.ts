@@ -34,6 +34,8 @@ const config = (over: Record<string, unknown> = {}) => ({
   ...modelViewsNode.defaultConfig(),
   viewPx: 48,
   supersample: 1,
+  // `grid` on its own means a square grid, the only shape there used to be.
+  ...('grid' in over ? { gridY: over.grid } : {}),
   ...over,
 });
 
@@ -88,6 +90,15 @@ describe('Model → Grid Views', () => {
     }
   });
 
+  it('renders an oblong grid, one view per cell of it', async () => {
+    // 2 across × 3 down: six eye positions, and the print node reads them in
+    // the same row-major order it names its own cells in.
+    const out = await modelViewsNode.compute(ctx({ model: TETRA }, config({ grid: 2, gridY: 3 })));
+    expect((out.views as SequenceValue).frames).toHaveLength(6);
+    const cfg = { ...modelViewsNode.defaultConfig(), grid: 2, gridY: 3 };
+    expect(describeViewGrid(cfg, viewGridOptionsFromConfig(cfg), TETRA, 0.3)).toContain('2×3 = 6 views');
+  });
+
   it('flips the depth output on request', async () => {
     const near = (img: RasterImage) => img.data[Math.floor(img.height / 2) * img.width * 4 + 4];
     const normal = (await modelViewsNode.compute(ctx({ model: TETRA }, config()))).depth as RasterImage;
@@ -130,7 +141,12 @@ describe('the Info report', () => {
   // not rasterise, so there is nothing to speed up and every warning threshold
   // is then measured against what a user actually gets.
   const report = (over: Record<string, unknown> = {}) => {
-    const cfg = { ...modelViewsNode.defaultConfig(), ...over };
+    // `grid` alone is a square grid, as it was when that was the only shape.
+    const cfg = {
+      ...modelViewsNode.defaultConfig(),
+      ...('grid' in over ? { gridY: over.grid } : {}),
+      ...over,
+    };
     return describeViewGrid(cfg, viewGridOptionsFromConfig(cfg), TETRA, 0.3);
   };
 
@@ -210,6 +226,17 @@ describe('the Info report', () => {
     expect(report({ viewPx: 512 })).not.toContain('upsampled');
   });
 
+  it('measures the parallax on the sparser axis, which is where the steps are biggest', () => {
+    const step = (over: Record<string, unknown>) =>
+      parseFloat(/Parallax ([\d.]+) lenslets/.exec(report(over))![1]);
+    // Both axes cross the same cone, so 15 across by 3 down steps as far as a
+    // 3×3 does — vertically — and that is what decides whether it doubles.
+    expect(step({ grid: 15, gridY: 3 })).toBeCloseTo(step({ grid: 3 }), 5);
+    expect(report({ grid: 15, gridY: 3 })).toContain('down — the sparser axis');
+    expect(report({ grid: 3, gridY: 15 })).toContain('across — the sparser axis');
+    expect(report({ grid: 3 })).toContain('either axis');
+  });
+
   it('spends more depth on a bigger grid, because the steps get smaller', () => {
     const step = (over: Record<string, unknown>) =>
       parseFloat(/Parallax ([\d.]+) lenslets/.exec(report(over))![1]);
@@ -253,7 +280,7 @@ describe('feeding Lens Grid Print from one wire', () => {
   it('still names the cells a short sequence cannot fill', async () => {
     const short: SequenceValue = { kind: 'sequence', frames: [] };
     await expect(
-      lensGridNode.compute(ctx({ views: short }, { ...lensGridNode.defaultConfig(), grid: 2 })),
+      lensGridNode.compute(ctx({ views: short }, { ...lensGridNode.defaultConfig(), grid: 2, gridY: 2 })),
     ).rejects.toThrow(/Missing: Left · Up, Right · Up, Left · Down, Right · Down/);
   });
 

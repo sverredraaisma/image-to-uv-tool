@@ -31,19 +31,29 @@ import type { ComputeContext, DataValue, RasterImage, SavedGraph } from '../type
 const ctx = (inputs: Record<string, DataValue | undefined>, config: Record<string, unknown>) =>
   ({ inputs, config }) as unknown as ComputeContext;
 
-/** Config that renders a fast artwork on a 100 px lens map. */
-const config = (over: Record<string, unknown> = {}) => ({
-  ...lensGridNode.defaultConfig(),
-  grid: 2,
-  widthMm: 25.4,
-  ppi: 100,
-  lpi: 10,
-  heightMm: 5,
-  ...over,
-});
+/**
+ * Config that renders a fast artwork on a 100 px lens map. `grid` on its own
+ * means a square one, as it did when that was the only shape there was; pass
+ * `gridY` too for an oblong grid.
+ */
+const config = (over: Record<string, unknown> = {}) => {
+  const grid = 'grid' in over ? over.grid : 2;
+  return {
+    ...lensGridNode.defaultConfig(),
+    grid,
+    gridY: grid,
+    widthMm: 25.4,
+    ppi: 100,
+    lpi: 10,
+    heightMm: 5,
+    ...over,
+  };
+};
 
 const settings = (over: Partial<LensGridSettings> = {}): LensGridSettings => ({
   ...gridSettingsFromConfig(config()),
+  // `grid` alone means a square grid here too.
+  ...(over.grid !== undefined && over.gridY === undefined ? { gridY: over.grid } : {}),
   ...over,
 });
 
@@ -66,6 +76,19 @@ const LD = solid([0, 0, 255]);
 const RD = solid([255, 255, 0]);
 const QUAD = [LU, RU, LD, RD];
 const fourInputs = { c0r0: LU, c1r0: RU, c0r1: LD, c1r1: RD };
+
+/** Six distinguishable views, in the cell order of a 2 across × 3 down grid. */
+const SIX = [
+  [255, 0, 0],
+  [0, 255, 0],
+  [0, 0, 255],
+  [255, 255, 0],
+  [255, 0, 255],
+  [0, 255, 255],
+].map((rgb) => solid(rgb as [number, number, number]));
+
+/** The colour a view was made of, for comparing against a sampled pixel. */
+const colour = (view: RasterImage) => [view.data[0], view.data[1], view.data[2]];
 
 describe('grid cell naming', () => {
   it('names a 2-wide axis with no centre', () => {
@@ -118,6 +141,21 @@ describe('grid cell naming', () => {
   it('clamps the grid to a printable range', () => {
     expect(gridCells(1)).toHaveLength(4); // floor of 2×2
     expect(gridCells(99)).toHaveLength(225); // ceiling of 15×15
+    expect(gridCells(2, 99)).toHaveLength(30); // …on each axis separately
+  });
+
+  it('names an oblong grid by each axis’ own count', () => {
+    // 2 across has no centre column; 3 down has a centre row, so the middle
+    // cells are named by the axis that is off-centre alone.
+    expect(gridCells(2, 3).map((c) => c.label)).toEqual([
+      'Left · Up',
+      'Right · Up',
+      'Left',
+      'Right',
+      'Left · Down',
+      'Right · Down',
+    ]);
+    expect(gridCells(2, 3).map((c) => c.id)).toEqual(['c0r0', 'c1r0', 'c0r1', 'c1r1', 'c0r2', 'c1r2']);
   });
 
   it('numbers the ranks once a grid is too wide for words', () => {
@@ -147,6 +185,14 @@ describe('Lens Grid node ports', () => {
     expect(lensGridInputs({ grid: 2 })).toHaveLength(5);
   });
 
+  it('takes the two axes separately, and a lone grid as square', () => {
+    expect(lensGridCellInputs({ grid: 2, gridY: 3 })).toHaveLength(6);
+    expect(lensGridCellInputs({ grid: 2, gridY: 3 })[2].label).toBe('Left');
+    // A graph saved before the grid could be oblong carries no gridY at all,
+    // and it meant a square grid — which is what falling back to `grid` gives.
+    expect(lensGridCellInputs({ grid: 4 })).toHaveLength(16);
+  });
+
   it('stops offering a port per cell past 4×4, leaving the sequence alone', () => {
     // 25 handles on one node is not a way anyone would wire a print; 225 is not
     // a node at all. The whole set comes down the one wire instead.
@@ -157,6 +203,11 @@ describe('Lens Grid node ports', () => {
     // …but every cell still exists, in order, for the sequence to fill.
     expect(lensGridCellSlots({ grid: 15 })).toHaveLength(225);
     expect(lensGridCellSlots({ grid: 15 })[0].label).toBe('Left 7 · Up 7');
+    // The limit is the number of handles, so an oblong grid is judged on its
+    // cell count: 2×8 is as many wires to drag as 4×4, and 2×15 is thirty.
+    expect(lensGridCellInputs({ grid: 2, gridY: 8 })).toHaveLength(16);
+    expect(lensGridCellInputs({ grid: 2, gridY: 15 })).toHaveLength(0);
+    expect(lensGridCellSlots({ grid: 2, gridY: 15 })).toHaveLength(30);
   });
 
   it('keeps a missing-view list readable', () => {
@@ -206,6 +257,20 @@ describe('renderGridInterlaced', () => {
     expect(px(img, 0, 7)).toEqual(px(img, 0, 0));
   });
 
+  it('cuts the cell into its own number of columns and rows', () => {
+    // 2 across × 3 down on a 60 px raster: a 6 px cell, so 3 px per tile
+    // column and 2 px per tile row. Mirrored, as always.
+    const img = renderGridInterlaced(SIX, square({ grid: 2, gridY: 3 }), {
+      interlacedSize: { width: 60, height: 60 },
+    });
+    expect(px(img, 0, 0)).toEqual(colour(SIX[5])); // Right · Down
+    expect(px(img, 3, 0)).toEqual(colour(SIX[4])); // Left · Down — one tile across
+    expect(px(img, 0, 3)).toEqual(colour(SIX[3])); // Right (centre row)
+    expect(px(img, 0, 5)).toEqual(colour(SIX[1])); // Right · Up — the third tile row
+    // …and the whole pattern repeats every cell, 6 px on.
+    expect(px(img, 6, 6)).toEqual(px(img, 0, 0));
+  });
+
   it('insists on exactly grid² views', () => {
     expect(() => renderGridInterlaced([LU, RU, LD], settings())).toThrow(/2×2 lens grid needs 4 images/);
     expect(() => renderGridDepthMap([LU, RU, LD], settings())).toThrow(/2×2 lens grid needs 4 images/);
@@ -221,13 +286,23 @@ describe('gridInterlacedSize', () => {
     expect(gridInterlacedSize(square({ grid: 3 }), QUAD).width).toBe(60);
   });
 
+  it('sizes an oblong grid on whichever axis asks for more', () => {
+    // The raster keeps the sheet's aspect, so the axis with more views is what
+    // sets the width: 2×6 needs the same 10 cells × 6 tiles × 2 samples as 6×2.
+    const s = { ppi: 1000 }; // clear of the press cap, so the floor shows
+    expect(gridInterlacedSize(square({ ...s, grid: 2, gridY: 6 }), Array(12).fill(LU)).width).toBe(120);
+    expect(gridInterlacedSize(square({ ...s, grid: 6, gridY: 2 }), Array(12).fill(LU)).width).toBe(120);
+    // …and neither is charged for views it does not have: a 2×2 wants 40.
+    expect(gridInterlacedSize(square({ ...s, grid: 2 }), QUAD).width).toBe(40);
+  });
+
   it('adds the hex row spacing back, so a tile keeps its samples down too', () => {
     // 40 ÷ √3/2 = 47 px of floor, then rounded up to a whole number of pixels
     // per cell — 6 across 10 cells, which is 3 per tile column.
     const s = settings({ ppi: 1000 }); // clear of the cap, so the floor shows
     expect(gridInterlacedSize(s, QUAD).width).toBe(60);
     // 70 px of floor at grid 3, rounded up to 9 px per cell: 3 per tile again.
-    expect(gridInterlacedSize({ ...s, grid: 3 }, QUAD).width).toBe(90);
+    expect(gridInterlacedSize({ ...s, grid: 3, gridY: 3 }, QUAD).width).toBe(90);
   });
 
   it('leaves diagonal tile edges on the small raster rather than jumping to PPI', () => {
@@ -414,7 +489,7 @@ describe('Lens Grid node', () => {
   });
 
   it('passes a 15×15 at the node’s own defaults — which is what caps it there', () => {
-    const s = gridSettingsFromConfig({ ...lensGridNode.defaultConfig(), grid: 15 });
+    const s = gridSettingsFromConfig({ ...lensGridNode.defaultConfig(), grid: 15, gridY: 15 });
     const view = solid([0, 0, 0], 8, 8);
     const text = describeGridGeometry(
       s,
@@ -426,12 +501,32 @@ describe('Lens Grid node', () => {
     expect(text).not.toContain('printed dots');
   });
 
+  it('prints an oblong grid, and says which way round it is', async () => {
+    const out = await lensGridNode.compute(
+      ctx({ views: { kind: 'sequence', frames: SIX } }, config({ grid: 2, gridY: 3 })),
+    );
+    expect((out.interlaced as RasterImage).width).toBeGreaterThan(0);
+    if (out.info?.kind === 'text') expect(out.info.text).toContain('2×3 grid = 6 views');
+    else throw new Error('expected a text info output');
+  });
+
+  it('asks for the cells an oblong grid is actually missing', async () => {
+    await expect(lensGridNode.compute(ctx({}, config({ grid: 2, gridY: 3 })))).rejects.toThrow(
+      /A 2×3 lens grid needs all 6 views/,
+    );
+  });
+
   it('reads the grid-only settings out of config', () => {
     const s = gridSettingsFromConfig({ grid: 4, phaseY: 0.25, mirrorViews: false, packing: 'square' });
     expect(s).toMatchObject({ grid: 4, phaseY: 0.25, mirrorViews: false, packing: 'square' });
     // …and inherits the shared print settings.
     expect(s.ppi).toBe(1440);
     expect(gridSettingsFromConfig({}).grid).toBe(3);
+    // Each axis is its own setting, and a config with only `grid` — every graph
+    // saved before the grid could be oblong — is square.
+    expect(gridSettingsFromConfig({ grid: 2, gridY: 5 })).toMatchObject({ grid: 2, gridY: 5 });
+    expect(gridSettingsFromConfig({ grid: 4 }).gridY).toBe(4);
+    expect(gridSettingsFromConfig({}).gridY).toBe(3);
     // Only an explicit 'square' opts out of hex — including in graphs saved
     // before the setting existed, which carry no `packing` at all.
     expect(gridSettingsFromConfig({}).packing).toBe('hex');
@@ -536,7 +631,7 @@ describe('the loading-spinner example', () => {
     const node = graph.nodes.find((n) => n.id === 'grid')!;
     const defaults = getNodeDef('lensGrid').defaultConfig();
     // Only the grid size is the example's own choice — it supplies four views.
-    expect(node.config).toEqual({ ...defaults, grid: 2 });
+    expect(node.config).toEqual({ ...defaults, grid: 2, gridY: 2 });
   });
 
   it('renders a printable pair of sheets', async () => {

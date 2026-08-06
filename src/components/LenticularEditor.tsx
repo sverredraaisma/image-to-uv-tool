@@ -8,9 +8,10 @@ import { encodeGray16Png } from '../lib/png16';
 import {
   calibrationPixelsPerLens,
   calibrationValues,
-  clampGrid,
   gridCellCounts,
+  gridDims,
   gridInterlacedSize,
+  gridLabel,
   gridSwitchViews,
   gridTilesOffPixelGrid,
   interlacedSize,
@@ -535,7 +536,8 @@ export function RadialGridEditor({ nodeId }: { nodeId: string }) {
   const missingLabels = radialViewInputs(node.config)
     .filter((_, i) => !views[i])
     .map((p) => p.label);
-  const cells = ready ? gridCellCounts({ ...settings, grid: 2, mirrorViews: true }, present[0]) : null;
+  // The cap array is the same object a grid prints, so its cell counts are too.
+  const cells = ready ? gridCellCounts(settings, present[0]) : null;
 
   return (
     <PrintEditor
@@ -608,9 +610,9 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
 
   if (!node) return null;
   const settings = gridSettingsFromConfig(node.config);
-  const grid = clampGrid(settings.grid);
+  const { cols, rows } = gridDims(settings);
   const present = views.filter((v): v is RasterImage => !!v);
-  const ready = present.length === grid * grid;
+  const ready = present.length === cols * rows;
   const missingLabels = lensGridCellSlots(node.config)
     .filter((_, i) => !views[i])
     .map((p) => p.label);
@@ -626,7 +628,7 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
         settings,
         views: present,
         ready,
-        missing: `Connect all ${grid * grid} views of the ${grid}×${grid} grid. Missing: ${summariseMissing(missingLabels)}.`,
+        missing: `Connect all ${cols * rows} views of the ${gridLabel(cols, rows)} grid. Missing: ${summariseMissing(missingLabels)}.`,
         // One whole cell of gutter: with lenslets in both axes a band edge
         // would otherwise leave a row of half-printed lenses.
         bandGapMm: Math.max(BAND_GAP_MM, 25.4 / Math.max(1, settings.lpi)),
@@ -635,7 +637,7 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
           <>
             <dt>Grid</dt>
             <dd>
-              {grid} × {grid} = {grid * grid} views
+              {cols} across × {rows} down = {cols * rows} views
             </dd>
             <dt>Packing</dt>
             <dd>
@@ -665,7 +667,7 @@ export function LensGridEditor({ nodeId }: { nodeId: string }) {
         ),
         renderArt: (v, options) => gridInterlaceChunks(v, settings, options),
         renderDepth: (options) => gridDepthMapChunks(present, settings, options),
-        switchViews: () => gridSwitchViews(grid),
+        switchViews: () => gridSwitchViews(cols, rows),
       }}
     />
   );

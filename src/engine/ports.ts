@@ -58,12 +58,20 @@ const named = (config: NodeConfig, fallback: string): string => {
   return typeof n === 'string' && n.trim() ? n : fallback;
 };
 
-/** The grid size a node instance is configured for. */
-function gridOf(config: NodeConfig): number {
+/** One grid dimension out of config, clamped. */
+function gridAxisOf(value: unknown, fallback: number): number {
   // Absent or unparseable falls back to the node's own default, not to the
   // minimum — a graph that lost the key must not silently shed ports.
-  const raw = typeof config.grid === 'number' ? config.grid : parseFloat(String(config.grid));
-  return clampGrid(Number.isFinite(raw) ? raw : DEFAULT_GRID);
+  const raw = typeof value === 'number' ? value : parseFloat(String(value));
+  return clampGrid(Number.isFinite(raw) ? raw : fallback);
+}
+
+/** The columns and rows a node instance is configured for. */
+function gridOf(config: NodeConfig): { cols: number; rows: number } {
+  const cols = gridAxisOf(config.grid, DEFAULT_GRID);
+  // A graph saved before the grid could be oblong has no `gridY`; those were
+  // square, so the columns are the right fallback.
+  return { cols, rows: gridAxisOf(config.gridY, cols) };
 }
 
 /**
@@ -77,13 +85,20 @@ function gridOf(config: NodeConfig): number {
 export const MAX_CELL_PORT_GRID = 4;
 
 /**
+ * …and the same limit counted in ports, which is what an oblong grid has to be
+ * judged by: 2×8 is as many handles as 4×4, and 3×15 is not a thing to wire.
+ */
+export const MAX_CELL_PORTS = MAX_CELL_PORT_GRID * MAX_CELL_PORT_GRID;
+
+/**
  * Every cell of the grid, in row-major order and named for where it is viewed
  * from relative to head-on — whether or not it is exposed as a port. This is the
  * order a sequence on `views` is read in, so it is what the node and the editor
  * iterate; {@link lensGridCellInputs} is the subset that has real ports.
  */
 export function lensGridCellSlots(config: NodeConfig): PortSpec[] {
-  return gridCells(gridOf(config)).map((cell) => ({
+  const { cols, rows } = gridOf(config);
+  return gridCells(cols, rows).map((cell) => ({
     id: cell.id,
     label: cell.label,
     type: 'image' as const,
@@ -98,7 +113,8 @@ export function lensGridCellSlots(config: NodeConfig): PortSpec[] {
  * that at compute time.
  */
 export function lensGridInputs(config: NodeConfig): PortSpec[] {
-  const cells = gridOf(config) <= MAX_CELL_PORT_GRID ? lensGridCellSlots(config) : [];
+  const { cols, rows } = gridOf(config);
+  const cells = cols * rows <= MAX_CELL_PORTS ? lensGridCellSlots(config) : [];
   return [{ id: 'views', label: 'All views (sequence)', type: 'sequence' as const }, ...cells];
 }
 

@@ -219,7 +219,7 @@ export const radialGridNode: NodeDefinition = {
           artSize,
           // One pixel per lenslet, exactly as the grid resolves — the wedges
           // divide the angle, not the sheet.
-          gridCellCounts({ ...settings, grid: 2, mirrorViews: true }, gathered[0]),
+          gridCellCounts(settings, gathered[0]),
         ),
       },
     };

@@ -984,8 +984,15 @@ export interface CapArraySettings extends LenticularSettings {
 }
 
 export interface LensGridSettings extends CapArraySettings {
-  /** Lenslets per side of one view grid: 2 = 2×2 (4 views), 3 = 3×3 (9). */
+  /** Columns of views under one lenslet: 2 = two views left→right, 3 = three. */
   grid: number;
+  /**
+   * Rows of views, so the grid can be oblong — 2 across by 3 down, say, when the
+   * sheet is to be tilted further vertically than horizontally, or the other way
+   * about. Absent on graphs saved before the grid could be anything but square,
+   * which is exactly what falling back to `grid` gives them.
+   */
+  gridY?: number;
   /**
    * Place each view opposite the direction it is named for. A lens inverts, so
    * the view you see from the left has to sit on the *right* of its cell; with
@@ -1007,6 +1014,17 @@ export const DEFAULT_GRID = 3;
 
 export const clampGrid = (grid: number): number =>
   Math.min(MAX_GRID, Math.max(MIN_GRID, Math.round(grid) || MIN_GRID));
+
+/** Columns and rows of the view grid. Both clamped; `gridY` defaults to `grid`. */
+export function gridDims(settings: { grid: number; gridY?: number }): { cols: number; rows: number } {
+  return {
+    cols: clampGrid(settings.grid),
+    rows: clampGrid(settings.gridY ?? settings.grid),
+  };
+}
+
+/** `3×3` — how a grid is written wherever one is reported. */
+export const gridLabel = (cols: number, rows: number): string => `${cols}×${rows}`;
 
 /**
  * How the round lenslet footprints tile the sheet.
@@ -1104,10 +1122,13 @@ export function gridAxisLabel(index: number, count: number, axis: 'x' | 'y'): st
   return `${word} ${rank}`;
 }
 
-/** Human-readable name of one grid cell, e.g. `Left · Up` or `Centre (neutral)`. */
-export function gridCellLabel(col: number, row: number, grid: number): string {
-  const x = gridAxisLabel(col, grid, 'x');
-  const y = gridAxisLabel(row, grid, 'y');
+/**
+ * Human-readable name of one grid cell, e.g. `Left · Up` or `Centre (neutral)`.
+ * `rows` defaults to `cols` for the square case.
+ */
+export function gridCellLabel(col: number, row: number, cols: number, rows = cols): string {
+  const x = gridAxisLabel(col, cols, 'x');
+  const y = gridAxisLabel(row, rows, 'y');
   if (x === 'Centre' && y === 'Centre') return 'Centre (neutral)';
   if (x === 'Centre') return y;
   if (y === 'Centre') return x;
@@ -1117,13 +1138,20 @@ export function gridCellLabel(col: number, row: number, grid: number): string {
 /** Stable port id for a grid cell — independent of the label wording. */
 export const gridCellId = (col: number, row: number): string => `c${col}r${row}`;
 
-/** Cells in port order: row-major from the top-left (`Left · Up`). */
-export function gridCells(grid: number): { col: number; row: number; id: string; label: string }[] {
-  const n = clampGrid(grid);
+/**
+ * Cells in port order: row-major from the top-left (`Left · Up`). `rows`
+ * defaults to `cols`, so a single argument still gives a square grid.
+ */
+export function gridCells(
+  cols: number,
+  rows = cols,
+): { col: number; row: number; id: string; label: string }[] {
+  const nx = clampGrid(cols);
+  const ny = clampGrid(rows);
   const cells = [];
-  for (let row = 0; row < n; row++) {
-    for (let col = 0; col < n; col++) {
-      cells.push({ col, row, id: gridCellId(col, row), label: gridCellLabel(col, row, n) });
+  for (let row = 0; row < ny; row++) {
+    for (let col = 0; col < nx; col++) {
+      cells.push({ col, row, id: gridCellId(col, row), label: gridCellLabel(col, row, nx, ny) });
     }
   }
   return cells;
@@ -1163,10 +1191,13 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
   const first = views[0];
   const cells = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
   const samples = Math.max(1, settings.stripSamples);
+  const { cols, rows } = gridDims(settings);
   // Hex rows sit √3/2 as far apart, so a raster giving `stripSamples` px across
-  // a view tile gives fewer *down* it. Scale up so the floor holds both ways.
+  // a view tile gives fewer *down* it — and an oblong grid cuts the cell into a
+  // different number of tiles each way. Take whichever axis asks for more, so
+  // the floor holds both ways.
   const forViews = Math.ceil(
-    (cells * clampGrid(settings.grid) * samples) / rowScaleOf(clampPacking(settings.packing)),
+    cells * samples * Math.max(cols, rows / rowScaleOf(clampPacking(settings.packing))),
   );
   const forArtwork = Math.max(...views.map((v) => v.width));
   // Whole pixels per cell across, and a whole number per tile column where the
@@ -1176,7 +1207,7 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
   const width = alignedInterlaceWidth(
     Math.max(forViews, forArtwork),
     cells,
-    clampGrid(settings.grid),
+    cols,
     outputSize(settings, first).width,
   );
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
@@ -1197,19 +1228,21 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
  */
 export const packingAlignsRows = (packing: LensPacking): boolean => rowScaleOf(packing) === 1;
 
-function requireGridViews(views: RasterImage[], grid: number): number {
-  const n = clampGrid(grid);
-  if (views.length !== n * n) {
-    throw new Error(`A ${n}×${n} lens grid needs ${n * n} images (got ${views.length}).`);
+function requireGridViews(views: RasterImage[], settings: LensGridSettings): { cols: number; rows: number } {
+  const { cols, rows } = gridDims(settings);
+  if (views.length !== cols * rows) {
+    throw new Error(
+      `A ${gridLabel(cols, rows)} lens grid needs ${cols * rows} images (got ${views.length}).`,
+    );
   }
-  return n;
+  return { cols, rows };
 }
 
 /**
  * Interlace a grid of views under a 2D lens array. Same idea as the 1D
  * interlace, run on both axes at once: the position within the cell picks a
  * column *and* a row of the view grid, and the sample point is the cell centre
- * so every one of the grid² tiles under a lenslet shows the same spot.
+ * so every one of the cols × rows tiles under a lenslet shows the same spot.
  *
  * Views arrive in {@link gridCells} order (row-major from `Left · Up`).
  */
@@ -1227,7 +1260,7 @@ export function* gridInterlaceChunks(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): Generator<ChunkProgress, RasterImage> {
-  const grid = requireGridViews(views, settings.grid);
+  const { cols, rows } = requireGridViews(views, settings);
   const size = options.interlacedSize ?? gridInterlacedSize(settings, views);
   const width = Math.max(1, Math.round(size.width));
   const height = Math.max(1, Math.round(size.height));
@@ -1261,24 +1294,26 @@ export function* gridInterlaceChunks(
         const sv = v / (pitchMm * rowScale) + phaseY;
         const cell = latticeAt(su, sv, packing);
 
-        // Tiles are square in millimetres on both axes, so a view subtends the
-        // same angle horizontally and vertically. A hex cell reaches past a
-        // pitch at its two tips, which clamp into the outermost tiles.
+        // The cell is one pitch each way, cut into `cols` tiles across and
+        // `rows` down: square tiles when the grid is, and on an oblong grid the
+        // sparser axis simply has wider tiles, so its views each subtend a
+        // larger slice of the same cone. A hex cell reaches past a pitch at its
+        // two tips, which clamp into the outermost tiles.
         const fu = Math.min(0.999999, Math.max(0, cell.du + 0.5));
         const fv = Math.min(0.999999, Math.max(0, cell.dv + 0.5));
-        const col = Math.floor(fu * grid);
-        const row = Math.floor(fv * grid);
+        const col = Math.floor(fu * cols);
+        const row = Math.floor(fv * rows);
 
         // The lens inverts: the tile on the left of a cell is what an eye to the
         // *right* sees, so a view named "Left" belongs on the right.
-        const viewCol = settings.mirrorViews ? grid - 1 - col : col;
-        const viewRow = settings.mirrorViews ? grid - 1 - row : row;
+        const viewCol = settings.mirrorViews ? cols - 1 - col : col;
+        const viewRow = settings.mirrorViews ? rows - 1 - row : row;
 
         // Sample at the cell centre, rotated back into sheet coordinates.
         const uc = (cell.cu - s.phase) * pitchMm;
         const vc = (cell.cv - phaseY) * pitchMm * rowScale;
         sampleNormalized(
-          views[viewRow * grid + viewCol],
+          views[viewRow * cols + viewCol],
           (uc * s.cos - vc * s.sin) / s.widthMm,
           (uc * s.sin + vc * s.cos) / s.heightMm,
           out.data,
@@ -1309,7 +1344,7 @@ export function* gridDepthMapChunks(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): Generator<ChunkProgress, DepthMapResult> {
-  requireGridViews(views, settings.grid);
+  requireGridViews(views, settings);
   return yield* capDepthMapChunks(views, settings, options);
 }
 
@@ -1388,7 +1423,7 @@ export function* lensGridChunks(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): Generator<ChunkProgress, LenticularRender> {
-  const grid = requireGridViews(views, settings.grid);
+  const { cols, rows } = requireGridViews(views, settings);
   const art = options.interlacedSize ?? gridInterlacedSize(settings, views);
   const map = outputSize(settings, views[0]);
   checkBudget(
@@ -1402,8 +1437,9 @@ export function* lensGridChunks(
 
   const artChunks = chunkCount(art.width, art.height, options.chunkPixels);
   const total = artChunks + chunkCount(map.width, map.height, options.chunkPixels);
-  const interlaced = yield* asPartOf(gridInterlaceChunks(views, { ...settings, grid }, options), 0, total);
-  const depth = yield* asPartOf(gridDepthMapChunks(views, { ...settings, grid }, options), artChunks, total);
+  const clamped = { ...settings, grid: cols, gridY: rows };
+  const interlaced = yield* asPartOf(gridInterlaceChunks(views, clamped, options), 0, total);
+  const depth = yield* asPartOf(gridDepthMapChunks(views, clamped, options), artChunks, total);
   return {
     interlaced,
     depth: depth.depth,
@@ -1418,8 +1454,8 @@ export function* lensGridChunks(
  * Switch target for a grid: a checkerboard of views, so a tilt along *either*
  * axis flips the sheet. The neutral centre view is white.
  */
-export function gridSwitchViews(grid: number): RasterImage[] {
-  return gridCells(grid).map(({ col, row }) => {
+export function gridSwitchViews(cols: number, rows = cols): RasterImage[] {
+  return gridCells(cols, rows).map(({ col, row }) => {
     const v = (col + row) % 2 === 0 ? 255 : 0;
     return createImage(1, 1, [v, v, v, 255]);
   });
@@ -1797,8 +1833,13 @@ export function describeGeometry(
   return lines.join('\n');
 }
 
-/** Cells across and down the sheet — one lenslet each, one pixel per view. */
-export function gridCellCounts(settings: LensGridSettings, first: RasterImage): OutputSize {
+/**
+ * Cells across and down the sheet — one lenslet each, one pixel per view. It is
+ * the *array* that decides this, not how the artwork under a cap is divided, so
+ * a ring of wedges and a grid of tiles both ask this question of the same
+ * settings.
+ */
+export function gridCellCounts(settings: CapArraySettings, first: RasterImage): OutputSize {
   const across = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
   // Hex rows are closer together than the pitch, so a hex sheet fits ~15% more
   // rows of lenslets — the packing gain, spent on vertical resolution.
@@ -1883,10 +1924,10 @@ export function describeGridGeometry(
   cells: OutputSize,
 ): string {
   const mm = (v: number) => v.toFixed(3);
-  const grid = clampGrid(settings.grid);
+  const { cols, rows } = gridDims(settings);
   const packing = clampPacking(settings.packing);
   const lines = [
-    `${grid}×${grid} grid = ${grid * grid} views · ${settings.widthMm} mm wide`,
+    `${gridLabel(cols, rows)} grid = ${cols * rows} views · ${settings.widthMm} mm wide`,
     `${packing === 'hex' ? 'Hexagonal' : 'Square'} lenslet packing — ` +
       `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap` +
       (packingAlignsRows(packing)
@@ -1910,7 +1951,8 @@ export function describeGridGeometry(
         : null,
     ),
     `Lenslet pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
-      `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / grid).toFixed(2)} px per view tile`,
+      `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / cols).toFixed(2)} × ` +
+      `${(artSize.height / Math.max(1, cells.height) / rows).toFixed(2)} px per view tile`,
     // The lens count *is* the per-view resolution: one lenslet shows one pixel
     // of each view, so this is what the viewer actually sees.
     `Each view resolves to ${cells.width}×${cells.height} px (one per lenslet)`,
@@ -1934,10 +1976,11 @@ export function describeGridGeometry(
   // guarantee it — but the printer has only the lenslet's own dots to spend and
   // they divide by the grid. Under about two, neighbouring views bleed together
   // everywhere rather than switching, and that is what finally caps the grid.
-  const printedTilePx = geometry.pitchPx / grid;
+  const printedTilePx = geometry.pitchPx / Math.max(cols, rows);
   if (printedTilePx < 2) {
     lines.push(
-      `⚠ A view tile lands on only ${printedTilePx.toFixed(2)} printed dots at ${settings.ppi} PPI — ` +
+      `⚠ A view tile lands on only ${printedTilePx.toFixed(2)} printed dots at ${settings.ppi} PPI ` +
+        `on its tighter axis — ` +
         `the views will bleed into each other at every angle rather than switching. Use a smaller grid, ` +
         `lower LPI, or raise PPI.`,
     );

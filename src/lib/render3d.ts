@@ -98,8 +98,13 @@ export interface ViewRenderOptions {
 }
 
 export interface ViewGridOptions extends ViewRenderOptions {
-  /** Views per side: 3 renders a 3×3 = 9 view grid. */
+  /** Views across: 3 renders three eye positions left→right. */
   grid: number;
+  /**
+   * Views down. Omitted is square — the grid the print node reads may be
+   * oblong, and the two must agree cell for cell.
+   */
+  gridY?: number;
   /**
    * Where the nearest point of the subject sits relative to the sheet, mm
    * *behind* it. 0 puts it right against the glass — the plain window — and
@@ -505,7 +510,10 @@ function downsample(rgb: Uint8ClampedArray, w: number, h: number, ss: number): R
  * faster in front than behind. Take whichever is worse.
  */
 export function disparityPerStep(o: ViewGridOptions, lpi: number): { mm: number; lenslets: number } {
-  const offsets = eyeOffsetsMm(o.grid, o.coneDeg, o.viewDistanceMm);
+  // Both axes cross the same cone, so the one with fewer views takes the larger
+  // step — and it is the larger step that decides whether the print doubles.
+  const sparsest = Math.min(Math.max(1, Math.round(o.grid)), Math.max(1, Math.round(o.gridY ?? o.grid)));
+  const offsets = eyeOffsetsMm(sparsest, o.coneDeg, o.viewDistanceMm);
   const step = offsets.length > 1 ? Math.abs(offsets[1] - offsets[0]) : 0;
   const near = clampSetbackMm(o.setbackMm, o.viewDistanceMm);
   return worstDisparity(step, near, near + Math.max(0, o.depthMm), o.viewDistanceMm, lpi);
@@ -548,7 +556,7 @@ export function disparityAtDepth(
 }
 
 export interface ViewGridRender {
-  /** grid² views, row-major from the top-left (`Left · Up`), as gridCells lists. */
+  /** cols × rows views, row-major from the top-left (`Left · Up`), as gridCells lists. */
   views: RasterImage[];
   /** Depth of the centre view, white = nearest. Feeds the gloss/heightmap chain. */
   depth: RasterImage;
@@ -590,7 +598,8 @@ export function renderViewGrid(stl: StlValue, o: ViewGridOptions): ViewGridRende
  * tab if nobody hands the event loop back in between.
  */
 export function* viewGridChunks(stl: StlValue, o: ViewGridOptions): Generator<ChunkProgress, ViewGridRender> {
-  const grid = Math.max(1, Math.round(o.grid));
+  const cols = Math.max(1, Math.round(o.grid));
+  const rows = Math.max(1, Math.round(o.gridY ?? o.grid));
   const depthMm = Math.max(0, o.depthMm);
   const setbackMm = clampSetbackMm(o.setbackMm, o.viewDistanceMm);
   // The subject occupies [-(setback + depth), -setback]: near face `setback`
@@ -606,19 +615,23 @@ export function* viewGridChunks(stl: StlValue, o: ViewGridOptions): Generator<Ch
   };
 
   const mesh = prepareVertices(stl, placed);
-  const offsets = eyeOffsetsMm(grid, o.coneDeg, o.viewDistanceMm);
+  // Each axis spans the same cone — the lens is as wide up and down as it is
+  // across — so a sparser axis simply takes bigger steps through it.
+  const offsetsX = eyeOffsetsMm(cols, o.coneDeg, o.viewDistanceMm);
+  const offsetsY = eyeOffsetsMm(rows, o.coneDeg, o.viewDistanceMm);
 
-  // The view nearest head-on; for an even grid, one of the middle four.
-  const mid = grid >> 1;
+  // The view nearest head-on; on an even axis, one of the middle pair.
+  const midCol = cols >> 1;
+  const midRow = rows >> 1;
   const views: RasterImage[] = [];
-  const total = grid * grid;
+  const total = cols * rows;
   let centre: ReturnType<typeof renderOne> | undefined;
-  for (let row = 0; row < grid; row++) {
-    for (let col = 0; col < grid; col++) {
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
       // Row 0 is `Up`: the eye is above the sheet, so +y. Column 0 is `Left`.
-      const rendered = renderOne(mesh, stl.triangleCount, placed, offsets[col], -offsets[row]);
+      const rendered = renderOne(mesh, stl.triangleCount, placed, offsetsX[col], -offsetsY[row]);
       views.push(downsample(rendered.rgb, rendered.w, rendered.h, rendered.ss));
-      if (col === mid && row === mid) centre = rendered;
+      if (col === midCol && row === midRow) centre = rendered;
       yield { done: views.length, total, what: 'Views' };
     }
   }

@@ -176,7 +176,7 @@ describe('LenticularEditor', () => {
 /** A 2×2 Lens Grid with all four views wired and computed. */
 async function gridWithViews(connect = ['c0r0', 'c1r0', 'c0r1', 'c1r1']) {
   const id = s().addNode('lensGrid');
-  s().updateNodeConfig(id, { grid: 2, widthMm: 25.4, ppi: 100, lpi: 10, heightMm: 5 });
+  s().updateNodeConfig(id, { grid: 2, gridY: 2, widthMm: 25.4, ppi: 100, lpi: 10, heightMm: 5 });
   for (const handle of connect) {
     const src = s().addNode('solidColor');
     s().updateNodeConfig(src, { width: 20, height: 20, color: '#ff0000' });
@@ -195,7 +195,7 @@ describe('LensGridEditor', () => {
   it('reports the grid, its per-view resolution and both rasters', async () => {
     const id = await gridWithViews();
     const { container } = render(<LensGridEditor nodeId={id} />);
-    expect(screen.getByText('2 × 2 = 4 views')).toBeInTheDocument();
+    expect(screen.getByText('2 across × 2 down = 4 views')).toBeInTheDocument();
     // Hex by default: rows √3/2 apart, so 12 rows of lenslets fit where 10
     // columns do, and the artwork grows to keep 2 px per tile down as well.
     expect(screen.getByText(/Hexagonal \(offset rows\) — 90\.7% under a cap/)).toBeInTheDocument();

@@ -396,7 +396,8 @@ for aligning the flip to a preferred head position.
 ## The two-dimensional version
 
 Swap the ruling of cylinders for an array of spherical caps and the print moves in both axes —
-left-right _and_ up-down — carrying N² views instead of N.
+left-right _and_ up-down — carrying X × Y views instead of N. The two counts are set separately, so
+the grid need not be square; see [Oblong grids](#oblong-grids-x--y) below.
 
 **The optics don't change.** A sphere and a cylinder refract identically at a surface of radius `R`,
 so everything above applies unaltered: same radius, same sag, same base, same feasibility floor, same
@@ -507,9 +508,32 @@ grid size**, so 177 × 153 is the answer for a 2 × 2 and for a 15 × 15 alike. 
 artwork raster and light per view, not sharpness. Hold on to that — it is what makes the depth budget
 below affordable, and it is why the tool goes as far as **15 × 15 = 225 views**.
 
-What does change is the artwork under each lenslet, which is cut into N² tiles: at N = 15 a tile is a
-fifteenth of the pitch on each axis, about 2.1 of the printer's dots at 1440 PPI. That is the real
-ceiling, and the print node warns when a setting falls under two dots a tile.
+What does change is the artwork under each lenslet, which is cut into X × Y tiles: at 15 across a tile
+is a fifteenth of the pitch on that axis, about 2.1 of the printer's dots at 1440 PPI. That is the
+real ceiling, and the print node warns when a setting falls under two dots a tile — measured on
+whichever axis is tighter.
+
+### Oblong grids (X × Y)
+
+**Views across** and **views down** are two settings, not one. A cell is one pitch each way whatever
+you set, so the axis with fewer views simply gets wider tiles: each of its views covers more of the
+cap, and therefore a larger slice of the same viewing cone. Nothing else in the optics notices.
+
+That matters because parallax is rarely worth the same in both directions. A print hung on a wall is
+walked past sideways and hardly ever stooped under, so views spent on vertical movement are views
+nobody sees. A **6 × 2** grid gives six steps of horizontal look-around for twelve renders, where a
+square grid carrying the same horizontal detail — 6 × 6 — costs thirty-six. The saving is real on
+every axis of the pipeline at once: renders, artwork raster, and the light each view gets.
+
+The cost of a sparse axis is the size of its steps. Both axes cross the whole cone, so 2 views down
+step from one edge of it to the other in one jump: the vertical flip is abrupt, and anything with
+depth doubles rather than glides as you rise or crouch. Fine when the sheet only needs to _switch_
+vertically (a two-state indicator), wrong when it needs to _move_. The renderers report the parallax
+per step on the sparser axis for exactly this reason — it is the one that will break first.
+
+The producers take X and Y too: set **Model → Grid Views** or **Splat → Views** to the same pair as
+the print node. One wire carries the cells in row-major order, and the two ends have to agree on how
+many there are.
 
 ---
 
@@ -519,7 +543,7 @@ If the subject is a 3D model rather than nine photographs, the views can be rend
 rendering has to be done in a particular way, which is why the tool has its own renderer instead of
 leaving you to a 3D package. Two nodes render views, and they share every rule below:
 
-- **Model → Grid Views** fills the N² eye positions of a **lens grid**.
+- **Model → Grid Views** fills the X × Y eye positions of a **lens grid**.
 - **Model → Stereo Views** renders a horizontal run of views for a **1D lenticular**.
 
 Both stand the subject entirely _behind_ the sheet, so the print is a window you look into rather
@@ -529,7 +553,7 @@ one. That arrangement is worth a section of its own; see
 
 ### Shift the eye; never rotate it
 
-The obvious approach is to point a camera at the subject from each of the N² positions. Don't. Aiming
+The obvious approach is to point a camera at the subject from each of those positions. Don't. Aiming
 the camera ("toe-in") gives every view a different keystone, and it introduces _vertical_ parallax
 between views that should differ only horizontally. Under a lens grid that reads as a wobble as your
 head moves, and no amount of care in the print will fix it.
@@ -601,10 +625,12 @@ ways to buy more, in order of how much they cost you:
 1. **A bigger grid.** Depth grows with `N − 1` and per-view resolution doesn't change at all, so this
    is nearly free — you pay in artwork raster, in render time, and in light split more ways. It is
    also the one with a hard stop, and it is not a matter of taste: the artwork under a lenslet is
-   divided into N² tiles, so each tile gets `pitch_px / N` of the printer's own dots. Under about two
-   dots the tiles bleed into each other and the print stops switching at all. At 1440 PPI and 45 LPI
-   a lenslet is 32 dots across, so **15 × 15 is the ceiling** — which is where the tool caps it, and
-   where the depth table above stops.
+   divided into X × Y tiles, so a tile gets `pitch_px / X` of the printer's own dots across and
+   `pitch_px / Y` down. Under about two dots the tiles bleed into each other and the print stops
+   switching at all. At 1440 PPI and 45 LPI a lenslet is 32 dots across, so **15 is the ceiling on
+   each axis** — which is where the tool caps it, and where the depth table above stops. Note that
+   depth is bought per axis: growing only X buys look-around only sideways
+   ([Oblong grids](#oblong-grids-x--y)).
 2. **A coarser pitch.** Depth grows with `p`, but coarse lenses need
    [thick ink](#when-it-cant-work) and you lose resolution one-for-one.
 3. **A narrower cone.** Fewer degrees to look around in, but every degree carries more depth.

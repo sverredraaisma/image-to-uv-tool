@@ -300,6 +300,7 @@ export const splatCameraNode: NodeDefinition = {
 /** Read the render settings out of a node's config, given the camera. */
 export function splatViewOptionsFromConfig(config: NodeConfig, camera: TransformValue): SplatViewOptions {
   const layout = str(config.layout, '1d') === '2d' ? '2d' : '1d';
+  const grid = clampGrid(num(config.grid, DEFAULT_GRID));
   return {
     camera,
     widthMm: Math.max(1, num(config.widthMm, 100)),
@@ -309,7 +310,8 @@ export function splatViewOptionsFromConfig(config: NodeConfig, camera: Transform
     coneDeg: coneFromConfig(config),
     layout,
     views: Math.min(MAX_VIEWS, Math.max(MIN_VIEWS, Math.round(num(config.views, 12)))),
-    grid: clampGrid(num(config.grid, DEFAULT_GRID)),
+    grid,
+    gridY: clampGrid(num(config.gridY, grid)),
     background: hexToRgb(str(config.background, '#ffffff')),
     supersample: Math.min(3, Math.max(1, Math.round(num(config.supersample, 1)))),
     splatBudget: Math.max(0, Math.round(num(config.splatBudget, 0))) || undefined,
@@ -326,7 +328,7 @@ function hexToRgb(hex: string): [number, number, number] {
 
 /** How many views a configuration will produce. */
 export const viewCount = (o: SplatViewOptions): number =>
-  o.layout === '2d' ? o.grid * o.grid : Math.max(1, Math.round(o.views));
+  o.layout === '2d' ? o.grid * (o.gridY ?? o.grid) : Math.max(1, Math.round(o.views));
 
 /** Geometry report for the node's Info output. */
 export function describeSplatViews(
@@ -354,7 +356,7 @@ export function describeSplatViews(
 
   const lines = [
     o.layout === '2d'
-      ? `${o.grid}×${o.grid} grid — ${n} views · ${o.widthPx}×${viewPy} px each`
+      ? `${o.grid}×${o.gridY ?? o.grid} grid — ${n} views · ${o.widthPx}×${viewPy} px each`
       : `${n} views · ${o.widthPx}×${viewPy} px each`,
     `Sheet ${o.widthMm}×${o.heightMm} mm, viewed from ${o.viewDistanceMm} mm`,
     `Cone ${o.coneDeg.toFixed(1)}°${
@@ -455,11 +457,12 @@ export const splatViewsNode: NodeDefinition = {
       label: 'Layout',
       options: [
         { value: '1d', label: 'Horizontal run (Lenticular Print)' },
-        { value: '2d', label: 'Square grid (Lens Grid Print)' },
+        { value: '2d', label: 'Grid, X × Y (Lens Grid Print)' },
       ],
     },
     { kind: 'number', key: 'views', label: 'Views (run)', min: MIN_VIEWS, max: MAX_VIEWS, step: 1 },
-    { kind: 'number', key: 'grid', label: 'Grid (n×n)', min: MIN_GRID, max: MAX_GRID, step: 1 },
+    { kind: 'number', key: 'grid', label: 'Grid: views across (X)', min: MIN_GRID, max: MAX_GRID, step: 1 },
+    { kind: 'number', key: 'gridY', label: 'Grid: views down (Y)', min: MIN_GRID, max: MAX_GRID, step: 1 },
     { kind: 'number', key: 'widthMm', label: 'Print width (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'sheetHeightMm', label: 'Print height (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'viewDistanceMm', label: 'Viewing distance (mm)', min: 10, step: 10 },
@@ -503,6 +506,7 @@ export const splatViewsNode: NodeDefinition = {
     layout: '1d',
     views: 12,
     grid: DEFAULT_GRID,
+    gridY: DEFAULT_GRID,
     widthMm: 100,
     sheetHeightMm: 75,
     viewDistanceMm: 400,
