@@ -190,6 +190,17 @@ view. Where your eye is decides which tile the lens shows you.
 
 ![How one lens is divided](images/07-interlace.png)
 
+Here is the whole of it moving — one frame per degree, across the lens's own 53.3° cone and a degree
+past each edge. A parallel bundle is refracted by Snell's law at the real arc and traced to the
+artwork; the strip it lands on is outlined, and the view that strip carries is named. Watch the two
+directions disagree: the eye walks **right**, the bundle lands **left**, the printed strip number
+goes **down** — and the view you end up seeing is the one captured from the right, which is where
+you are standing. That is the whole reason the run is printed reversed.
+
+![The view sweep, one degree at a time](images/16-viewing-sweep.gif)
+
+_Regenerate it, or the frames behind it, with `python docs/animation.py` — see the head of that file._
+
 Walking across the sheet at position `u` (measured across the lenses), the arithmetic is:
 
 ```
