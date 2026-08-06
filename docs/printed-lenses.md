@@ -191,9 +191,9 @@ view. Where your eye is decides which tile the lens shows you.
 ![How one lens is divided](images/07-interlace.png)
 
 Here it is moving — one frame per degree, across the lens's own 53.3° cone and a degree past each
-edge. A parallel bundle is refracted by Snell's law at the real arc and traced to the artwork; the
-strip it lands on is outlined, and the strips are coloured by where their view was captured, blue
-from the left of the cone and orange from the right.
+edge. The whole aperture of each lenticule is traced, by Snell's law at the real arc: green where a
+ray lands in the strip the eye is being shown, amber where it does not. The strips are coloured by
+where their view was captured, blue from the left of the cone and orange from the right.
 
 ![The view sweep, one degree at a time](images/16-viewing-sweep.gif)
 
@@ -204,11 +204,85 @@ strip's colour is always the colour of the side the eye is on. That is the whole
 reversal, and a print made the other way round is one where those two stop agreeing.
 
 The frames at each end are just outside the cone: the bundle has walked onto the next lenticule's
-strips, which is where the print repeats.
+strips, which is where the print repeats. _Regenerate with `python docs/animation.py`._
 
-_The drawn bundle is the middle 45% of each cap, which is the part that comes to a point. Across the
-whole aperture it lands over five strips — spherical aberration, and the print's own blur. Regenerate
-with `python docs/animation.py`; see the head of that file._
+### The blur the lens itself adds
+
+All that amber is the honest problem. A circular cap does not bring its aperture to a point: the
+outer rays cross the axis nearer the lens than the middle ones do, which is **spherical aberration**,
+and it is a property of the shape rather than of the printing. Traced across the full aperture of the
+tool's default lenticule, head-on, the bundle lands over **269 µm** — and at twelve views a strip is
+47 µm, so the light meant for one view is spread over **5.7 of them**. Off-axis it is worse: 446 µm,
+9.5 strips, at the edge of the cone.
+
+That is not a small correction. It is why a lenticular print reads as several views blended rather
+than one view at a time, and it is the reason the practical view count of a print is far below what
+the raster could carry.
+
+![Where the blur comes from, and what fixes it](images/17-aberration.png)
+
+Four things reduce it, and they are not equally good:
+
+| Surface                                           | Blur head-on        | Worst across the cone | What it costs    |
+| ------------------------------------------------- | ------------------- | --------------------- | ---------------- |
+| circle, focus on the artwork _(as printed today)_ | 269 µm · 5.7 strips | 446 µm · 9.5 strips   | —                |
+| circle, radius set for **best focus**             | 30 µm · 0.6         | 174 µm · 3.7          | ~13% of the cone |
+| **ellipse**, `K = −1/n²`, same vertex radius      | **0 µm**            | 167 µm · 3.6          | nothing          |
+| ellipse, radius re-optimised over the cone        | 85 µm · 1.8         | **86 µm · 1.8**       | ~13% of the cone |
+
+**Change the shape.** An ellipse, not a circle, is the exact answer for the on-axis point: for one
+refracting surface bringing collimated light to a focus inside a medium of index `n`, the conic that
+does it perfectly has conic constant `K = −1/n²` — −0.444 at n = 1.5. That is textbook single-surface
+optics, and it is precisely what the lenticular patents claim, together with the same
+`t = R·n/(n−1)` thickness condition this document derives in
+[Solving the lens](#solving-the-lens) ([US6795250B2](https://patents.google.com/patent/US6795250B2/en)).
+Traced here it removes the head-on blur **entirely** — 269 µm to 0.0 — and still cuts the worst case
+across the cone by 2.7×, with coma the residual, exactly as that patent says.
+
+The remarkable part is what it costs, which is nothing. The ellipse has the same vertex radius, so
+the same focal length and the same cone; its sag is 43 µm shallower, so the flat base under it grows
+by 43 µm and the stack is the same 0.9 mm. On a laminated sheet you take the profile the extruder
+made. Here **the profile is a height map** — an aspheric costs exactly as many bytes as a sphere.
+Adding it to this tool is a change to one function, `renderCapDepthMap`, plus a setting.
+
+**Move the focus.** Cheaper still, and available today: put the artwork at the circle of least
+confusion instead of at the paraxial focus. For this lenticule the tightest plane is 180 µm above the
+paraxial focus, so solving the radius from `best focus = H` rather than `paraxial focus = H` — R
+0.347 mm instead of 0.300 — turns 269 µm into **30 µm**, a ninefold improvement for a different
+number in the same formula. It is not free: the lens is weaker, so by the marginal-ray measure this
+document uses the cone narrows from 53.3° to 46.2°.
+
+**Stop the aperture down.** Blur falls fast with aperture — 80% of the pitch gives 88 µm, 60% gives
+30 µm — which is the standard advice in the display literature: increasing the radius of curvature or
+decreasing the aperture suppresses the aberration and the crosstalk with it
+([SPIE 8384](https://ui.adsabs.harvard.edu/abs/2012SPIE.8384E..19L/abstract)). But the aperture _is_
+the cone here: 60% of the pitch is a 32° cone instead of 53°, and 40% of the light thrown away. On a
+printed lens you would do it by leaving a flat gutter between lenticules, which is also 40% of the
+sheet not focusing anything. Usually the wrong trade.
+
+**Raise the index.** Blur falls steeply with `n`: 133 µm at 1.6, 85 µm at 1.7, against 269 µm at 1.5
+— and the cone _widens_ at the same time. This is the one lever with no downside except availability;
+UV clear inks sit near 1.5, and 1.6+ means a different chemistry.
+
+**Or spend fewer views.** The blur only matters against the width of a strip. The same 269 µm is 5.7
+strips at twelve views and 2.9 at six. Half the views, half the crosstalk — and it is worth knowing
+that a print with fewer, cleaner views often reads as sharper than one with more, blended ones.
+
+Everything above is traced rather than asserted: the figure and the table come out of
+`fig_aberration()` in `docs/figures.py`, over the same `Lens` solve the tool ships. Beyond a single
+surface the display literature goes further — acylindrical arrays corrected across a 30–60° field,
+and triplet lenticules for low-crosstalk multi-view printing — but a printed relief _is_ a single
+surface, so the ellipse is the whole of what is available here, and most of what is available
+anywhere:
+
+- [Lenticular lens array, US6795250B2](https://patents.google.com/patent/US6795250B2/en) — the
+  elliptical cross-section, `κ = −1/N²`, and the junction-depth argument.
+- [Method of crosstalk reduction using lenticular lens, SPIE 8384](https://ui.adsabs.harvard.edu/abs/2012SPIE.8384E..19L/abstract)
+  — radius of curvature and aperture against aberration and crosstalk.
+- [Correction of aberrations in lens-based 3D displays](https://www.researchgate.net/publication/252774709_Correction_of_aberrations_in_lens-based_3D_displays)
+  — aspheric and acylindrical arrays over a wide field.
+- [Low-crosstalk super multi-view lenticular printing using triplet lenticular lens](https://www.sciencedirect.com/science/article/abs/pii/S0030402619315645)
+  — what more than one surface buys.
 
 Walking across the sheet at position `u` (measured across the lenses), the arithmetic is:
 

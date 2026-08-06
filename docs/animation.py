@@ -13,7 +13,10 @@ at that angle and the light traced through to the artwork. Real rays — a
 parallel bundle (the eye is 400 mm away, so it is parallel to within a
 thousandth of a degree across one 0.56 mm lenticule), refracted by Snell's law
 at the lenticule's actual arc, down to the artwork plane at the focus. The
-strip it lands on is outlined.
+strip the axial ray lands on is outlined; every other ray is drawn green if it
+lands in that strip too and amber if it does not, so the print's crosstalk is
+in the picture rather than in a footnote. See APERTURE below, figure 17, and
+"The blur the lens itself adds" in the guide.
 
 The direction is the point of it. The eye walks left to right, because that is
 what a viewer does, and the bundle therefore lands the other way:
@@ -48,7 +51,7 @@ import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Circle, Rectangle, Wedge
 
-from figures import DEFAULT, FAINT, GLOSS, GLOSS_FILL, INK, RAY, SUB, clean
+from figures import DEFAULT, FAINT, GLOSS, GLOSS_FILL, INK, RAY, SUB, WARN, clean
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
 
@@ -89,17 +92,18 @@ def refract(d, normal, n_from, n_to):
     return (eta * d[0] + s * normal[0], eta * d[1] + s * normal[1])
 
 
-#: Fraction of the half-pitch the drawn bundle spans.
+#: Fraction of the half-pitch the drawn bundle spans. Not quite 1: the last
+#: hundredth is the seam where two lenticules meet, and no press lays that edge
+#: down as geometry anyway.
 #:
-#: A spherical cap does not bring its whole aperture to one point — the outer
-#: rays cross above the middle ones, which is spherical aberration and is a real
-#: property of this lens rather than a fault in the trace. Drawn across the full
-#: aperture the bundle lands over 234 µm, five strips wide, and the picture shows
-#: a smear where the eye wants a focus. The central 45% lands within 7 µm, or a
-#: seventh of a strip: a point, and the part of the cap the focus is solved for.
-#: The wider bundle is what makes a real print's views bleed into each other, and
-#: the still figures in figures.py are where that is drawn.
-APERTURE = 0.45
+#: The whole aperture is drawn because the whole aperture is what a print has. A
+#: spherical cap does not bring it to one point — the outer rays cross above the
+#: middle ones — and that is spherical aberration, a real property of this lens
+#: rather than a fault in the trace. Head-on the bundle lands over 269 µm, which
+#: at twelve views is 5.7 strips: the rays drawn in amber are the ones landing
+#: outside the strip the eye is being shown, and they are the print's crosstalk.
+#: What can be done about it is figure 17 and the section beside it in the guide.
+APERTURE = 0.99
 
 
 def trace(lens, theta_deg: float, cell: float = 0.0, rays: int = 9, aperture: float = APERTURE):
@@ -162,7 +166,7 @@ def eye_of(strip: int, n_views: int) -> int:
     return n_views - 1 - strip
 
 
-def frame(lens, theta, n_views, path, aperture=APERTURE, cells=(-1, 0, 1)):
+def frame(lens, theta, n_views, path, aperture=APERTURE, rays=15, cells=(-1, 0, 1)):
     """One frame: the cross-section, the bundle at this angle, and nothing else."""
     half = lens.pitch / 2
     span = 1.5 * lens.pitch
@@ -202,27 +206,33 @@ def frame(lens, theta, n_views, path, aperture=APERTURE, cells=(-1, 0, 1)):
             )
     ax.add_patch(Rectangle((-span, -art_h), 2 * span, art_h, fill=False, edgecolor=INK, lw=1.0, zorder=4))
 
+    # The middle lenticule's bundle decides what is being shown, so trace it
+    # first: the ray down the lens axis names the strip, and every other ray is
+    # then either in that strip or spilling out of it.
+    middle = trace(lens, theta, cell=0.0, rays=rays, aperture=aperture)
+    lit = next(r["land"][0] for r in middle if r["axis"])
+    strip_here = strip_of(lens, lit, 0.0, n_views)
+
     # The bundles. The middle lenticule in full, its neighbours faintly — the
     # sheet does the same thing under every lens, which is why it switches as
-    # one rather than sweeping across.
-    lit = None
+    # one rather than sweeping across. Amber is a ray landing outside the strip
+    # the eye is being shown: the aberration, and the print's crosstalk.
     for c in cells:
         strong = c == 0
-        for ray in trace(lens, theta, cell=c * lens.pitch, aperture=aperture):
+        for ray in middle if strong else trace(lens, theta, cell=c * lens.pitch, rays=rays, aperture=aperture):
+            on = strip_of(lens, ray["land"][0], c * lens.pitch, n_views) == strip_here
             ax.plot(
                 [ray["entry"][0], ray["surface"][0], ray["land"][0]],
                 [ray["entry"][1], ray["surface"][1], ray["land"][1]],
-                color=RAY if strong else FAINT,
+                color=(RAY if on else WARN) if strong else FAINT,
                 lw=1.5 if ray["axis"] and strong else (0.9 if strong else 0.7),
-                alpha=1.0 if strong else 0.85,
+                alpha=(1.0 if on else 0.75) if strong else 0.85,
                 zorder=5 if strong else 1,
                 solid_capstyle="round",
             )
-            if ray["axis"] and strong:
-                lit = ray["land"][0]
 
     # The strip the axial ray reads, outlined where it lies.
-    strip = strip_of(lens, lit, 0.0, n_views)
+    strip = strip_here
     x0 = -half + strip * lens.pitch / n_views + lens.pitch * math.floor((lit + half) / lens.pitch)
     ax.add_patch(
         Rectangle(
@@ -254,7 +264,7 @@ def frame(lens, theta, n_views, path, aperture=APERTURE, cells=(-1, 0, 1)):
     ax.set_ylim(bottom, top)
     ax.set_aspect("equal")
     clean(ax)
-    fig.savefig(path, dpi=105, facecolor="white")
+    fig.savefig(path, dpi=96, facecolor="white")
     plt.close(fig)
 
 
@@ -302,7 +312,7 @@ def main():
         # There and back: what a person actually does in front of a print, and
         # it saves the jump a forward-only loop makes at the right-hand edge.
         order = paths if args.once else paths + paths[-2:0:-1]
-        first, *rest = [Image.open(p).convert("P", palette=Image.ADAPTIVE, colors=64) for p in order]
+        first, *rest = [Image.open(p).convert("P", palette=Image.ADAPTIVE, colors=48) for p in order]
         first.save(args.gif, save_all=True, append_images=rest, duration=args.ms, loop=0, optimize=True)
         print(f"\n{args.gif}  ({len(order)} frames, {os.path.getsize(args.gif) / 1e6:.1f} MB)")
 

@@ -1064,6 +1064,132 @@ def fig_model_depth():
     save(fig, "14b-model-depth.png")
 
 
+
+# ---------------------------------------------------------------------------
+# 17 — the blur the lens itself adds, and the ways out of it
+#
+# Everything here is traced, not sketched: Snell at the real surface, across the
+# real aperture, onto the real artwork plane. The numbers quoted in the guide
+# come from this function.
+# ---------------------------------------------------------------------------
+
+
+def conic_sag(r, R, K):
+    """
+    Depth below the apex of a conic of vertex radius `R` and conic constant `K`.
+
+    K = 0 is the circle the tool prints today. K = −1/n² is the ellipse that
+    focuses a collimated beam to a point inside a medium of index n — an exact
+    result for one refracting surface, and the shape the lenticular patents
+    reach for (US6795250B2).
+    """
+    r2 = np.asarray(r, dtype=float) ** 2
+    return r2 / (R * (1 + np.sqrt(np.maximum(1e-12, 1 - (1 + K) * r2 / R**2))))
+
+
+def trace_bundle(lens, offsets, *, R=None, K=0.0, theta_deg=0.0, plane=None):
+    """
+    Land a parallel bundle from `theta_deg` on the artwork, one x per ray.
+
+    The same trace the animation runs, with the surface generalised to a conic
+    and the artwork plane free, so a design can be judged on where its light
+    actually goes rather than on its paraxial focus.
+    """
+    R = lens.radius if R is None else R
+    plane = lens.H if plane is None else plane
+    th = math.radians(theta_deg)
+    d = (-math.sin(th), -math.cos(th))
+    eps, out = 1e-7, []
+    for off in offsets:
+        s = float(conic_sag(abs(off), R, K))
+        slope = (float(conic_sag(abs(off) + eps, R, K)) - s) / eps * (1 if off >= 0 else -1)
+        nl = math.hypot(slope, 1.0)
+        normal = (slope / nl, 1.0 / nl)
+        eta = 1.0 / lens.n
+        cos_i = -(d[0] * normal[0] + d[1] * normal[1])
+        k = 1 - eta * eta * (1 - cos_i * cos_i)
+        if k < 0:
+            continue
+        f = eta * cos_i - math.sqrt(k)
+        ins = (eta * d[0] + f * normal[0], eta * d[1] + f * normal[1])
+        if ins[1] >= 0:
+            continue
+        t = ((lens.H - s) - (lens.H - plane)) / -ins[1]
+        out.append((off, lens.H - s, off + t * ins[0]))
+    return out
+
+
+def spot_um(lens, offsets, **kw):
+    """Width of the landing patch, in µm — the blur, in the units of a strip."""
+    lands = [x for _, _, x in trace_bundle(lens, offsets, **kw)]
+    return (max(lands) - min(lands)) * 1000 if lands else float("nan")
+
+
+def fig_aberration():
+    L = DEFAULT
+    half = L.pitch / 2
+    K_ELL = -1 / L.n**2
+    # The vertex radius whose *best* focus, rather than whose paraxial focus,
+    # falls on the artwork — found by search, in the sweep below.
+    R_BEST = 0.3470
+    fine = np.linspace(-half * 0.99, half * 0.99, 401)
+    drawn = np.linspace(-half * 0.99, half * 0.99, 17)
+
+    fig = plt.figure(figsize=(11.4, 4.5))
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1.45], wspace=0.22)
+    strip = L.pitch / 12 * 1000
+
+    for col, (K, R, title) in enumerate(
+        (
+            (0.0, L.radius, f"circle — {spot_um(L, fine):.0f} µm across the artwork"),
+            (K_ELL, L.radius, f"ellipse, K = −1/n² — {spot_um(L, fine, K=K_ELL):.1f} µm"),
+        )
+    ):
+        ax = fig.add_subplot(gs[0, col])
+        ax.set_aspect("equal")
+        clean(ax)
+        xs = np.linspace(-half, half, 300)
+        surf = L.H - conic_sag(np.abs(xs), R, K)
+        ax.fill_between(xs, 0, surf, color=GLOSS_FILL)
+        ax.plot(xs, surf, color=GLOSS, lw=2)
+        for x0, y0, land in trace_bundle(L, drawn, R=R, K=K):
+            ax.plot([x0, x0, land], [L.H + 0.30, y0, 0], color=RAY, lw=0.8, alpha=0.85)
+        ax.add_patch(Rectangle((-half, -0.06), L.pitch, 0.06, facecolor=ART, edgecolor="none"))
+        for k in range(1, 12):
+            ax.plot([-half + k * L.pitch / 12] * 2, [-0.06, 0], color="white", lw=0.5)
+        ax.set_xlim(-half * 1.06, half * 1.06)
+        ax.set_ylim(-0.1, L.H + 0.32)
+        ax.set_title(title, fontsize=10, color=SUB, loc="left")
+
+    # Spot against viewing angle, for the four designs worth knowing about.
+    bx = fig.add_subplot(gs[0, 2])
+    angles = np.linspace(0, L.view_angle / 2, 28)
+    designs = (
+        ("circle, focus on the artwork — as printed", dict(R=L.radius, K=0.0), INK, "-"),
+        ("circle, radius set for best focus", dict(R=R_BEST, K=0.0), SUB, (0, (4, 3))),
+        ("ellipse K = −1/n², same radius", dict(R=L.radius, K=K_ELL), ART, "-"),
+        ("ellipse, radius re-optimised", dict(R=0.3460, K=K_ELL), GLOSS, (0, (1, 2))),
+    )
+    for label, kw, col, ls in designs:
+        bx.plot(
+            angles,
+            [spot_um(L, fine, theta_deg=t, **kw) for t in angles],
+            color=col, lw=1.8, ls=ls, label=label,
+        )
+    bx.axhline(strip, color=WARN, lw=1.2)
+    bx.text(L.view_angle / 2 * 0.53, strip * 1.12, "one strip at 12 views — past this is crosstalk",
+            fontsize=8.6, color=WARN)
+    bx.set_xlabel("viewing angle off head-on (°)")
+    bx.set_ylabel("blur at the artwork (µm)")
+    bx.set_xlim(0, L.view_angle / 2)
+    bx.set_ylim(0, 470)
+    bx.grid(color=FAINT, lw=0.6)
+    bx.set_axisbelow(True)
+    for side in ("top", "right"):
+        bx.spines[side].set_visible(False)
+    bx.legend(fontsize=8.4, loc="upper left", frameon=False)
+    save(fig, "17-aberration.png")
+
 # ---------------------------------------------------------------------------
 # 15 — a calibration sheet
 # ---------------------------------------------------------------------------
@@ -1138,6 +1264,7 @@ if __name__ == "__main__":
     fig_mirroring()
     fig_model_depth()
     fig_calibration()
+    fig_aberration()
     L = DEFAULT
     print(
         f"\ndefaults check: pitch {L.pitch:.4f} mm, sag {L.sag:.4f}, base {L.base:.4f}, "
