@@ -244,9 +244,9 @@ view. Where your eye is decides which tile the lens shows you.
 ![How one lens is divided](images/07-interlace.png)
 
 Here it is moving — one frame per degree, across the lens's own 53.3° cone and a degree past each
-edge. The whole aperture of each lenticule is traced, by Snell's law at the real arc: green where a
-ray lands in the strip the eye is being shown, amber where it does not. The strips are coloured by
-where their view was captured, blue from the left of the cone and orange from the right.
+edge. The whole aperture of each lenticule is traced, by Snell's law at the real surface: green
+where a ray lands in the strip the eye is being shown, amber where it does not. The strips are
+coloured by where their view was captured, blue from the left of the cone and orange from the right.
 
 ![The view sweep, one degree at a time](images/16-viewing-sweep.gif)
 
@@ -257,14 +257,20 @@ strip's colour is always the colour of the side the eye is on. That is the whole
 reversal, and a print made the other way round is one where those two stop agreeing.
 
 The frames at each end are just outside the cone: the bundle has walked onto the next lenticule's
-strips, which is where the print repeats. _Regenerate with `python docs/animation.py`._
+strips, which is where the print repeats.
+
+Notice that the bundle arrives as a **point**. That is the ellipse of the section above doing its
+job: the whole aperture lands inside one strip, and the only amber is out at the edges of the cone,
+where what is left is coma rather than spherical aberration. Run
+`python docs/animation.py --surface circle` and watch the same sweep with the obvious shape instead —
+a third of every bundle sprayed into the neighbouring strips, at every angle. That is the difference
+the next section measures.
 
 ### The blur the lens itself adds
 
-All that amber is the honest problem, and it is why the surface above is an ellipse. The animation
-is drawn with a **circle**, because a circle is what everyone reaches for and what a laminated sheet
-gives you. A circular cap does not bring its aperture to a point: the
-outer rays cross the axis nearer the lens than the middle ones do, which is **spherical aberration**,
+Here is what the circle costs, and why the tool does not print one. A circular cap does not bring its
+aperture to a point: the outer rays cross the axis nearer the lens than the middle ones do, which is
+**spherical aberration**,
 and it is a property of the shape rather than of the printing. Traced across the full aperture of the
 tool's default lenticule, head-on, the bundle lands over **269 µm** — and at twelve views a strip is
 47 µm, so the light meant for one view is spread over **5.7 of them**. Off-axis it is worse: 446 µm,

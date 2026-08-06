@@ -12,11 +12,18 @@ One picture per frame: a cross-section through three lenticules, with the eye
 at that angle and the light traced through to the artwork. Real rays — a
 parallel bundle (the eye is 400 mm away, so it is parallel to within a
 thousandth of a degree across one 0.56 mm lenticule), refracted by Snell's law
-at the lenticule's actual arc, down to the artwork plane at the focus. The
+at the lenticule's actual surface, down to the artwork plane at the focus. The
 strip the axial ray lands on is outlined; every other ray is drawn green if it
 lands in that strip too and amber if it does not, so the print's crosstalk is
-in the picture rather than in a footnote. See APERTURE below, figure 17, and
-"The blur the lens itself adds" in the guide.
+in the picture rather than in a footnote.
+
+That surface is the ellipse the tool prints, `K = −1/n²`, and it is worth
+running `--surface circle` once to see what the shape is worth: the ellipse
+brings its whole aperture to a point in the lit strip, while the circle sprays
+a third of its light into the neighbours at every angle. What is left of the
+ellipse is coma, which shows up as a few amber rays out at the edge of the
+cone and as none at all head-on. Figure 17 and "The blur the lens itself adds"
+in the guide have the measurements.
 
 The direction is the point of it. The eye walks left to right, because that is
 what a viewer does, and the bundle therefore lands the other way:
@@ -51,7 +58,7 @@ import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Circle, Rectangle, Wedge
 
-from figures import DEFAULT, FAINT, GLOSS, GLOSS_FILL, INK, RAY, SUB, WARN, clean
+from figures import CIRCLE, DEFAULT, FAINT, GLOSS, GLOSS_FILL, INK, RAY, SUB, WARN, clean, conic_sag
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
 
@@ -75,9 +82,15 @@ def view_colour(i: int, n: int):
 
 
 def surface_y(lens, x):
-    """Height of the lens surface above the artwork, for a sheet of lenticules."""
+    """
+    Height of the lens surface above the artwork, for a sheet of lenticules.
+
+    Whichever surface the lens was solved for: a circle at K = 0, the ellipse
+    the tool prints at K = −1/n². `conic_sag` is figures.py's, which is the port
+    of the tool's own.
+    """
     d = (np.asarray(x, float) + lens.pitch / 2) % lens.pitch - lens.pitch / 2
-    arc = np.sqrt(np.maximum(0.0, lens.radius**2 - d**2)) - (lens.radius - lens.sag)
+    arc = lens.sag - conic_sag(np.abs(d), lens.radius, lens.K)
     return lens.base + np.maximum(0.0, arc)
 
 
@@ -96,13 +109,12 @@ def refract(d, normal, n_from, n_to):
 #: hundredth is the seam where two lenticules meet, and no press lays that edge
 #: down as geometry anyway.
 #:
-#: The whole aperture is drawn because the whole aperture is what a print has. A
-#: spherical cap does not bring it to one point — the outer rays cross above the
-#: middle ones — and that is spherical aberration, a real property of this lens
-#: rather than a fault in the trace. Head-on the bundle lands over 269 µm, which
-#: at twelve views is 5.7 strips: the rays drawn in amber are the ones landing
-#: outside the strip the eye is being shown, and they are the print's crosstalk.
-#: What can be done about it is figure 17 and the section beside it in the guide.
+#: The whole aperture is drawn because the whole aperture is what a print has,
+#: and because whether a surface can focus all of it is the entire question. The
+#: ellipse can, exactly, on axis. A circle cannot: its outer rays cross above its
+#: middle ones — spherical aberration, a real property of the shape rather than a
+#: fault in the trace — and head-on its bundle lands over 269 µm, which at twelve
+#: views is 5.7 strips of crosstalk. Run `--surface circle` to watch it happen.
 APERTURE = 0.99
 
 
@@ -123,14 +135,20 @@ def trace(lens, theta_deg: float, cell: float = 0.0, rays: int = 9, aperture: fl
     half = lens.pitch / 2
     offsets = np.linspace(-half * aperture, half * aperture, rays)
     out = []
+    eps = 1e-7
     for off in offsets:
         sx = cell + off
         sy = float(surface_y(lens, sx))
-        # Outward normal of the arc: away from its centre of curvature, which
-        # sits one radius below the apex.
-        nx, ny = off, sy - (lens.H - lens.radius)
-        nl = math.hypot(nx, ny)
-        normal = (nx / nl, ny / nl)
+        # Outward normal of the surface, from the slope of its own sag — which
+        # works for any conic, where "one radius below the apex" only works for
+        # a circle.
+        slope = float(
+            conic_sag(abs(off) + eps, lens.radius, lens.K) - conic_sag(abs(off), lens.radius, lens.K)
+        ) / eps
+        if off < 0:
+            slope = -slope
+        nl = math.hypot(slope, 1.0)
+        normal = (slope / nl, 1.0 / nl)
         inside = refract(d, normal, 1.0, lens.n)
         if inside is None or inside[1] >= 0:
             continue
@@ -146,6 +164,12 @@ def trace(lens, theta_deg: float, cell: float = 0.0, rays: int = 9, aperture: fl
     return out
 
 
+def strip_at(lens, x: float, cell: float, n_views: int) -> float:
+    """Where a landing point falls, in strips from the left of its lenticule."""
+    t = (x - cell + lens.pitch / 2) / lens.pitch
+    return (t - math.floor(t)) * n_views
+
+
 def strip_of(lens, x: float, cell: float, n_views: int) -> int:
     """
     Which printed strip a landing point falls in, counting from the left of its
@@ -153,8 +177,15 @@ def strip_of(lens, x: float, cell: float, n_views: int) -> int:
     Can run past the lenticule's own edge, which is what a view outside the cone
     does: it reads the neighbour's strips and the print repeats.
     """
-    t = (x - cell + lens.pitch / 2) / lens.pitch
-    return int(math.floor((t - math.floor(t)) * n_views))
+    return int(math.floor(strip_at(lens, x, cell, n_views)))
+
+
+#: How far outside the lit strip a ray has to land before it is drawn as
+#: crosstalk, as a fraction of a strip. Not zero: a lens that focuses properly
+#: lands its whole bundle on one point, and head-on that point is exactly a
+#: strip boundary — the flip itself — where which side a ray falls is decided by
+#: the last bit of the arithmetic rather than by any optics.
+SPILL = 0.02
 
 
 def eye_of(strip: int, n_views: int) -> int:
@@ -220,7 +251,8 @@ def frame(lens, theta, n_views, path, aperture=APERTURE, rays=15, cells=(-1, 0, 
     for c in cells:
         strong = c == 0
         for ray in middle if strong else trace(lens, theta, cell=c * lens.pitch, rays=rays, aperture=aperture):
-            on = strip_of(lens, ray["land"][0], c * lens.pitch, n_views) == strip_here
+            at = strip_at(lens, ray["land"][0], c * lens.pitch, n_views)
+            on = strip_here - SPILL <= at <= strip_here + 1 + SPILL
             ax.plot(
                 [ray["entry"][0], ray["surface"][0], ray["land"][0]],
                 [ray["entry"][1], ray["surface"][1], ray["land"][1]],
@@ -269,7 +301,7 @@ def frame(lens, theta, n_views, path, aperture=APERTURE, rays=15, cells=(-1, 0, 
 
 
 def main():
-    lens = DEFAULT
+    lens = DEFAULT  # replaced below if --surface circle
     # The cone, rounded out to a whole degree, plus one — so the sweep is a
     # degree a frame across everything the lens can show, and the frame at each
     # end is just past the edge, where the print starts repeating. At the
@@ -288,7 +320,12 @@ def main():
     ap.add_argument("--gif", default=os.path.join(OUT, "16-viewing-sweep.gif"))
     ap.add_argument("--ms", type=int, default=110, help="milliseconds per frame in the GIF")
     ap.add_argument("--once", action="store_true", help="loop left→right only, instead of walking back")
+    ap.add_argument(
+        "--surface", choices=("ellipse", "circle"), default="ellipse",
+        help="which lens to trace: the ellipse the tool prints, or the circle it used to",
+    )
     args = ap.parse_args()
+    lens = CIRCLE if args.surface == "circle" else DEFAULT
 
     os.makedirs(args.out, exist_ok=True)
     angles = np.arange(-args.span, args.span + 1e-9, args.step)
