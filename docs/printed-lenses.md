@@ -190,16 +190,25 @@ view. Where your eye is decides which tile the lens shows you.
 
 ![How one lens is divided](images/07-interlace.png)
 
-Here is the whole of it moving — one frame per degree, across the lens's own 53.3° cone and a degree
-past each edge. A parallel bundle is refracted by Snell's law at the real arc and traced to the
-artwork; the strip it lands on is outlined, and the view that strip carries is named. Watch the two
-directions disagree: the eye walks **right**, the bundle lands **left**, the printed strip number
-goes **down** — and the view you end up seeing is the one captured from the right, which is where
-you are standing. That is the whole reason the run is printed reversed.
+Here it is moving — one frame per degree, across the lens's own 53.3° cone and a degree past each
+edge. A parallel bundle is refracted by Snell's law at the real arc and traced to the artwork; the
+strip it lands on is outlined, and the strips are coloured by where their view was captured, blue
+from the left of the cone and orange from the right.
 
 ![The view sweep, one degree at a time](images/16-viewing-sweep.gif)
 
-_Regenerate it, or the frames behind it, with `python docs/animation.py` — see the head of that file._
+Watch the two directions disagree. The eye walks **right**; the bundle lands **left** of the lens
+axis, so it reads a strip nearer the left of the lenticule, which is a *low* strip number — and a low
+strip number carries a view captured from the **right**, because the run is printed reversed. The lit
+strip's colour is always the colour of the side the eye is on. That is the whole reason for the
+reversal, and a print made the other way round is one where those two stop agreeing.
+
+The frames at each end are just outside the cone: the bundle has walked onto the next lenticule's
+strips, which is where the print repeats.
+
+_The drawn bundle is the middle 45% of each cap, which is the part that comes to a point. Across the
+whole aperture it lands over five strips — spherical aberration, and the print's own blur. Regenerate
+with `python docs/animation.py`; see the head of that file._
 
 Walking across the sheet at position `u` (measured across the lenses), the arithmetic is:
 
