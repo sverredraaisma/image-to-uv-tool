@@ -7,6 +7,11 @@ import {
   alignedInterlaceWidth,
   calibrationPixelsPerLens,
   calibrationValues,
+  bundleLandings,
+  clampProfile,
+  conicSag,
+  spotSizeMm,
+  worstSpotMm,
   chunkCount,
   chunkRows,
   depthMapChunks,
@@ -127,6 +132,173 @@ describe('lensGeometry', () => {
     const low = lensGeometry(settings({ ri: 1.4 }));
     const high = lensGeometry(settings({ ri: 1.7 }));
     expect(high.minHeightMm).toBeLessThan(low.minHeightMm);
+  });
+});
+
+describe('the lens surface', () => {
+  it('is a circle for a graph that predates the choice, and says so', () => {
+    const g = lensGeometry(settings({ lpi: 45, heightMm: 0.9 }));
+    expect(g.profile).toBe('circle');
+    expect(g.conicK).toBe(0);
+    expect(clampProfile(undefined)).toBe('circle');
+    expect(clampProfile('nonsense')).toBe('circle');
+    expect(clampProfile('ellipse')).toBe('ellipse');
+  });
+
+  it('gives the ellipse the conic constant the optics call for', () => {
+    const g = lensGeometry(settings({ ri: 1.5, profile: 'ellipse' }));
+    expect(g.profile).toBe('ellipse');
+    expect(g.conicK).toBeCloseTo(-1 / 2.25, 12); // −1/n²
+    expect(lensGeometry(settings({ ri: 1.6, profile: 'ellipse' })).conicK).toBeCloseTo(-1 / 2.56, 12);
+  });
+
+  it('keeps the focus, the radius and the cone, and only changes the shape', () => {
+    const circle = lensGeometry(settings({ lpi: 45, heightMm: 0.9, ri: 1.5 }));
+    const ellipse = lensGeometry(settings({ lpi: 45, heightMm: 0.9, ri: 1.5, profile: 'ellipse' }));
+    // The focus condition fixes the vertex radius on its own, so neither the
+    // focal length nor the viewing cone notices the shape.
+    expect(ellipse.radiusMm).toBeCloseTo(circle.radiusMm, 12);
+    expect(ellipse.focusMm).toBeCloseTo(0.9, 9);
+    expect(ellipse.viewAngleDeg).toBeCloseTo(circle.viewAngleDeg, 12);
+    // What does change: a flatter cap, and a taller base to keep the height.
+    expect(ellipse.sagMm).toBeLessThan(circle.sagMm);
+    expect(ellipse.sagMm).toBeCloseTo(0.155, 3);
+    expect(circle.sagMm - ellipse.sagMm).toBeCloseTo(0.0433, 4);
+    expect(ellipse.baseMm).toBeCloseTo(0.9 - ellipse.sagMm, 9);
+    expect(ellipse.totalMm).toBeCloseTo(0.9, 9);
+  });
+
+  it('reaches further before it runs out, so it focuses in less ink', () => {
+    // A circle stops at its hemisphere; the ellipse gets √(n²−1)/n further,
+    // which is 25% off the height floor at n = 1.5 — the constraint the whole
+    // technique lives under.
+    const circle = lensGeometry(settings({ lpi: 45 }));
+    const ellipse = lensGeometry(settings({ lpi: 45, profile: 'ellipse' }));
+    expect(circle.minHeightMm).toBeCloseTo(0.847, 3);
+    expect(ellipse.minHeightMm).toBeCloseTo(0.631, 3);
+    expect(ellipse.minHeightMm / circle.minHeightMm).toBeCloseTo(Math.sqrt(1.25) / 1.5, 9);
+    // …and a height that cannot be printed as a circle can be as an ellipse.
+    expect(lensGeometry(settings({ lpi: 45, heightMm: 0.7 })).feasible).toBe(false);
+    expect(lensGeometry(settings({ lpi: 45, heightMm: 0.7, profile: 'ellipse' })).feasible).toBe(true);
+  });
+
+  it('falls back to the deepest surface of its own family when it cannot focus', () => {
+    const g = lensGeometry(settings({ lpi: 45, heightMm: 0.4, profile: 'ellipse' }));
+    expect(g.feasible).toBe(false);
+    // The ellipse's own limit, where its root vanishes: sag = half / √(1+K).
+    expect(g.sagMm).toBeCloseTo(g.pitchMm / 2 / Math.sqrt(1 - 1 / 2.25), 6);
+    expect(g.focusMm).toBeGreaterThan(0.4);
+  });
+
+  it('traces where the light actually lands, and how wide', () => {
+    const s = settings({ lpi: 45, heightMm: 0.9, ri: 1.5, profile: 'ellipse' });
+    const g = lensGeometry(s);
+    // An ellipse brings the whole aperture to one point on the axis — that is
+    // the property it was chosen for, and it is exact.
+    expect(spotSizeMm(s, g, 0) * 1000).toBeCloseTo(0, 3);
+    // A circle of the same radius does not: 269 µm, close to six strips of a
+    // twelve-view print.
+    const circle = lensGeometry(settings({ lpi: 45, heightMm: 0.9, ri: 1.5 }));
+    expect(spotSizeMm(settings({ lpi: 45, heightMm: 0.9, ri: 1.5 }), circle, 0) * 1000).toBeCloseTo(269, 0);
+    // Off-axis, coma: the ellipse grows with angle, and is still far better.
+    const rim = g.viewAngleDeg / 2;
+    expect(spotSizeMm(s, g, rim) * 1000).toBeCloseTo(167, 0);
+    expect(spotSizeMm(s, g, rim)).toBeLessThan(spotSizeMm(settings({ lpi: 45 }), circle, rim) / 2.5);
+    // The bundle lands on the side away from the eye — the lens inversion, in
+    // the one place it is decided.
+    const landed = bundleLandings(s, g, 12);
+    expect(Math.max(...landed)).toBeLessThan(0);
+    expect(Math.min(...bundleLandings(s, g, -12))).toBeGreaterThan(0);
+  });
+
+  it('can trade the axial point for an even blur across the cone', () => {
+    const axis = settings({ lpi: 45, heightMm: 0.9, ri: 1.5, profile: 'ellipse' });
+    const cone = settings({ ...axis, focus: 'cone' });
+    const ga = lensGeometry(axis);
+    const gc = lensGeometry(cone);
+    expect(ga.focus).toBe('axis');
+    expect(gc.focus).toBe('cone');
+    // A longer radius, so the paraxial focus sits past the artwork on purpose
+    // and the circle of least confusion lands on it instead.
+    expect(gc.radiusMm).toBeGreaterThan(ga.radiusMm);
+    expect(gc.focusMm).toBeGreaterThan(0.9);
+    expect(gc.axialRadiusMm).toBeCloseTo(ga.radiusMm, 12);
+    // Head-on is no longer perfect; the rim is much better; the worst case
+    // across the whole cone is halved.
+    expect(spotSizeMm(cone, gc, 0)).toBeGreaterThan(spotSizeMm(axis, ga, 0));
+    expect(spotSizeMm(cone, gc, gc.viewAngleDeg / 2)).toBeLessThan(
+      spotSizeMm(axis, ga, ga.viewAngleDeg / 2),
+    );
+    expect(worstSpotMm(cone, gc)).toBeLessThan(worstSpotMm(axis, ga) / 1.8);
+    // …and it is even: nothing in the cone is much worse than anything else.
+    const spots = [0, 0.25, 0.5, 0.75, 1].map((f) => spotSizeMm(cone, gc, (f * gc.viewAngleDeg) / 2));
+    expect(Math.max(...spots) / Math.min(...spots)).toBeLessThan(2);
+  });
+
+  it('leaves the viewing cone alone, because the radius was never what set it', () => {
+    // The ray through the lenticule's axis meets the surface square on, so it
+    // refracts as through a plane: where it lands, and so where the print
+    // starts repeating, is a question about the pitch and the stack height.
+    const axis = settings({ lpi: 45, heightMm: 0.9, profile: 'ellipse' });
+    const cone = settings({ ...axis, focus: 'cone' });
+    expect(lensGeometry(cone).viewAngleDeg).toBeCloseTo(lensGeometry(axis).viewAngleDeg, 12);
+    expect(lensGeometry(settings({ lpi: 45, heightMm: 0.9 })).viewAngleDeg).toBeCloseTo(
+      lensGeometry(axis).viewAngleDeg,
+      12,
+    );
+    // Which is the same number it has always reported, because the old solve
+    // forced the focus to equal the height.
+    const g = lensGeometry(axis);
+    const half = g.pitchMm / 2;
+    expect(g.viewAngleDeg).toBeCloseTo(
+      2 * (Math.asin(Math.min(1, 1.5 * (half / Math.hypot(half, 0.9)))) * (180 / Math.PI)),
+      12,
+    );
+    expect(g.viewAngleDeg).toBeCloseTo(53.34, 2);
+  });
+
+  it('only solves across the cone when it has a focus to move', () => {
+    // Infeasible is already the deepest surface there is; there is nothing to
+    // trade, so the search does not run.
+    const g = lensGeometry(settings({ lpi: 45, heightMm: 0.4, focus: 'cone' }));
+    expect(g.feasible).toBe(false);
+    expect(g.radiusMm).toBeCloseTo(g.axialRadiusMm, 12);
+  });
+
+  it('is the same sag equation for both, and the circle is its K = 0 case', () => {
+    const R = 0.3;
+    for (const r of [0, 0.05, 0.1, 0.2, 0.28]) {
+      expect(conicSag(r, R, 0)).toBeCloseTo(R - Math.sqrt(R * R - r * r), 12);
+    }
+    // Flatter than the circle everywhere off the axis, and equal on it.
+    expect(conicSag(0, R, -0.444)).toBe(0);
+    expect(conicSag(0.2, R, -0.444)).toBeLessThan(conicSag(0.2, R, 0));
+    // Past where a surface runs out it is clamped, not imaginary.
+    expect(Number.isFinite(conicSag(10, R, 0))).toBe(true);
+  });
+
+  it('prints the shape it solved: the depth map follows the profile', () => {
+    const frames = [createImage(4, 4, [255, 0, 0, 255]), createImage(4, 4, [0, 0, 255, 255])];
+    const map = (profile: 'circle' | 'ellipse') => {
+      const s = settings({ profile });
+      const { depth, width, scaleMm } = renderDepthMap(frames, s);
+      const g = lensGeometry(s);
+      // Down the middle of a lenticule, from its apex to its seam.
+      const row = 0;
+      const at = (frac: number) =>
+        (depth[row * width + Math.round(frac * (g.pitchPx - 1))] / 65535) * scaleMm;
+      return { apex: at(0.5), quarter: at(0.25), seam: at(0.02), g };
+    };
+    const c = map('circle');
+    const e = map('ellipse');
+    // Both stand a whole stack tall at the apex — to within the pixel the
+    // sample lands on, which is a tenth of a lenticule here.
+    expect(c.apex).toBeGreaterThan(c.g.totalMm * 0.99);
+    expect(e.apex).toBeGreaterThan(e.g.totalMm * 0.99);
+    // …and in between the ellipse sits higher, because it is the flatter cap on
+    // the taller base. That difference *is* the fix, printed.
+    expect(e.quarter).toBeGreaterThan(c.quarter);
+    expect(e.seam).toBeGreaterThan(c.seam);
   });
 
   it('reports a plausible viewing cone', () => {

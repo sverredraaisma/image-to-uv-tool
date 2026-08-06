@@ -42,10 +42,13 @@ export interface SplatViewOptions {
   viewDistanceMm: number;
   /** The cone the run spans. */
   coneDeg: number;
-  /** A horizontal run of `views`, or a `grid`×`grid` square of them. */
+  /** A horizontal run of `views`, or a `grid` × `gridY` block of them. */
   layout: '1d' | '2d';
   views: number;
+  /** Views across the grid. */
   grid: number;
+  /** Views down it; omitted is square. */
+  gridY?: number;
   /** Paper colour, showing through wherever the cloud is thin. */
   background: [number, number, number];
   /** Draw at this multiple and box-filter down. */
@@ -541,15 +544,21 @@ function resolveDepth(buf: Buffers, w: number, h: number, ss: number): { depth: 
 /** Eye positions of the run, in the order the views come back. */
 export function splatEyeOffsets(o: SplatViewOptions): { x: number; y: number }[] {
   if (o.layout === '2d') {
-    const grid = Math.max(1, Math.round(o.grid));
-    const offsets = eyeOffsetsMm(grid, o.coneDeg, o.viewDistanceMm);
-    return gridCells(grid).map((_, idx) => ({
-      x: offsets[idx % grid],
+    const cols = Math.max(1, Math.round(o.grid));
+    const rows = Math.max(1, Math.round(o.gridY ?? o.grid));
+    // Both axes cross the same cone; a sparser one just steps further per view.
+    const offsetsX = eyeOffsetsMm(cols, o.coneDeg, o.viewDistanceMm);
+    const offsetsY = eyeOffsetsMm(rows, o.coneDeg, o.viewDistanceMm);
+    return gridCells(cols, rows).map((_, idx) => ({
+      x: offsetsX[idx % cols],
       // Row 0 is `Up`: the eye is above the sheet, so +y.
-      y: -offsets[Math.floor(idx / grid)],
+      y: -offsetsY[Math.floor(idx / cols)],
     }));
   }
-  return eyeOffsetsMm(Math.max(1, Math.round(o.views)), o.coneDeg, o.viewDistanceMm).map((x) => ({ x, y: 0 }));
+  return eyeOffsetsMm(Math.max(1, Math.round(o.views)), o.coneDeg, o.viewDistanceMm).map((x) => ({
+    x,
+    y: 0,
+  }));
 }
 
 /**

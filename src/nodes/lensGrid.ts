@@ -12,22 +12,27 @@ import {
   depthPreview,
   describeGridGeometry,
   gridCellCounts,
+  gridDims,
   gridInterlacedSize,
+  gridLabel,
   lensGeometry,
   lensGridChunks,
   outputSize,
   type LensGridSettings,
 } from '../lib/lenticular';
 import { runChunked } from '../lib/chunked';
-import { MAX_CELL_PORT_GRID, lensGridCellSlots, lensGridInputs, summariseMissing } from '../engine/ports';
-import { settingsFromConfig } from './lenticular';
+import { MAX_CELL_PORTS, lensGridCellSlots, lensGridInputs, summariseMissing } from '../engine/ports';
+import { focusField, profileField, settingsFromConfig } from './lenticular';
 import { asImage, asImages, bool, num } from './helpers';
 
 /** Read the print settings, plus the grid-only ones, out of a node's config. */
 export function gridSettingsFromConfig(config: NodeConfig): LensGridSettings {
+  const grid = clampGrid(num(config.grid, DEFAULT_GRID));
   return {
     ...settingsFromConfig(config),
-    grid: clampGrid(num(config.grid, DEFAULT_GRID)),
+    grid,
+    // No `gridY` is a graph from before the grid could be oblong: square.
+    gridY: clampGrid(num(config.gridY, grid)),
     packing: clampPacking(config.packing),
     phaseY: num(config.phaseY, 0),
     mirrorViews: bool(config.mirrorViews, true),
@@ -39,7 +44,7 @@ export function gridSettingsFromConfig(config: NodeConfig): LensGridSettings {
  *
  * A Sequence on the `views` port supplies the whole grid at once — that is how
  * Model → Grid Views feeds this node, and dragging 225 edges for a 15×15 by
- * hand would be absurd; past 4×4 the cell ports are not even offered. Where a
+ * hand would be absurd; past sixteen cells the ports are not even offered. Where a
  * cell does have a port and something is wired to it, that wins, so you can
  * wire the sequence and then override one view with a retouched image.
  */
@@ -66,23 +71,26 @@ export const lensGridNode: NodeDefinition = {
     'Interlace a grid of views under a 2D lens array (rows and columns of lenslets), so the print ' +
     'moves both left/right and up/down. Every input is named for where it is viewed from relative to ' +
     'head-on — Left · Up, Centre, Right · Down; or feed all of them down one wire from Model → Grid ' +
-    'Views. Grids up to 4×4 get a port per cell; bigger ones, up to 15×15, take the whole set on the ' +
-    'All views wire instead. Same optics and calibration sheets as Lenticular Print; ' +
-    'a grid of N gives N² views, each resolving to one pixel per lenslet. Lenslets pack hexagonally by ' +
+    'Views. Views across and views down are set separately, so the grid can be oblong — 2×3, or 8×2 for ' +
+    'a sheet that mostly moves sideways. Up to sixteen cells there is a port each; beyond that, up to ' +
+    '15×15, the whole set arrives on the All views wire instead. Same optics and calibration sheets as ' +
+    'Lenticular Print; X × Y views, each resolving to one pixel per lenslet. Lenslets pack hexagonally by ' +
     'default (the densest arrangement, ~15% more lenses and less flat sheet than a square grid) — switch ' +
     'to Square grid to line them up in rows and columns instead. Manual: click Run.',
   autoRun: false,
   customEditor: 'lensGrid',
-  // Ports are resolved per instance from `grid` (see engine/ports.ts); these
-  // are the 3×3 defaults, so the static definition still describes the node.
-  inputs: lensGridInputs({ grid: DEFAULT_GRID }),
+  // Ports are resolved per instance from `grid`/`gridY` (see engine/ports.ts);
+  // these are the 3×3 defaults, so the static definition still describes the
+  // node.
+  inputs: lensGridInputs({ grid: DEFAULT_GRID, gridY: DEFAULT_GRID }),
   outputs: [
     { id: 'interlaced', label: 'Interlaced', type: 'image' },
     { id: 'depth', label: 'Gloss depth', type: 'image' },
     { id: 'info', label: 'Info', type: 'text' },
   ],
   configFields: [
-    { kind: 'number', key: 'grid', label: 'Grid (N × N views)', min: MIN_GRID, max: MAX_GRID, step: 1 },
+    { kind: 'number', key: 'grid', label: 'Views across (X)', min: MIN_GRID, max: MAX_GRID, step: 1 },
+    { kind: 'number', key: 'gridY', label: 'Views down (Y)', min: MIN_GRID, max: MAX_GRID, step: 1 },
     {
       kind: 'select',
       key: 'packing',
@@ -99,6 +107,8 @@ export const lensGridNode: NodeDefinition = {
     { kind: 'number', key: 'phaseY', label: 'Phase Y (0–1)', min: 0, max: 1, step: 0.05 },
     { kind: 'number', key: 'heightMm', label: 'Height (mm)', min: 0.01, step: 0.05 },
     { kind: 'number', key: 'ri', label: 'RI', min: 1.01, max: 3, step: 0.01 },
+    profileField(),
+    focusField(),
     { kind: 'number', key: 'orientationDeg', label: 'Orientation (°)', min: -180, max: 180, step: 1 },
     {
       kind: 'boolean',
@@ -159,6 +169,7 @@ export const lensGridNode: NodeDefinition = {
   ],
   defaultConfig: () => ({
     grid: DEFAULT_GRID,
+    gridY: DEFAULT_GRID,
     packing: 'hex',
     widthMm: 100,
     ppi: 1440,
@@ -167,6 +178,8 @@ export const lensGridNode: NodeDefinition = {
     phaseY: 0,
     heightMm: 0.9,
     ri: 1.5,
+    profile: 'ellipse',
+    focus: 'axis',
     orientationDeg: 0,
     mirrorViews: true,
     stripSamples: 2,
@@ -186,11 +199,13 @@ export const lensGridNode: NodeDefinition = {
   compute: async ({ inputs, config, onProgress, signal, allowOversize }) => {
     const gathered = gatherViews(inputs, config);
     if ('missing' in gathered) {
-      const n = clampGrid(num(config.grid, DEFAULT_GRID));
+      const { cols, rows } = gridDims(gridSettingsFromConfig(config));
+      const n = cols * rows;
       throw new Error(
-        `A ${n}×${n} lens grid needs all ${n * n} views. Missing: ${summariseMissing(gathered.missing)}.` +
-          (n > MAX_CELL_PORT_GRID
-            ? ` A grid this big has no per-cell inputs — feed all ${n * n} down the All views wire.`
+        `A ${gridLabel(cols, rows)} lens grid needs all ${n} views. ` +
+          `Missing: ${summariseMissing(gathered.missing)}.` +
+          (n > MAX_CELL_PORTS
+            ? ` A grid this big has no per-cell inputs — feed all ${n} down the All views wire.`
             : ''),
       );
     }

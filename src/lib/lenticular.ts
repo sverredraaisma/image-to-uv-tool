@@ -105,6 +105,160 @@ export interface LenticularSettings {
    * strips wherever the phase lands badly; 2 is the safe floor.
    */
   stripSamples: number;
+  /**
+   * The shape of the lens surface. Absent on graphs saved before there was a
+   * choice, which were circles — see {@link clampProfile} and {@link LensProfile}.
+   */
+  profile?: LensProfile;
+  /**
+   * Where the radius puts the focus: on the axis, or evenest across the cone.
+   * Absent is `axis`, which is what every graph before the choice solved for.
+   * See {@link LensFocus}.
+   */
+  focus?: LensFocus;
+}
+
+/**
+ * The cross-section of the lens surface.
+ *
+ * - `circle`: an arc of one radius. The obvious shape, and the wrong one: a
+ *   circle does not bring its whole aperture to a point, so the light meant for
+ *   one strip lands across several. At the tool's defaults that is 269 µm of
+ *   spread, 5.7 strips of a twelve-view print, and it is the single largest
+ *   source of crosstalk in a lenticular.
+ * - `ellipse`: the conic that focuses collimated light to a point inside a
+ *   medium of index n, exactly, at one refracting surface. Same vertex radius,
+ *   so the same focal length, the same viewing cone and the same feasibility
+ *   arithmetic; only the shape between the apex and the seam differs, by 43 µm
+ *   at the defaults. It removes the on-axis spread entirely and cuts the
+ *   worst-case across the cone by 2.7×.
+ *
+ * A laminated sheet is whatever the extruder made. Here the profile is a height
+ * map, so the better shape costs nothing to print — which is why the ellipse is
+ * the default for new nodes. See docs/printed-lenses.md, "The blur the lens
+ * itself adds", and figure 17.
+ */
+export type LensProfile = 'circle' | 'ellipse';
+
+/**
+ * Conic constant of a profile at index `n`.
+ *
+ * `K = −1/n²` is the classical result for a single refracting surface imaging an
+ * axial point at infinity: it is the ellipse whose eccentricity is 1/n, and it
+ * is what the lenticular art claims for the same job (US6795250B2). 0 is the
+ * circle, which is the same formula's degenerate case.
+ */
+export const conicConstant = (profile: LensProfile | undefined, n: number): number =>
+  profile === 'ellipse' ? -1 / (n * n) : 0;
+
+/** Config values arrive as unknowns; anything but an explicit `ellipse` is a circle. */
+export const clampProfile = (profile: unknown): LensProfile =>
+  profile === 'ellipse' ? 'ellipse' : 'circle';
+
+/**
+ * Where to put the radius, given that no single surface is sharp everywhere.
+ *
+ * - `axis`: the vertex focus lands on the artwork. Sharpest head-on — with an
+ *   ellipse, exactly a point — and softening towards the edge of the cone,
+ *   where coma takes over. The default, and what "solve the lens" means above.
+ * - `cone`: the radius that gives the smallest *worst* blur across the whole
+ *   cone instead. It is a longer focus, so head-on is no longer perfect, but
+ *   nothing is much worse than anything else: with an ellipse it turns 0 µm
+ *   head-on and 167 µm at the rim into about 85 µm everywhere.
+ *
+ * Which is better is a question about the print rather than about optics. A
+ * sheet looked at square on wants `axis`; one that will be walked past, or a
+ * grid, spends most of its viewing at an angle and wants `cone`.
+ *
+ * The viewing cone is the same either way — it is set by the pitch and the
+ * stack height, not by the radius. See {@link lensGeometry}.
+ */
+export type LensFocus = 'axis' | 'cone';
+
+/** Config values arrive as unknowns; anything but an explicit `cone` is `axis`. */
+export const clampFocus = (focus: unknown): LensFocus => (focus === 'cone' ? 'cone' : 'axis');
+
+/**
+ * Depth of a conic surface below its own apex, at distance `r` from the axis.
+ *
+ * The standard sag equation, `r² / (R(1 + √(1 − (1+K)r²/R²)))`, which is the
+ * circle at K = 0 and an ellipse for −1 < K < 0. Past the point where the root
+ * turns negative the surface has run out — a circle at its hemisphere, an
+ * ellipse at its own semi-axis — and it is clamped there rather than made
+ * imaginary; {@link lensGeometry} keeps the solve on the printable side of that.
+ */
+export function conicSag(r: number, radiusMm: number, conicK: number): number {
+  const R = Math.max(1e-9, radiusMm);
+  const r2 = r * r;
+  const disc = 1 - ((1 + conicK) * r2) / (R * R);
+  return r2 / (R * (1 + Math.sqrt(Math.max(0, disc))));
+}
+
+/** Slope of {@link conicSag} at `r` — `r / (R√(1 − (1+K)r²/R²))`, exactly. */
+export function conicSlope(r: number, radiusMm: number, conicK: number): number {
+  const R = Math.max(1e-9, radiusMm);
+  const disc = 1 - ((1 + conicK) * r * r) / (R * R);
+  return r / (R * Math.sqrt(Math.max(1e-12, disc)));
+}
+
+/**
+ * Where the light an eye collects actually lands on the artwork, in mm from the
+ * lenticule's axis — one entry per ray across the aperture.
+ *
+ * This is the print's own question, asked exactly rather than paraxially: a
+ * parallel bundle (the eye is hundreds of millimetres away, so it is parallel
+ * across half a millimetre of lens), refracted by Snell's law at the real
+ * surface, run down to the artwork plane at `heightMm`. Where the bundle lands
+ * decides which strip is seen, and how wide it lands is the print's crosstalk.
+ *
+ * The eye is `thetaDeg` to the right of head-on, so the light reaching it
+ * travels down and to the *left*: the inversion, in one sign.
+ */
+export function bundleLandings(
+  settings: LenticularSettings,
+  geometry: LensGeometry,
+  thetaDeg: number,
+  rays = 65,
+): number[] {
+  const n = Math.max(1.0001, settings.ri);
+  const h = Math.max(1e-6, settings.heightMm);
+  const half = geometry.pitchMm / 2;
+  const th = (thetaDeg * Math.PI) / 180;
+  const dx = -Math.sin(th);
+  const dy = -Math.cos(th);
+  const out: number[] = [];
+  for (let i = 0; i < rays; i++) {
+    // Across the aperture, but not into the seam where two lenticules meet.
+    const off = half * 0.99 * (rays === 1 ? 0 : (2 * i) / (rays - 1) - 1);
+    const y = h - conicSag(Math.abs(off), geometry.radiusMm, geometry.conicK);
+    const slope = conicSlope(Math.abs(off), geometry.radiusMm, geometry.conicK) * Math.sign(off);
+    const nl = Math.hypot(slope, 1);
+    const nx = slope / nl;
+    const ny = 1 / nl;
+    // Snell as a vector, air into the varnish.
+    const eta = 1 / n;
+    const cosI = -(dx * nx + dy * ny);
+    const k = 1 - eta * eta * (1 - cosI * cosI);
+    if (k < 0) continue;
+    const f = eta * cosI - Math.sqrt(k);
+    const ix = eta * dx + f * nx;
+    const iy = eta * dy + f * ny;
+    if (iy >= 0) continue;
+    out.push(off + (y / -iy) * ix);
+  }
+  return out;
+}
+
+/** How wide that bundle lands, in mm — the blur one view is smeared over. */
+export function spotSizeMm(
+  settings: LenticularSettings,
+  geometry: LensGeometry,
+  thetaDeg = 0,
+  rays = 65,
+): number {
+  const lands = bundleLandings(settings, geometry, thetaDeg, rays);
+  if (!lands.length) return 0;
+  return Math.max(...lands) - Math.min(...lands);
 }
 
 export interface LensGeometry {
@@ -128,6 +282,17 @@ export interface LensGeometry {
   minHeightMm: number;
   /** Full viewing cone in air, degrees. */
   viewAngleDeg: number;
+  /** The surface this was solved for, and its conic constant. */
+  profile: LensProfile;
+  conicK: number;
+  /** Which focus the radius was chosen for. */
+  focus: LensFocus;
+  /**
+   * The radius the plain focus condition would have given. Equal to
+   * {@link radiusMm} unless the focus was solved across the cone, which lands
+   * the paraxial focus past the artwork on purpose.
+   */
+  axialRadiusMm: number;
 }
 
 /**
@@ -143,34 +308,100 @@ export function lensGeometry(settings: LenticularSettings): LensGeometry {
   const pitchMm = 25.4 / lpi;
   const pitchPx = ppi / lpi;
   const halfPitch = pitchMm / 2;
+  const profile = clampProfile(settings.profile);
+  const conicK = conicConstant(profile, n);
+  // How far out a conic of vertex radius R reaches before its own surface runs
+  // out: R/√(1+K). A circle stops at its hemisphere; the flatter ellipse gets
+  // √(1+K) = √(n²−1)/n further, which is what lowers the height floor below.
+  const reach = Math.sqrt(1 + conicK);
 
-  const minHeightMm = (n * pitchMm) / (2 * (n - 1));
-  const disc = h * h * (n - 1) * (n - 1) - n * n * halfPitch * halfPitch;
-  const feasible = disc >= 0;
-  // Infeasible → hemisphere, the shortest focus this pitch can produce.
-  const sagMm = feasible ? (h * (n - 1) - Math.sqrt(disc)) / n : halfPitch;
-  const radiusMm = (sagMm * sagMm + halfPitch * halfPitch) / (2 * sagMm);
-  const focusMm = (n * radiusMm) / (n - 1);
-  const baseMm = Math.max(0, h - sagMm);
-  const totalMm = baseMm + sagMm;
+  // The focus condition, and the whole of the solve: light from infinity lands
+  // `nR/(n−1)` inside the material, and we want that to be H. It fixes the
+  // radius on its own — not the pitch, not the view count, and not the shape,
+  // which only decides how much sag that radius costs across the pitch.
+  const wantedR = (h * (n - 1)) / n;
+  const minHeightMm = (n * reach * pitchMm) / (2 * (n - 1));
+  const feasible = wantedR >= reach * halfPitch;
+  // Infeasible → the deepest surface of this family that still spans the pitch
+  // (a hemisphere, for a circle), which is the shortest focus this pitch can
+  // produce. It focuses short of the artwork, and the report says so.
+  const axialRadiusMm = feasible ? wantedR : reach * halfPitch;
 
-  // Marginal ray from the focus to the lens edge, refracted back out to air.
-  const sinInside = halfPitch / Math.hypot(halfPitch, focusMm);
+  // The ray that leaves the eye through the lenticule's own axis meets the
+  // surface where it is flat to the axis, so it refracts as if through a plane
+  // and lands at H·tan(asin(sinθ/n)) from the axis, whatever the radius. The
+  // cone is where that walks off the lenticule and the print starts repeating —
+  // a question about the pitch and the stack height only.
+  //
+  // Until the focus could be solved across the cone this read `focusMm`, which
+  // the solve had just forced to equal H; identical for every lens printed so
+  // far, and honest for the ones where the paraxial focus is deliberately past
+  // the artwork.
+  const sinInside = halfPitch / Math.hypot(halfPitch, h);
   const sinAir = Math.min(1, n * sinInside);
   const viewAngleDeg = 2 * (Math.asin(sinAir) * (180 / Math.PI));
 
-  return {
+  const focus = clampFocus(settings.focus);
+  const base = (radius: number): LensGeometry => ({
     pitchMm,
     pitchPx,
-    sagMm,
-    baseMm,
-    radiusMm,
-    focusMm,
-    totalMm,
+    sagMm: conicSag(halfPitch, radius, conicK),
+    baseMm: Math.max(0, h - conicSag(halfPitch, radius, conicK)),
+    radiusMm: radius,
+    focusMm: (n * radius) / (n - 1),
+    totalMm: Math.max(0, h - conicSag(halfPitch, radius, conicK)) + conicSag(halfPitch, radius, conicK),
     feasible,
     minHeightMm,
     viewAngleDeg,
-  };
+    profile,
+    conicK,
+    focus,
+    axialRadiusMm,
+  });
+
+  const axial = base(axialRadiusMm);
+  return focus === 'cone' && feasible ? base(bestRadiusMm(settings, axial)) : axial;
+}
+
+/** Angles the cone search judges a radius at: head-on out to the rim. */
+const CONE_SAMPLES = [0, 0.25, 0.5, 0.75, 1];
+
+/** The widest a bundle lands anywhere in the cone — what `cone` focus minimises. */
+export function worstSpotMm(settings: LenticularSettings, geometry: LensGeometry, rays = 41): number {
+  const half = geometry.viewAngleDeg / 2;
+  return Math.max(...CONE_SAMPLES.map((f) => spotSizeMm(settings, geometry, f * half, rays)));
+}
+
+/**
+ * The radius whose worst blur across the cone is smallest.
+ *
+ * Longer than the axial one, always: spherical aberration lands the outer rays
+ * short, so pushing the paraxial focus past the artwork brings the whole bundle
+ * together at it instead — the circle of least confusion, put where the picture
+ * is. A golden-section search over `[R, 1.6R]`, on a curve with one minimum in
+ * that interval, and cheap enough to run inside the solve: about sixty traces.
+ */
+export function bestRadiusMm(settings: LenticularSettings, axial: LensGeometry): number {
+  const at = (radius: number) => worstSpotMm(settings, { ...axial, radiusMm: radius }, 25);
+  const phi = (Math.sqrt(5) - 1) / 2;
+  let lo = axial.radiusMm;
+  let hi = axial.radiusMm * 1.6;
+  let c = hi - phi * (hi - lo);
+  let d = lo + phi * (hi - lo);
+  let fc = at(c);
+  let fd = at(d);
+  for (let i = 0; i < 24 && hi - lo > axial.radiusMm * 1e-4; i++) {
+    if (fc < fd) {
+      [hi, d, fd] = [d, c, fc];
+      c = hi - phi * (hi - lo);
+      fc = at(c);
+    } else {
+      [lo, c, fc] = [c, d, fd];
+      d = lo + phi * (hi - lo);
+      fd = at(d);
+    }
+  }
+  return (lo + hi) / 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -883,13 +1114,14 @@ export function* depthMapChunks(
         const band = bandAt(s, xMm, yMm);
         if (!band) continue; // gutter between calibration bands prints no gloss
 
-        const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
+        const { pitchMm, sagMm, baseMm, radiusMm, conicK } = band.geometry;
         const u = xMm * s.cos + yMm * s.sin;
         const t = u / pitchMm + s.phase - Math.floor(u / pitchMm + s.phase);
 
-        // Lens profile: circular arc of radius R and sag `sagMm`, on the base.
+        // The surface, measured down from the apex and turned back into height
+        // above the base: a circle at K = 0, an ellipse at K = −1/n².
         const offset = (t - 0.5) * pitchMm;
-        const arc = Math.sqrt(Math.max(0, radiusMm * radiusMm - offset * offset)) - (radiusMm - sagMm);
+        const arc = sagMm - conicSag(Math.abs(offset), radiusMm, conicK);
         const mm = baseMm + Math.max(0, arc);
         depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
       }
@@ -984,8 +1216,15 @@ export interface CapArraySettings extends LenticularSettings {
 }
 
 export interface LensGridSettings extends CapArraySettings {
-  /** Lenslets per side of one view grid: 2 = 2×2 (4 views), 3 = 3×3 (9). */
+  /** Columns of views under one lenslet: 2 = two views left→right, 3 = three. */
   grid: number;
+  /**
+   * Rows of views, so the grid can be oblong — 2 across by 3 down, say, when the
+   * sheet is to be tilted further vertically than horizontally, or the other way
+   * about. Absent on graphs saved before the grid could be anything but square,
+   * which is exactly what falling back to `grid` gives them.
+   */
+  gridY?: number;
   /**
    * Place each view opposite the direction it is named for. A lens inverts, so
    * the view you see from the left has to sit on the *right* of its cell; with
@@ -1007,6 +1246,17 @@ export const DEFAULT_GRID = 3;
 
 export const clampGrid = (grid: number): number =>
   Math.min(MAX_GRID, Math.max(MIN_GRID, Math.round(grid) || MIN_GRID));
+
+/** Columns and rows of the view grid. Both clamped; `gridY` defaults to `grid`. */
+export function gridDims(settings: { grid: number; gridY?: number }): { cols: number; rows: number } {
+  return {
+    cols: clampGrid(settings.grid),
+    rows: clampGrid(settings.gridY ?? settings.grid),
+  };
+}
+
+/** `3×3` — how a grid is written wherever one is reported. */
+export const gridLabel = (cols: number, rows: number): string => `${cols}×${rows}`;
 
 /**
  * How the round lenslet footprints tile the sheet.
@@ -1104,10 +1354,13 @@ export function gridAxisLabel(index: number, count: number, axis: 'x' | 'y'): st
   return `${word} ${rank}`;
 }
 
-/** Human-readable name of one grid cell, e.g. `Left · Up` or `Centre (neutral)`. */
-export function gridCellLabel(col: number, row: number, grid: number): string {
-  const x = gridAxisLabel(col, grid, 'x');
-  const y = gridAxisLabel(row, grid, 'y');
+/**
+ * Human-readable name of one grid cell, e.g. `Left · Up` or `Centre (neutral)`.
+ * `rows` defaults to `cols` for the square case.
+ */
+export function gridCellLabel(col: number, row: number, cols: number, rows = cols): string {
+  const x = gridAxisLabel(col, cols, 'x');
+  const y = gridAxisLabel(row, rows, 'y');
   if (x === 'Centre' && y === 'Centre') return 'Centre (neutral)';
   if (x === 'Centre') return y;
   if (y === 'Centre') return x;
@@ -1117,13 +1370,20 @@ export function gridCellLabel(col: number, row: number, grid: number): string {
 /** Stable port id for a grid cell — independent of the label wording. */
 export const gridCellId = (col: number, row: number): string => `c${col}r${row}`;
 
-/** Cells in port order: row-major from the top-left (`Left · Up`). */
-export function gridCells(grid: number): { col: number; row: number; id: string; label: string }[] {
-  const n = clampGrid(grid);
+/**
+ * Cells in port order: row-major from the top-left (`Left · Up`). `rows`
+ * defaults to `cols`, so a single argument still gives a square grid.
+ */
+export function gridCells(
+  cols: number,
+  rows = cols,
+): { col: number; row: number; id: string; label: string }[] {
+  const nx = clampGrid(cols);
+  const ny = clampGrid(rows);
   const cells = [];
-  for (let row = 0; row < n; row++) {
-    for (let col = 0; col < n; col++) {
-      cells.push({ col, row, id: gridCellId(col, row), label: gridCellLabel(col, row, n) });
+  for (let row = 0; row < ny; row++) {
+    for (let col = 0; col < nx; col++) {
+      cells.push({ col, row, id: gridCellId(col, row), label: gridCellLabel(col, row, nx, ny) });
     }
   }
   return cells;
@@ -1163,10 +1423,13 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
   const first = views[0];
   const cells = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
   const samples = Math.max(1, settings.stripSamples);
+  const { cols, rows } = gridDims(settings);
   // Hex rows sit √3/2 as far apart, so a raster giving `stripSamples` px across
-  // a view tile gives fewer *down* it. Scale up so the floor holds both ways.
+  // a view tile gives fewer *down* it — and an oblong grid cuts the cell into a
+  // different number of tiles each way. Take whichever axis asks for more, so
+  // the floor holds both ways.
   const forViews = Math.ceil(
-    (cells * clampGrid(settings.grid) * samples) / rowScaleOf(clampPacking(settings.packing)),
+    cells * samples * Math.max(cols, rows / rowScaleOf(clampPacking(settings.packing))),
   );
   const forArtwork = Math.max(...views.map((v) => v.width));
   // Whole pixels per cell across, and a whole number per tile column where the
@@ -1176,7 +1439,7 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
   const width = alignedInterlaceWidth(
     Math.max(forViews, forArtwork),
     cells,
-    clampGrid(settings.grid),
+    cols,
     outputSize(settings, first).width,
   );
   return { width, height: Math.max(1, Math.round((width * first.height) / first.width)) };
@@ -1197,19 +1460,21 @@ export function gridInterlacedSize(settings: LensGridSettings, views: RasterImag
  */
 export const packingAlignsRows = (packing: LensPacking): boolean => rowScaleOf(packing) === 1;
 
-function requireGridViews(views: RasterImage[], grid: number): number {
-  const n = clampGrid(grid);
-  if (views.length !== n * n) {
-    throw new Error(`A ${n}×${n} lens grid needs ${n * n} images (got ${views.length}).`);
+function requireGridViews(views: RasterImage[], settings: LensGridSettings): { cols: number; rows: number } {
+  const { cols, rows } = gridDims(settings);
+  if (views.length !== cols * rows) {
+    throw new Error(
+      `A ${gridLabel(cols, rows)} lens grid needs ${cols * rows} images (got ${views.length}).`,
+    );
   }
-  return n;
+  return { cols, rows };
 }
 
 /**
  * Interlace a grid of views under a 2D lens array. Same idea as the 1D
  * interlace, run on both axes at once: the position within the cell picks a
  * column *and* a row of the view grid, and the sample point is the cell centre
- * so every one of the grid² tiles under a lenslet shows the same spot.
+ * so every one of the cols × rows tiles under a lenslet shows the same spot.
  *
  * Views arrive in {@link gridCells} order (row-major from `Left · Up`).
  */
@@ -1227,7 +1492,7 @@ export function* gridInterlaceChunks(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): Generator<ChunkProgress, RasterImage> {
-  const grid = requireGridViews(views, settings.grid);
+  const { cols, rows } = requireGridViews(views, settings);
   const size = options.interlacedSize ?? gridInterlacedSize(settings, views);
   const width = Math.max(1, Math.round(size.width));
   const height = Math.max(1, Math.round(size.height));
@@ -1261,24 +1526,26 @@ export function* gridInterlaceChunks(
         const sv = v / (pitchMm * rowScale) + phaseY;
         const cell = latticeAt(su, sv, packing);
 
-        // Tiles are square in millimetres on both axes, so a view subtends the
-        // same angle horizontally and vertically. A hex cell reaches past a
-        // pitch at its two tips, which clamp into the outermost tiles.
+        // The cell is one pitch each way, cut into `cols` tiles across and
+        // `rows` down: square tiles when the grid is, and on an oblong grid the
+        // sparser axis simply has wider tiles, so its views each subtend a
+        // larger slice of the same cone. A hex cell reaches past a pitch at its
+        // two tips, which clamp into the outermost tiles.
         const fu = Math.min(0.999999, Math.max(0, cell.du + 0.5));
         const fv = Math.min(0.999999, Math.max(0, cell.dv + 0.5));
-        const col = Math.floor(fu * grid);
-        const row = Math.floor(fv * grid);
+        const col = Math.floor(fu * cols);
+        const row = Math.floor(fv * rows);
 
         // The lens inverts: the tile on the left of a cell is what an eye to the
         // *right* sees, so a view named "Left" belongs on the right.
-        const viewCol = settings.mirrorViews ? grid - 1 - col : col;
-        const viewRow = settings.mirrorViews ? grid - 1 - row : row;
+        const viewCol = settings.mirrorViews ? cols - 1 - col : col;
+        const viewRow = settings.mirrorViews ? rows - 1 - row : row;
 
         // Sample at the cell centre, rotated back into sheet coordinates.
         const uc = (cell.cu - s.phase) * pitchMm;
         const vc = (cell.cv - phaseY) * pitchMm * rowScale;
         sampleNormalized(
-          views[viewRow * grid + viewCol],
+          views[viewRow * cols + viewCol],
           (uc * s.cos - vc * s.sin) / s.widthMm,
           (uc * s.sin + vc * s.cos) / s.heightMm,
           out.data,
@@ -1309,7 +1576,7 @@ export function* gridDepthMapChunks(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): Generator<ChunkProgress, DepthMapResult> {
-  requireGridViews(views, settings.grid);
+  requireGridViews(views, settings);
   return yield* capDepthMapChunks(views, settings, options);
 }
 
@@ -1351,7 +1618,7 @@ export function* capDepthMapChunks(
         const band = bandAt(s, xMm, yMm);
         if (!band) continue;
 
-        const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
+        const { pitchMm, sagMm, baseMm, radiusMm, conicK } = band.geometry;
         const u = xMm * s.cos + yMm * s.sin;
         const v = -xMm * s.sin + yMm * s.cos;
         const su = u / pitchMm + s.phase;
@@ -1361,10 +1628,11 @@ export function* capDepthMapChunks(
         const dv = cell.dv * pitchMm;
 
         // A cap of diameter one pitch around the nearest centre; outside it,
-        // flat base. In a hex array that circle touches all six neighbours.
+        // flat base. In a hex array that circle touches all six neighbours. The
+        // cap is a surface of revolution of the same conic the 1D sheet uses —
+        // a sphere at K = 0, an ellipsoid at K = −1/n².
         const r = Math.hypot(du, dv);
-        const arc =
-          r <= pitchMm / 2 ? Math.sqrt(Math.max(0, radiusMm * radiusMm - r * r)) - (radiusMm - sagMm) : 0;
+        const arc = r <= pitchMm / 2 ? sagMm - conicSag(r, radiusMm, conicK) : 0;
         const mm = baseMm + Math.max(0, arc);
         depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
       }
@@ -1388,7 +1656,7 @@ export function* lensGridChunks(
   settings: LensGridSettings,
   options: RenderOptions = {},
 ): Generator<ChunkProgress, LenticularRender> {
-  const grid = requireGridViews(views, settings.grid);
+  const { cols, rows } = requireGridViews(views, settings);
   const art = options.interlacedSize ?? gridInterlacedSize(settings, views);
   const map = outputSize(settings, views[0]);
   checkBudget(
@@ -1402,8 +1670,9 @@ export function* lensGridChunks(
 
   const artChunks = chunkCount(art.width, art.height, options.chunkPixels);
   const total = artChunks + chunkCount(map.width, map.height, options.chunkPixels);
-  const interlaced = yield* asPartOf(gridInterlaceChunks(views, { ...settings, grid }, options), 0, total);
-  const depth = yield* asPartOf(gridDepthMapChunks(views, { ...settings, grid }, options), artChunks, total);
+  const clamped = { ...settings, grid: cols, gridY: rows };
+  const interlaced = yield* asPartOf(gridInterlaceChunks(views, clamped, options), 0, total);
+  const depth = yield* asPartOf(gridDepthMapChunks(views, clamped, options), artChunks, total);
   return {
     interlaced,
     depth: depth.depth,
@@ -1418,8 +1687,8 @@ export function* lensGridChunks(
  * Switch target for a grid: a checkerboard of views, so a tilt along *either*
  * axis flips the sheet. The neutral centre view is white.
  */
-export function gridSwitchViews(grid: number): RasterImage[] {
-  return gridCells(grid).map(({ col, row }) => {
+export function gridSwitchViews(cols: number, rows = cols): RasterImage[] {
+  return gridCells(cols, rows).map(({ col, row }) => {
     const v = (col + row) % 2 === 0 ? 255 : 0;
     return createImage(1, 1, [v, v, v, 255]);
   });
@@ -1780,6 +2049,7 @@ export function describeGeometry(
     `Lenticule pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / frameCount).toFixed(2)} px per frame strip`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
+    describeProfile(geometry),
     `Radius ${mm(geometry.radiusMm)} mm · focus ${mm(geometry.focusMm)} mm below apex · viewing angle ${geometry.viewAngleDeg.toFixed(1)}°`,
   ];
   if (!geometry.feasible) {
@@ -1797,8 +2067,13 @@ export function describeGeometry(
   return lines.join('\n');
 }
 
-/** Cells across and down the sheet — one lenslet each, one pixel per view. */
-export function gridCellCounts(settings: LensGridSettings, first: RasterImage): OutputSize {
+/**
+ * Cells across and down the sheet — one lenslet each, one pixel per view. It is
+ * the *array* that decides this, not how the artwork under a cap is divided, so
+ * a ring of wedges and a grid of tiles both ask this question of the same
+ * settings.
+ */
+export function gridCellCounts(settings: CapArraySettings, first: RasterImage): OutputSize {
   const across = (Math.max(0.01, settings.widthMm) * Math.max(1e-6, settings.lpi)) / 25.4;
   // Hex rows are closer together than the pitch, so a hex sheet fits ~15% more
   // rows of lenslets — the packing gain, spent on vertical resolution.
@@ -1847,6 +2122,7 @@ export function describeRadialGeometry(
       `across a wedge at the rim`,
     `Each view resolves to ${cells.width}×${cells.height} px (one per lenslet)`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
+    describeProfile(geometry),
     `Radius ${mm(geometry.radiusMm)} mm · focus ${mm(geometry.focusMm)} mm below apex · ` +
       `viewing cone ${geometry.viewAngleDeg.toFixed(1)}° — a view holds from just off head-on to the edge ` +
       `of that cone, at its own bearing`,
@@ -1874,6 +2150,33 @@ export function describeRadialGeometry(
   return lines.join('\n');
 }
 
+/**
+ * The surface, and what it is worth — the one line of the report that is about
+ * the shape rather than the size.
+ *
+ * A circle does not focus its own aperture: at the tool's defaults its light
+ * lands across 269 µm, which is close to six strips of a twelve-view print, and
+ * that spread is the crosstalk that makes a lenticular read as a blend. The
+ * ellipse is the exact fix for the axial point and costs nothing to print, so
+ * the only reason to see `circle` here is a graph that predates the choice.
+ */
+function describeProfile(geometry: LensGeometry): string {
+  const surface =
+    geometry.profile === 'ellipse'
+      ? `Surface: ellipse, K = ${geometry.conicK.toFixed(3)} (−1/n²) — the whole lens focuses on one ` +
+        `strip, so the views do not bleed into each other`
+      : `Surface: circle — it cannot focus its own aperture, so each view's light spreads over ` +
+        `several strips. Switch Lens surface to Ellipse; it costs nothing to print`;
+  if (geometry.focus !== 'cone') return surface;
+  const mm = (v: number) => v.toFixed(3);
+  return (
+    `${surface}\nFocus: solved across the cone — radius ${mm(geometry.radiusMm)} mm rather than the ` +
+    `${mm(geometry.axialRadiusMm)} mm that focuses on the axis, so the paraxial focus sits ` +
+    `${mm(geometry.focusMm)} mm down, past the artwork on purpose. Head-on is a little softer and the ` +
+    `edge of the cone much sharper; the cone itself is unchanged, being set by the pitch and the height`
+  );
+}
+
 /** {@link describeGeometry} for the 2D grid node. */
 export function describeGridGeometry(
   settings: LensGridSettings,
@@ -1883,10 +2186,10 @@ export function describeGridGeometry(
   cells: OutputSize,
 ): string {
   const mm = (v: number) => v.toFixed(3);
-  const grid = clampGrid(settings.grid);
+  const { cols, rows } = gridDims(settings);
   const packing = clampPacking(settings.packing);
   const lines = [
-    `${grid}×${grid} grid = ${grid * grid} views · ${settings.widthMm} mm wide`,
+    `${gridLabel(cols, rows)} grid = ${cols * rows} views · ${settings.widthMm} mm wide`,
     `${packing === 'hex' ? 'Hexagonal' : 'Square'} lenslet packing — ` +
       `${(packingFill(packing) * 100).toFixed(1)}% of the sheet under a cap` +
       (packingAlignsRows(packing)
@@ -1910,11 +2213,13 @@ export function describeGridGeometry(
         : null,
     ),
     `Lenslet pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
-      `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / grid).toFixed(2)} px per view tile`,
+      `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / cols).toFixed(2)} × ` +
+      `${(artSize.height / Math.max(1, cells.height) / rows).toFixed(2)} px per view tile`,
     // The lens count *is* the per-view resolution: one lenslet shows one pixel
     // of each view, so this is what the viewer actually sees.
     `Each view resolves to ${cells.width}×${cells.height} px (one per lenslet)`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
+    describeProfile(geometry),
     `Radius ${mm(geometry.radiusMm)} mm · focus ${mm(geometry.focusMm)} mm below apex · viewing angle ${geometry.viewAngleDeg.toFixed(1)}°`,
   ];
   if (!geometry.feasible) {
@@ -1934,10 +2239,11 @@ export function describeGridGeometry(
   // guarantee it — but the printer has only the lenslet's own dots to spend and
   // they divide by the grid. Under about two, neighbouring views bleed together
   // everywhere rather than switching, and that is what finally caps the grid.
-  const printedTilePx = geometry.pitchPx / grid;
+  const printedTilePx = geometry.pitchPx / Math.max(cols, rows);
   if (printedTilePx < 2) {
     lines.push(
-      `⚠ A view tile lands on only ${printedTilePx.toFixed(2)} printed dots at ${settings.ppi} PPI — ` +
+      `⚠ A view tile lands on only ${printedTilePx.toFixed(2)} printed dots at ${settings.ppi} PPI ` +
+        `on its tighter axis — ` +
         `the views will bleed into each other at every angle rather than switching. Use a smaller grid, ` +
         `lower LPI, or raise PPI.`,
     );

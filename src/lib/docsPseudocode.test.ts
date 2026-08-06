@@ -25,9 +25,13 @@ function docImplementation(views: RasterImage[], p: LenticularSettings) {
   const frac = (v: number) => v - Math.floor(v);
 
   const pitch = 25.4 / LPI;
-  const disc = H * H * (n - 1) ** 2 - (n * n * pitch * pitch) / 4;
-  const s = disc < 0 ? pitch / 2 : (H * (n - 1) - Math.sqrt(disc)) / n;
-  const R = (s * s + (pitch / 2) ** 2) / (2 * s);
+  const K = -1 / (n * n);
+  const reach = Math.sqrt(1 + K);
+  const sag = (r: number, radius: number) =>
+    (r * r) / (radius * (1 + Math.sqrt(Math.max(0, 1 - ((1 + K) * r * r) / (radius * radius)))));
+  let R = (H * (n - 1)) / n;
+  if (R < (reach * pitch) / 2) R = (reach * pitch) / 2;
+  const s = sag(pitch / 2, R);
   const b = Math.max(0, H - s);
 
   const bilinear = (img: RasterImage, u: number, v: number, out: Uint8ClampedArray, at: number) => {
@@ -88,7 +92,7 @@ function docImplementation(views: RasterImage[], p: LenticularSettings) {
       const u = x * Math.cos(o) + y * Math.sin(o);
       const t = frac(u / pitch + phase);
       const d = (t - 0.5) * pitch;
-      const z = b + Math.max(0, Math.sqrt(Math.max(0, R * R - d * d)) - (R - s));
+      const z = b + Math.max(0, s - sag(Math.abs(d), R));
       depth[py * map_w + px] = Math.round(Math.min(1, z / H) * 65535);
     }
   }
@@ -104,6 +108,8 @@ const settings: LenticularSettings = {
   ri: 1.52,
   orientationDeg: 23,
   stripSamples: 2,
+  // The surface the guide's listing solves, and the one the tool prints.
+  profile: 'ellipse',
 };
 const ramp = (seed: number) => {
   const img = createImage(31, 23);

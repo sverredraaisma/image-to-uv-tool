@@ -939,7 +939,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
   },
   lensGrid: {
     summary:
-      'The 2D sibling of Lenticular Print: rows *and* columns of lenslets, so the image moves left/right and up/down. A grid of N gives N² views, from 2×2 up to 15×15. Up to 4×4 the input ports appear and disappear with the grid setting; past that the whole set arrives on the All views wire.',
+      'The 2D sibling of Lenticular Print: rows *and* columns of lenslets, so the image moves left/right and up/down. Views across and views down are separate settings, so the grid can be square or oblong — 3×3, 2×3, 8×2 — with 2 to 15 on each axis. Up to sixteen cells the input ports appear and disappear with those settings; past that the whole set arrives on the All views wire.',
     uses: [
       {
         title: 'Look-around portrait',
@@ -954,8 +954,9 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     tips: [
       'Set the pitch by pixels per lens rather than by LPI, in the editor. PPI ÷ LPI is what decides whether every lens on the sheet is identical: give it a whole number and each lenticule covers the same pixel columns, so the interlace never drifts. 1440 ÷ 45 is a clean 32, but 50 LPI on the same press is 28.8, and that fifth of a pixel accumulates into visible banding across the print. The editor shows the figure, warns when it is fractional, and snaps to the nearest whole, even or odd value — even puts the lens axis on a pixel boundary (what an even view count wants), odd puts one pixel on the axis for a true head-on view.',
       'Each view resolves to a single pixel per lenslet whatever the grid size, so more views cost artwork raster and light per view rather than sharpness — start at grid 2 or 3 by hand, and go large only when a renderer is feeding the wire.',
-      'What caps the grid is the printed dot: the lenslet’s own pixels divide by N, and under about two dots per view tile the views bleed together at every angle instead of switching. Info warns when that happens — at 1440 PPI and 45 LPI a 15×15 is just inside it.',
-      'Ports are named for where the view is seen from: Left · Up, Centre (neutral), Right · Down — and Left 7 · Up 7 out at the corners of a big grid. Past 4×4 there are no per-cell ports at all; 25 handles on one node is not a way anyone would wire a print.',
+      'What caps the grid is the printed dot: the lenslet’s own pixels divide by the views on that axis, and under about two dots per view tile the views bleed together at every angle instead of switching. Info warns when that happens, measuring the tighter axis — at 1440 PPI and 45 LPI a 15×15 is just inside it.',
+      'The two axes are independent, and an oblong grid is often the honest one. A sheet on a wall is walked past sideways far more than it is stooped under, so 6×2 spends its views where the movement is: six steps of horizontal parallax for the cost of twelve renders instead of thirty-six. Keep the producer’s grid — Model → Grid Views, Splat → Views — set to the same X and Y, since the wire carries the cells in order and the counts have to agree.',
+      'Ports are named for where the view is seen from: Left · Up, Centre (neutral), Right · Down — and Left 7 · Up 7 out at the corners of a big grid. Past sixteen cells there are no per-cell ports at all; 25 handles on one node is not a way anyone would wire a print.',
       'A big sheet is a big render: over 80 MP the node asks first, then runs in chunks with a progress bar, and Cancel ✕ works between them.',
       'Hex packing needs ~15% more artwork than square (the closer rows), and puts every tile edge on a diagonal. The artwork is not silently promoted to the printer’s raster for it — raise Artwork px per view tile if those edges look stepped on your press, up to the PPI cap.',
       'Hex packing cannot align its rows, and that is a proof rather than a tolerance: its rows sit √3/2 of a pitch apart and √3/2 is irrational, so no raster has whole pixels between rows as well as between columns. A hex sheet switches as one when you tilt it left and right, and sweeps through the rows when you tilt it up and down. Square packing aligns both ways — it is the choice to make when the vertical flip matters more than the 15% extra lenslets.',
@@ -1122,6 +1123,40 @@ export const NODE_HELP: Record<string, NodeHelp> = {
       'Depth blur is worth the 1 px it defaults to: an 8-bit depth map bands, and every band boundary is a place where two neighbouring pixels land a pixel apart and tear. Raise it to 3–4 for a noisy estimate; lower it to 0 only for a map you drew yourself.',
       'The depth map is a relief, so it cannot rotate anything — you get parallax and occlusion, not a new angle on the subject. For a real turn, use Model → Stereo Views with a mesh.',
       'The views go out right-eye-first, because a lenticule shows its leftmost strip to an eye on the right and Lenticular Print interlaces in the order frames arrive. Turn off *Order for the lens* under Advanced if you ever need the raw left-to-right run.',
+    ],
+  },
+
+  facingViews: {
+    summary:
+      'Takes one picture and prints it so that it pivots about its own centre to face you from wherever you stand. Each view is the picture on a plane turned square to that eye and ray-traced back onto the sheet, so the foreshortening you would see from there is cancelled before it happens. The picture is enlarged to cover the sheet from every angle, and the sheet edges crop it — the crop sliding as you move is what sells the pivot.',
+    uses: [
+      {
+        title: 'A poster that follows you',
+        detail:
+          'A portrait that squares up to every passer-by rather than only to the one standing in front of it — the flat-print version of the eyes-follow-you trick, and it needs no depth map or model.',
+        chain: ['Image Input', 'Image → Facing Views', 'Lenticular Print'],
+      },
+      {
+        title: 'Follows in both axes',
+        detail:
+          'Switch the layout to a grid and it pivots up and down as well, so it faces someone crouching or standing under it too.',
+        chain: ['Image Input', 'Image → Facing Views', 'Lens Grid Print'],
+      },
+      {
+        title: 'A sign that stays readable off-axis',
+        detail:
+          'Text on a sheet seen at 25° is text squashed to nine-tenths of its width. Printed this way it is not: every angle gets the letterforms un-squashed, which is worth more on type than on any photograph.',
+        chain: ['Text Input', 'Image → Facing Views', 'Lenticular Print'],
+      },
+    ],
+    tips: [
+      'The pivot is about the centre of the picture, and that centre stays where it is on the sheet — what moves is everything around it, swinging as the plane turns. Info reports the turn in degrees at the outermost view.',
+      'Follow is the whole control. 1 is square on at every angle; 0 never turns and prints an ordinary picture (every view identical); in between the picture lags behind you, which reads as a loose hinge rather than a lock — often more convincing on a photograph, where a perfect lock can read as a flat sticker.',
+      'The picture has to be bigger than the sheet, and Info says by how much: a turned plane covers less, so it is enlarged until it covers the sheet from every view, and one scale serves them all. A per-view fit would breathe in and out as you moved, which reads as bulging rather than turning.',
+      'That enlargement is a crop, and the crop is the cost. Head-on you see 1/scale² of the picture — a wide cone and a full follow can leave a quarter of it. Feed a source with room around its subject, narrow the cone, or lower Follow.',
+      'Zoom under Advanced crops in past the minimum. The same turn then sweeps a bigger picture past the sheet edges, so the movement is showier — at the price of showing less of the picture and of enlarging the source further.',
+      'There is no depth here and nothing is invented: it is one image resampled, so it cannot show what is behind anything. For real parallax use Image + Depth → Stereo Views, or a mesh. The two stack, though — print a facing view of a picture that already has depth painted into it.',
+      'A run goes out right-eye-first for the lens; a grid goes out in the order Lens Grid Print names its cells. Both match what the print node expects, so the wire is one wire.',
     ],
   },
 

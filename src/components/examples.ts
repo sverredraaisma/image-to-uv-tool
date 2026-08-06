@@ -559,6 +559,7 @@ export const EXAMPLES: Example[] = [
           config: {
             ...lensGridNode.defaultConfig(),
             grid: 2,
+            gridY: 2,
           },
         },
       ],

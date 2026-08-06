@@ -218,6 +218,18 @@ describe('splat view rendering', () => {
     expect(eyes[8].y).toBeLessThan(0);
   });
 
+  it('lays an oblong grid out the same way, a row at a time', () => {
+    // 2 across × 3 down: six eyes, the middle row dead level, and each axis
+    // spanning the same cone — so the sparser one just steps further.
+    const eyes = splatEyeOffsets(options({ layout: '2d', grid: 2, gridY: 3 }));
+    expect(eyes).toHaveLength(6);
+    expect(eyes[0].x).toBeLessThan(0);
+    expect(eyes[1].x).toBeGreaterThan(0);
+    expect(eyes[2].y).toBeCloseTo(0, 6); // the centre row of three
+    expect(eyes[3].y).toBeCloseTo(0, 6);
+    expect(eyes[5].y).toBeLessThan(0); // Down, last
+  });
+
   it('renders a grid layout as grid² views', () => {
     const cloud = cloudOf([[0, 0, -400, 6, 0, 0, 0, 255]]);
     const { views } = renderSplatViews(cloud, options({ layout: '2d', grid: 3, widthPx: 24 }));

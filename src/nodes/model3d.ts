@@ -102,6 +102,9 @@ export function viewGridOptionsFromConfig(config: NodeConfig): ViewGridOptions {
   const grid = clampGrid(num(config.grid, DEFAULT_GRID));
   return {
     grid,
+    // Square unless told otherwise — which is what a graph saved before the
+    // grid could be oblong means by leaving the key out.
+    gridY: clampGrid(num(config.gridY, grid)),
     widthMm: Math.max(1, num(config.widthMm, 100)),
     heightMm: Math.max(1, num(config.sheetHeightMm, 75)),
     widthPx: Math.min(MAX_VIEW_PX, Math.max(MIN_VIEW_PX, Math.round(num(config.viewPx, 512)))),
@@ -196,9 +199,14 @@ export function describeViewGrid(
   stl: StlValue,
   coverage: number,
 ): string {
-  const grid = o.grid;
+  const cols = o.grid;
+  const rows = o.gridY ?? o.grid;
   const lpi = Math.max(1, num(config.lpi, 45));
-  const offsets = eyeOffsetsMm(grid, o.coneDeg, o.viewDistanceMm);
+  // The sparser axis: its steps are the biggest, so it is the one the parallax
+  // figures below are about. Both axes span the same cone, so the outer eye is
+  // the same either way.
+  const sparsest = Math.min(cols, rows);
+  const offsets = eyeOffsetsMm(sparsest, o.coneDeg, o.viewDistanceMm);
   const step = disparityPerStep(o, lpi);
   const cells = lensletCounts(config);
   const outer = offsets[offsets.length - 1];
@@ -222,7 +230,7 @@ export function describeViewGrid(
       : 'far';
 
   const lines = [
-    `${grid}×${grid} = ${grid * grid} views · ${viewPx}×${viewPy} px each · ` +
+    `${cols}×${rows} = ${cols * rows} views · ${viewPx}×${viewPy} px each · ` +
       `${stl.triangleCount.toLocaleString()} triangles`,
     `Sheet ${o.widthMm}×${o.heightMm} mm, viewed from ${o.viewDistanceMm} mm`,
     `Cone ${o.coneDeg.toFixed(1)}°${fromLens ? ` (solved from ${lpi} LPI / ${num(config.lensHeightMm, 0.9)} mm / RI ${num(config.ri, 1.5)})` : ' (set by hand)'} — ` +
@@ -230,8 +238,9 @@ export function describeViewGrid(
     ...describePlacement(nearMm, farMm, D, 'and the edges occlude it in both axes as you move'),
     `Covers ${(coverage * 100).toFixed(0)}% of the frame`,
     `Surface: ${surfaceUsed(stl, o)}`,
-    `Parallax ${step.lenslets.toFixed(2)} lenslets per view step at the ${face} face ` +
-      `(${step.mm.toFixed(3)} mm at ${lpi} LPI), ${(step.lenslets * (grid - 1)).toFixed(2)} across the whole cone`,
+    `Parallax ${step.lenslets.toFixed(2)} lenslets per view step at the ${face} face, ` +
+      `${cols === rows ? 'either axis' : `${cols < rows ? 'across' : 'down'} — the sparser axis`} ` +
+      `(${step.mm.toFixed(3)} mm at ${lpi} LPI), ${(step.lenslets * (sparsest - 1)).toFixed(2)} across the whole cone`,
     `Each view will print at ${cells.across}×${cells.down} px — one pixel per lenslet`,
   ];
 
@@ -298,7 +307,9 @@ export const modelViewsNode: NodeDefinition = {
     'the front of the subject out through the plate, which is worth a millimetre or two if you keep it ' +
     'away from the sheet edges. Watch the parallax figure in Info: past ~1.5 lenslets per view step the ' +
     'far face softens into haze (often worth having), and past ~4 it doubles. A bigger grid is what buys ' +
-    'depth, since it divides the cone into smaller steps. Up to 15×15 = 225 views. Manual: click Run.',
+    'depth, since it divides the cone into smaller steps. Views across and views down are set separately, ' +
+    'so an oblong grid — 2×3, or 8×2 — spends its renders on the axis you mean to move along; set them to ' +
+    'match the print node’s. Up to 15×15 = 225 views. Manual: click Run.',
   autoRun: false,
   inputs: [
     { id: 'model', label: 'Mesh', type: 'stl', required: true },
@@ -312,7 +323,8 @@ export const modelViewsNode: NodeDefinition = {
     { id: 'info', label: 'Info', type: 'text' },
   ],
   configFields: [
-    { kind: 'number', key: 'grid', label: 'Grid (N × N views)', min: MIN_GRID, max: MAX_GRID, step: 1 },
+    { kind: 'number', key: 'grid', label: 'Views across (X)', min: MIN_GRID, max: MAX_GRID, step: 1 },
+    { kind: 'number', key: 'gridY', label: 'Views down (Y)', min: MIN_GRID, max: MAX_GRID, step: 1 },
     { kind: 'number', key: 'widthMm', label: 'Print width (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'sheetHeightMm', label: 'Print height (mm)', min: 1, step: 1 },
     { kind: 'number', key: 'depthMm', label: 'Subject depth (mm)', min: 0, step: 1 },
@@ -375,6 +387,7 @@ export const modelViewsNode: NodeDefinition = {
   ],
   defaultConfig: () => ({
     grid: DEFAULT_GRID,
+    gridY: DEFAULT_GRID,
     widthMm: 100,
     sheetHeightMm: 75,
     // One millimetre, and that is not a typo. A 3×3 over the lens's 53.3° cone
@@ -421,7 +434,7 @@ export const modelViewsNode: NodeDefinition = {
       throw new Error(`Mesh has ${stl.triangleCount.toLocaleString()} triangles — decimate it first.`);
     }
     const o = { ...viewGridOptionsFromConfig(config), texture: asImage(inputs.texture) };
-    onProgress?.(`Rendering ${o.grid * o.grid} views at ${o.widthPx} px…`);
+    onProgress?.(`Rendering ${o.grid * (o.gridY ?? o.grid)} views at ${o.widthPx} px…`);
     // One chunk per view: a 15×15 is 225 passes over the mesh, and the run
     // hands the UI back between them so the count moves and Cancel works.
     const render = await runChunked(viewGridChunks(stl, o), { onProgress, signal });

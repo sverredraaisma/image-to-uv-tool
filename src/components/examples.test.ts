@@ -30,7 +30,7 @@ describe('empty-state examples', () => {
     // printer's, so a 2×2 spinner may override it; the asset keys carry the
     // upload and have no default.
     const allowedOverrides: Record<string, string[]> = {
-      lensGrid: ['grid'],
+      lensGrid: ['grid', 'gridY'],
       animationInput: ['src', 'srcRef', 'name'],
     };
     const problems: string[] = [];

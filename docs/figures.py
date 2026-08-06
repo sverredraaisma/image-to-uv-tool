@@ -60,34 +60,136 @@ plt.rcParams.update(
 # ---------------------------------------------------------------------------
 
 
+def conic_sag(r, R: float, K: float):
+    """
+    Depth of a conic surface below its own apex, at distance `r` from the axis.
+
+    The standard sag equation: a circle at K = 0, an ellipse for −1 < K < 0.
+    Clamped where the root would go negative — that is where the surface has run
+    out, and `Lens` keeps the solve on the printable side of it.
+    """
+    r2 = np.asarray(r, dtype=float) ** 2
+    return r2 / (R * (1 + np.sqrt(np.maximum(1e-12, 1 - (1 + K) * r2 / R**2))))
+
+
 class Lens:
-    def __init__(self, lpi: float, height_mm: float, ri: float, ppi: float = 1440.0):
+    """
+    The lens the tool solves, for either surface.
+
+    `profile` is `ellipse` — the shape the tool prints — or `circle`, which is
+    what it printed before, and what the comparisons below are against.
+    """
+
+    def __init__(
+        self,
+        lpi: float,
+        height_mm: float,
+        ri: float,
+        ppi: float = 1440.0,
+        profile: str = "ellipse",
+        focus: str = "axis",
+    ):
         n = max(1.0001, ri)
         h = max(1e-6, height_mm)
         self.lpi, self.n, self.H, self.ppi = lpi, n, h, ppi
+        self.profile_name, self.focus_name = profile, focus
         self.pitch = 25.4 / lpi
         self.pitch_px = ppi / lpi
         half = self.pitch / 2
-        self.min_height = n * self.pitch / (2 * (n - 1))
-        disc = h * h * (n - 1) ** 2 - n * n * half * half
-        self.feasible = disc >= 0
-        self.sag = (h * (n - 1) - math.sqrt(disc)) / n if self.feasible else half
-        self.radius = (self.sag**2 + half**2) / (2 * self.sag)
+        # The conic constant: 0 is the circle, −1/n² the ellipse that focuses a
+        # collimated beam to a point inside the material.
+        self.K = -1 / (n * n) if profile == "ellipse" else 0.0
+        # How far out the surface reaches before it runs out: R/√(1+K).
+        reach = math.sqrt(1 + self.K)
+        # The focus condition fixes the vertex radius on its own.
+        wanted_r = h * (n - 1) / n
+        self.min_height = n * reach * self.pitch / (2 * (n - 1))
+        self.feasible = wanted_r >= reach * half
+        self.axial_radius = wanted_r if self.feasible else reach * half
+        self.radius = self.axial_radius
+        # The ray through the lens axis meets the surface square on, so where it
+        # lands — and so where the print repeats — is set by the pitch and the
+        # stack height, not by the radius. Same for either focus below.
+        sin_in = half / math.hypot(half, h)
+        self.view_angle = 2 * math.degrees(math.asin(min(1.0, n * sin_in)))
+        if focus == "cone" and self.feasible:
+            self.radius = self._best_radius()
+        self.sag = float(conic_sag(half, self.radius, self.K))
         self.focus = n * self.radius / (n - 1)
         self.base = max(0.0, h - self.sag)
         self.total = self.base + self.sag
-        sin_in = half / math.hypot(half, self.focus)
-        self.view_angle = 2 * math.degrees(math.asin(min(1.0, n * sin_in)))
+
+    # --- the trace, which is what "focus for the cone" is solved against ----
+
+    def landings(self, theta_deg=0.0, rays=41, radius=None):
+        """Where a parallel bundle from `theta_deg` lands on the artwork, mm."""
+        R = self.radius if radius is None else radius
+        th = math.radians(theta_deg)
+        d = (-math.sin(th), -math.cos(th))
+        half = self.pitch / 2
+        out = []
+        for off in np.linspace(-half * 0.99, half * 0.99, rays):
+            y = self.H - float(conic_sag(abs(off), R, self.K))
+            disc = max(1e-12, 1 - (1 + self.K) * off * off / (R * R))
+            slope = off / (R * math.sqrt(disc))
+            nl = math.hypot(slope, 1.0)
+            normal = (slope / nl, 1.0 / nl)
+            eta = 1.0 / self.n
+            cos_i = -(d[0] * normal[0] + d[1] * normal[1])
+            k = 1 - eta * eta * (1 - cos_i * cos_i)
+            if k < 0:
+                continue
+            f = eta * cos_i - math.sqrt(k)
+            ins = (eta * d[0] + f * normal[0], eta * d[1] + f * normal[1])
+            if ins[1] >= 0:
+                continue
+            out.append(off + (y / -ins[1]) * ins[0])
+        return out
+
+    def spot_mm(self, theta_deg=0.0, rays=41, radius=None):
+        """How wide that bundle lands — the blur one view is smeared over."""
+        lands = self.landings(theta_deg, rays, radius)
+        return (max(lands) - min(lands)) if lands else 0.0
+
+    def worst_spot_mm(self, rays=41, radius=None):
+        half = self.view_angle / 2
+        return max(self.spot_mm(f * half, rays, radius) for f in (0, 0.25, 0.5, 0.75, 1))
+
+    def _best_radius(self):
+        """Golden-section for the radius whose worst blur across the cone is least."""
+        phi = (math.sqrt(5) - 1) / 2
+        lo, hi = self.axial_radius, self.axial_radius * 1.6
+        c, dd = hi - phi * (hi - lo), lo + phi * (hi - lo)
+        fc, fd = self.worst_spot_mm(25, c), self.worst_spot_mm(25, dd)
+        for _ in range(24):
+            if hi - lo <= self.axial_radius * 1e-4:
+                break
+            if fc < fd:
+                hi, dd, fd = dd, c, fc
+                c = hi - phi * (hi - lo)
+                fc = self.worst_spot_mm(25, c)
+            else:
+                lo, c, fc = c, dd, fd
+                dd = lo + phi * (hi - lo)
+                fd = self.worst_spot_mm(25, dd)
+        return (lo + hi) / 2
+
+    def surface(self, d):
+        """Height of the surface above the *artwork*, at offset d from the axis."""
+        return self.H - conic_sag(np.abs(np.asarray(d, dtype=float)), self.radius, self.K)
 
     def profile(self, d):
         """Surface height above the substrate, at offset d from the lens axis."""
         d = np.asarray(d, dtype=float)
         inside = np.abs(d) <= self.pitch / 2
-        arc = np.sqrt(np.maximum(0.0, self.radius**2 - d**2)) - (self.radius - self.sag)
+        arc = self.sag - conic_sag(np.abs(d), self.radius, self.K)
         return np.where(inside, self.base + np.maximum(0.0, arc), self.base)
 
 
+#: The lens the tool prints today.
 DEFAULT = Lens(lpi=45, height_mm=0.9, ri=1.5)
+#: The same lens as a circle — the shape it printed before, kept for comparison.
+CIRCLE = Lens(lpi=45, height_mm=0.9, ri=1.5, profile="circle")
 
 
 def save(fig, name: str):
@@ -263,7 +365,7 @@ def fig_focus():
 
     top = L.H
     xs = np.linspace(-half, half, 400)
-    surf = top - (L.sag - (np.sqrt(L.radius**2 - xs**2) - (L.radius - L.sag)))
+    surf = L.surface(xs)
     ax.fill_between(xs, 0, surf, color=GLOSS_FILL, zorder=1)
     ax.plot(xs, surf, color=GLOSS, lw=2, zorder=3)
     ax.plot([-half, -0.6], [top - L.sag, top - L.sag], color=GLOSS, lw=1.2, zorder=3)
@@ -276,7 +378,7 @@ def fig_focus():
 
     for xr in np.linspace(-half * 0.92, half * 0.92, 9):
         y_top = top + 0.30
-        y_hit = top - (L.sag - (math.sqrt(L.radius**2 - xr**2) - (L.radius - L.sag)))
+        y_hit = float(L.surface(xr))
         ax.plot([xr, xr], [y_top, y_hit], color=RAY, lw=1.1, zorder=4)
         ax.plot([xr, 0], [y_hit, 0], color=RAY, lw=1.1, zorder=4)
     ax.text(0, top + 0.335, "light from far away", ha="center", fontsize=9.5, color=RAY)
@@ -322,7 +424,9 @@ def fig_focus():
 
 
 def fig_chord():
-    L = DEFAULT
+    # The chord-and-sag construction is the circle's own algebra — the K = 0
+    # case of the sag equation the tool solves — so this one figure is a circle.
+    L = CIRCLE
     half = L.pitch / 2
     fig, ax = plt.subplots(figsize=(7.4, 6.0))
     ax.set_aspect("equal")
@@ -384,24 +488,32 @@ def fig_feasibility():
     fig, ax = plt.subplots(figsize=(9.2, 5.4))
     lpi = np.linspace(15, 120, 400)
 
+    # The floor is n·√(1+K)·p / (2(n−1)). The ellipse's √(1+K) = √(n²−1)/n
+    # reaches a quarter further before the surface runs out, so it focuses in a
+    # quarter less ink than the circle of the same pitch.
     for n, style in ((1.4, (0, (2, 2))), (1.5, "-"), (1.6, (0, (5, 2)))):
-        h_min = n * (25.4 / lpi) / (2 * (n - 1))
+        h_min = n * (25.4 / lpi) / (2 * (n - 1)) * math.sqrt(1 - 1 / n**2)
         ax.plot(
             lpi, h_min, color=INK if n == 1.5 else SUB, ls=style,
-            lw=2 if n == 1.5 else 1.3, label=f"n = {n}",
+            lw=2 if n == 1.5 else 1.3, label=f"ellipse, n = {n}",
         )
+    circle15 = 1.5 * (25.4 / lpi) / 1.0
+    ell15 = circle15 * math.sqrt(1 - 1 / 1.5**2)
+    ax.plot(lpi, circle15, color=WARN, lw=1.5, ls=(0, (1, 2)), label="circle, n = 1.5")
 
-    ax.fill_between(lpi, 1.5 * (25.4 / lpi) / 1.0, 3.2, color="#eaf5ef", zorder=0)
-    ax.fill_between(lpi, 0, 1.5 * (25.4 / lpi) / 1.0, color="#fdeeea", zorder=0)
-    ax.text(90, 2.2, "focuses — two roots,\ntake the shallow one", fontsize=10, color="#1f7a55")
-    ax.text(30, 0.22, "cannot focus at any profile\n(shading drawn for n = 1.5)", fontsize=10, color=WARN)
+    ax.fill_between(lpi, circle15, 3.2, color="#eaf5ef", zorder=0)
+    ax.fill_between(lpi, ell15, circle15, color="#fdf1d6", zorder=0)
+    ax.fill_between(lpi, 0, ell15, color="#fdeeea", zorder=0)
+    ax.text(52, 2.35, "either surface focuses here", fontsize=10, color="#1f7a55")
+    ax.text(76, 1.06, "an ellipse focuses here;\na circle cannot", fontsize=9.4, color="#8a5b06")
+    ax.text(20, 0.12, "no surface focuses this shallow\n(shading drawn for n = 1.5)", fontsize=9.4, color=WARN)
 
     ax.axhline(0.9, color=GLOSS, lw=1.6, ls=(0, (6, 3)))
-    ax.text(112, 0.97, "0.9 mm of ink", fontsize=9.5, color=GLOSS, weight="bold", ha="right")
+    ax.text(17, 0.97, "0.9 mm of ink", fontsize=9.5, color=GLOSS, weight="bold")
 
     # 40 LPI is deliberately left unlabelled: it sits almost on top of 45, and
     # 45 is the one worth naming because it is the tool's default.
-    offsets = {20: (3, 0.16), 30: (3, 0.18), 45: (5, -0.40), 60: (4, 0.16), 100: (-19, 0.20)}
+    offsets = {20: (4, 0.30), 30: (5, 0.28), 45: (7, 0.26), 60: (6, 0.24), 100: (-16, 0.28)}
     for lpi_v, (dx, dy) in offsets.items():
         L = Lens(lpi_v, 0.9, 1.5)
         ok = L.feasible
@@ -419,7 +531,10 @@ def fig_feasibility():
     ax.set_ylabel("minimum clear-ink height (mm)")
     ax.set_xlim(15, 128)
     ax.set_ylim(0, 3.0)
-    ax.set_title("Coarse lenses need thick ink", fontsize=12, weight="bold", loc="left", pad=12)
+    ax.set_title(
+        "Coarse lenses need thick ink — and the surface decides how much",
+        fontsize=12, weight="bold", loc="left", pad=12,
+    )
     ax.legend(loc="upper right", frameon=True, framealpha=0.95, edgecolor=FAINT, fontsize=9.5)
     ax.grid(color=FAINT, lw=0.6)
     ax.set_axisbelow(True)
@@ -442,7 +557,7 @@ def fig_cone():
     clean(ax)
     top = L.H
     xs = np.linspace(-half, half, 300)
-    surf = top - (L.sag - (np.sqrt(L.radius**2 - xs**2) - (L.radius - L.sag)))
+    surf = L.surface(xs)
     ax.fill_between(xs, 0, surf, color=GLOSS_FILL)
     ax.plot(xs, surf, color=GLOSS, lw=2)
     ax.add_patch(Rectangle((-half, -0.05), L.pitch, 0.05, facecolor=ART, edgecolor="none"))
@@ -1064,6 +1179,138 @@ def fig_model_depth():
     save(fig, "14b-model-depth.png")
 
 
+
+# ---------------------------------------------------------------------------
+# 17 — the blur the lens itself adds, and the ways out of it
+#
+# Everything here is traced, not sketched: Snell at the real surface, across the
+# real aperture, onto the real artwork plane. The numbers quoted in the guide
+# come from this function.
+# ---------------------------------------------------------------------------
+
+
+def conic_sag(r, R, K):
+    """
+    Depth below the apex of a conic of vertex radius `R` and conic constant `K`.
+
+    K = 0 is the circle the tool prints today. K = −1/n² is the ellipse that
+    focuses a collimated beam to a point inside a medium of index n — an exact
+    result for one refracting surface, and the shape the lenticular patents
+    reach for (US6795250B2).
+    """
+    r2 = np.asarray(r, dtype=float) ** 2
+    return r2 / (R * (1 + np.sqrt(np.maximum(1e-12, 1 - (1 + K) * r2 / R**2))))
+
+
+def trace_bundle(lens, offsets, *, R=None, K=0.0, theta_deg=0.0, plane=None):
+    """
+    Land a parallel bundle from `theta_deg` on the artwork, one x per ray.
+
+    The same trace the animation runs, with the surface generalised to a conic
+    and the artwork plane free, so a design can be judged on where its light
+    actually goes rather than on its paraxial focus.
+    """
+    R = lens.radius if R is None else R
+    plane = lens.H if plane is None else plane
+    th = math.radians(theta_deg)
+    d = (-math.sin(th), -math.cos(th))
+    eps, out = 1e-7, []
+    for off in offsets:
+        s = float(conic_sag(abs(off), R, K))
+        slope = (float(conic_sag(abs(off) + eps, R, K)) - s) / eps * (1 if off >= 0 else -1)
+        nl = math.hypot(slope, 1.0)
+        normal = (slope / nl, 1.0 / nl)
+        eta = 1.0 / lens.n
+        cos_i = -(d[0] * normal[0] + d[1] * normal[1])
+        k = 1 - eta * eta * (1 - cos_i * cos_i)
+        if k < 0:
+            continue
+        f = eta * cos_i - math.sqrt(k)
+        ins = (eta * d[0] + f * normal[0], eta * d[1] + f * normal[1])
+        if ins[1] >= 0:
+            continue
+        t = ((lens.H - s) - (lens.H - plane)) / -ins[1]
+        out.append((off, lens.H - s, off + t * ins[0]))
+    return out
+
+
+def spot_um(lens, offsets, **kw):
+    """Width of the landing patch, in µm — the blur, in the units of a strip."""
+    lands = [x for _, _, x in trace_bundle(lens, offsets, **kw)]
+    return (max(lands) - min(lands)) * 1000 if lands else float("nan")
+
+
+#: Views the blur figures are quoted against. Eight is a common lenticular
+#: count and wide enough per strip to see what is happening; the animations
+#: use the same number, so the two can be read together.
+VIEWS = 8
+
+
+def fig_aberration():
+    L = DEFAULT
+    half = L.pitch / 2
+    K_ELL = -1 / L.n**2
+    # The radii whose *worst blur across the cone*, rather than whose paraxial
+    # focus, is what they were solved for — the same search the tool runs.
+    R_BEST = Lens(45, 0.9, 1.5, profile="circle", focus="cone").radius
+    R_BEST_ELL = Lens(45, 0.9, 1.5, focus="cone").radius
+    fine = np.linspace(-half * 0.99, half * 0.99, 401)
+    drawn = np.linspace(-half * 0.99, half * 0.99, 17)
+
+    fig = plt.figure(figsize=(11.4, 4.5))
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1.45], wspace=0.22)
+    strip = L.pitch / VIEWS * 1000
+
+    for col, (K, R, title) in enumerate(
+        (
+            (0.0, L.radius, f"circle — {spot_um(L, fine):.0f} µm across the artwork"),
+            (K_ELL, L.radius, f"ellipse, K = −1/n² — {spot_um(L, fine, K=K_ELL):.1f} µm"),
+        )
+    ):
+        ax = fig.add_subplot(gs[0, col])
+        ax.set_aspect("equal")
+        clean(ax)
+        xs = np.linspace(-half, half, 300)
+        surf = L.H - conic_sag(np.abs(xs), R, K)
+        ax.fill_between(xs, 0, surf, color=GLOSS_FILL)
+        ax.plot(xs, surf, color=GLOSS, lw=2)
+        for x0, y0, land in trace_bundle(L, drawn, R=R, K=K):
+            ax.plot([x0, x0, land], [L.H + 0.30, y0, 0], color=RAY, lw=0.8, alpha=0.85)
+        ax.add_patch(Rectangle((-half, -0.06), L.pitch, 0.06, facecolor=ART, edgecolor="none"))
+        for k in range(1, VIEWS):
+            ax.plot([-half + k * L.pitch / VIEWS] * 2, [-0.06, 0], color="white", lw=0.5)
+        ax.set_xlim(-half * 1.06, half * 1.06)
+        ax.set_ylim(-0.1, L.H + 0.32)
+        ax.set_title(title, fontsize=10, color=SUB, loc="left")
+
+    # Spot against viewing angle, for the four designs worth knowing about.
+    bx = fig.add_subplot(gs[0, 2])
+    angles = np.linspace(0, L.view_angle / 2, 28)
+    designs = (
+        ("circle, focus on the axis", dict(R=L.radius, K=0.0), INK, "-"),
+        ("circle, focus for the cone", dict(R=R_BEST, K=0.0), SUB, (0, (4, 3))),
+        ("ellipse, focus on the axis — the default", dict(R=L.radius, K=K_ELL), ART, "-"),
+        ("ellipse, focus for the cone", dict(R=R_BEST_ELL, K=K_ELL), GLOSS, (0, (1, 2))),
+    )
+    for label, kw, col, ls in designs:
+        bx.plot(
+            angles,
+            [spot_um(L, fine, theta_deg=t, **kw) for t in angles],
+            color=col, lw=1.8, ls=ls, label=label,
+        )
+    bx.axhline(strip, color=WARN, lw=1.2)
+    bx.text(9.5, strip * 0.24, f"one strip at {VIEWS} views — past this is crosstalk", fontsize=8.6, color=WARN)
+    bx.set_xlabel("viewing angle off head-on (°)")
+    bx.set_ylabel("blur at the artwork (µm)")
+    bx.set_xlim(0, L.view_angle / 2)
+    bx.set_ylim(0, 470)
+    bx.grid(color=FAINT, lw=0.6)
+    bx.set_axisbelow(True)
+    for side in ("top", "right"):
+        bx.spines[side].set_visible(False)
+    bx.legend(fontsize=8.4, loc="upper left", frameon=False)
+    save(fig, "17-aberration.png")
+
 # ---------------------------------------------------------------------------
 # 15 — a calibration sheet
 # ---------------------------------------------------------------------------
@@ -1138,6 +1385,7 @@ if __name__ == "__main__":
     fig_mirroring()
     fig_model_depth()
     fig_calibration()
+    fig_aberration()
     L = DEFAULT
     print(
         f"\ndefaults check: pitch {L.pitch:.4f} mm, sag {L.sag:.4f}, base {L.base:.4f}, "

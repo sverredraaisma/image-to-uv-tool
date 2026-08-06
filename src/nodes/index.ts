@@ -9,6 +9,7 @@ import { radialGridNodes } from './radialGrid';
 import { model3dNodes } from './model3d';
 import { modelStereoNodes } from './modelStereo';
 import { depthStereoNodes } from './depthStereo';
+import { facingViewsNodes } from './facingViews';
 import { splatNodes } from './splat';
 import { pipelineNodes } from './pipeline';
 
@@ -28,6 +29,7 @@ export function registerBuiltinNodes(): void {
     ...model3dNodes,
     ...modelStereoNodes,
     ...depthStereoNodes,
+    ...facingViewsNodes,
     ...splatNodes,
     ...pipelineNodes,
   ];

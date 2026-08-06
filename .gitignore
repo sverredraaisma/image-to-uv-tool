@@ -7,3 +7,9 @@ coverage
 .idea
 *.log
 *.tsbuildinfo
+
+# derived: the animation frames behind docs/images/16-viewing-sweep.gif
+# (python docs/animation.py rewrites them in seconds)
+docs/images/anim/
+docs/images/anim-cone/
+__pycache__/

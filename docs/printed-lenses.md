@@ -58,8 +58,8 @@ Three things to notice, because everything else follows from them:
 
 1. The clear ink is the **only** thing between the lens and the picture. There's no substrate in
    between, the way there is when you laminate a lens sheet on top of a print.
-2. The lens doesn't fill the whole height. Most of it — 0.702 mm of the 0.9 mm here — is a flat
-   base layer, and the actual curve is only the top 0.198 mm.
+2. The lens doesn't fill the whole height. Most of it — 0.745 mm of the 0.9 mm here — is a flat
+   base layer, and the actual curve is only the top 0.155 mm.
 3. Under each lens the artwork is chopped into strips, one per view.
 
 ---
@@ -100,11 +100,53 @@ R = H (n − 1) / n
 ```
 
 That's worth pausing on. **The radius depends only on the stack height and the refractive index.**
-Not on the pitch, not on how many views you have. Given 0.9 mm of varnish at index 1.5, the surface
-is a piece of a sphere of radius 0.3 mm, and that's that.
+Not on the pitch, not on how many views you have, and — as the next section shows — not on the shape
+either: `R` is the radius at the _vertex_, and every surface below shares it. Given 0.9 mm of varnish
+at index 1.5, that radius is 0.3 mm, and that's that.
 
-The pitch decides how much of that sphere you use. A circular arc across a chord of width `p`, rising
-to a height `s` in the middle (the **sag**), has radius:
+### Which surface, and why it isn't a circle
+
+A radius at the vertex does not name a shape. The family of surfaces with a given vertex radius is
+the **conics**, written with one more number — the conic constant `K`:
+
+```
+                    r²
+  sag(r) = ───────────────────────
+           R (1 + √(1 − (1+K) r²/R²))
+```
+
+`K = 0` is the circle. And a circle is the obvious choice, which is why almost everything written
+about lenticulars assumes one — but it is not the right one. **A circle does not bring its own
+aperture to a point.** Its outer rays cross the axis nearer the lens than its middle rays do, so the
+light meant for one strip lands across several; at the settings here that spread is 269 µm, close to
+four strips of an eight-view print. That is spherical aberration, and the single largest source
+of crosstalk in a lenticular print. [The blur the lens itself adds](#the-blur-the-lens-itself-adds)
+measures it.
+
+There is an exact fix, and it has been known for centuries. For one refracting surface bringing
+collimated light to a focus inside a medium of index `n`, the conic that does it **perfectly** is:
+
+```
+  K = −1 / n²          (−0.444 at n = 1.5)
+```
+
+an ellipse of eccentricity `1/n`. It is the same shape the lenticular patents claim, with the same
+`t = R·n/(n−1)` thickness condition derived above ([US6795250B2](https://patents.google.com/patent/US6795250B2/en)).
+
+The reason this document leads with it, rather than mentioning it as an improvement, is that here it
+is **free**. A laminated sheet is whatever shape the extruder cut; this lens is a height map, and an
+ellipse costs exactly as many bytes as a circle. It keeps the same vertex radius, so the same focal
+length and the same viewing cone; it is 43 µm shallower across the pitch, so the flat base grows by
+43 µm and the stack is the same 0.9 mm. The tool prints it by default, and `Lens surface` on the
+print nodes is there to switch back to a circle if you are matching an existing sheet.
+
+At the defaults, then: a sag of **0.155 mm** on a **0.745 mm** base.
+
+### The circle's own algebra
+
+Worth keeping, because it is where the feasibility limit comes from and because a circle is what
+you get from a ready-made sheet. A circular arc across a chord of width `p`, rising to a height `s`
+in the middle, has radius:
 
 ![Sag, chord and radius](images/04-chord.png)
 
@@ -122,9 +164,10 @@ n·s² − 2H(n−1)·s + n·p²/4 = 0
                       n
 ```
 
-and the flat base underneath is just `b = H − s`.
+and the flat base underneath is just `b = H − s`, giving 0.198 mm of sag on a 0.702 mm base — a
+deeper cap than the ellipse, for a worse focus.
 
-### Why the minus sign
+#### Why the minus sign
 
 The quadratic has two roots and both are real solutions — they're the minor and major arc of the
 _same_ circle, since both share the radius fixed above. The larger root has a sag bigger than the
@@ -135,40 +178,59 @@ useful. Always take the minus root.
 
 ## When it can't work
 
-Look at the square root. If `H²(n−1)² < n²p²/4` there's no real answer, and rearranging tells you
-exactly when:
+Every surface runs out somewhere. In the sag equation the root goes negative past `r = R/√(1+K)`,
+which is where the shape has used itself up: a circle at its hemisphere, an ellipse a little further
+out. The lens has to span half a pitch, so it can only be printed when
 
 ```
-H  ≥  n·p / (2(n − 1))
+H  ≥  n·√(1+K)·p / (2(n − 1))
 ```
 
-This isn't a numerical quirk, it's physics. As `H` drops toward that bound the sag grows to `p/2` — a
-hemisphere, the strongest lens you can make across that chord. Below it, no surface of any shape
-spanning that pitch focuses that shallow.
+which for a circle is the familiar `n·p / (2(n−1))`, and for the ellipse is
+`√(n²−1)·p / (2(n−1))` — **a quarter lower at n = 1.5**, because √(1+K) = √(n²−1)/n = 0.745.
+
+This isn't a numerical quirk, it's physics. As `H` drops toward the bound the surface deepens toward
+its own limit — the strongest lens you can make across that chord. Below it, no surface of that
+family spanning that pitch focuses that shallow.
 
 ![The feasibility floor](images/05-feasibility.png)
 
 The floor is **linear in the pitch**, so it's inversely proportional to LPI. Read that off the chart
 and it says something that surprises people coming from laminated lenticular: **coarse lenses need
-thick ink.** A 20 LPI lens needs 1.9 mm of varnish. At a realistic 0.9 mm budget you can't go
-coarser than about 42 LPI, and the tool's 45 LPI default sits just 6% above the floor.
+thick ink.** A 20 LPI lens needs 1.42 mm of varnish. At a realistic 0.9 mm budget you can't go
+coarser than about 32 LPI, and the tool's 45 LPI default has 0.63 mm of floor under its 0.9 mm.
 
-If you ask for something impossible, the tool doesn't refuse — it prints the strongest lens it can (a
-hemisphere), tells you where that actually focuses, and tells you the height you'd need. A print
-that focuses at the wrong depth is blurry, not ruined, and seeing it is more useful than an error.
+The amber band on that chart is worth a second look, because it is the second thing the ellipse buys
+and nobody would guess it from the optics: **the shape moves the floor.** Everything between the two
+curves is a lens a circle cannot print and an ellipse can — a 40 LPI sheet at 0.9 mm, or the tool's
+own 45 LPI in 0.64 mm of ink instead of 0.85. Ink height is the binding constraint of this whole
+technique, and the better-focusing surface needs a quarter less of it.
+
+If you ask for something impossible, the tool doesn't refuse — it prints the deepest surface of that
+family, tells you where it actually focuses, and tells you the height you'd need. A print that
+focuses at the wrong depth is blurry, not ruined, and seeing it is more useful than an error.
 
 ---
 
 ## How wide the view is
 
 The cone you can move through before the image stops flipping is set by the marginal ray: the one
-from the focus out through the edge of the lens, refracted back into air.
+from the artwork out through the edge of the lens, refracted back into air.
 
 ![The viewing cone](images/06-viewing-cone.png)
 
 ```
 sin(θ/2) = n · sin( arctan( (p/2) / H ) )
 ```
+
+Note which `H` that is: the **stack height**, the apex-to-artwork distance — not the focal length.
+The two are equal whenever the lens is solved to focus on the artwork, which is why the distinction
+rarely comes up, but they are not the same thing and the cone follows the stack. The ray through the
+lenticule's own axis meets the surface square on, so it refracts as if through a flat plane and lands
+`H·tan(asin(sinθ/n))` from the axis _whatever the radius is_; the cone is where that walks off the
+lenticule and the print starts repeating. So a lens whose radius has been chosen for something other
+than the axial focus — [as one option below does](#the-blur-the-lens-itself-adds) — has exactly the
+same cone as one that hasn't.
 
 Both this and the feasibility floor depend on the pitch and the height **only through their ratio**.
 Halve both and nothing changes — same lens shape, same margin, same cone. That has two consequences
@@ -189,6 +251,131 @@ Now the artwork. Each lens covers a strip of it, and that strip is divided into 
 view. Where your eye is decides which tile the lens shows you.
 
 ![How one lens is divided](images/07-interlace.png)
+
+Here it is moving — one frame per degree, across the lens's own 53.3° cone and a degree past each
+edge. The whole aperture of each lenticule is traced, by Snell's law at the real surface: green
+where a ray lands in the strip the eye is being shown, amber where it does not. The strips are
+coloured by where their view was captured, blue from the left of the cone and orange from the right.
+
+![The view sweep, one degree at a time](images/16-viewing-sweep.gif)
+
+Watch the two directions disagree. The eye walks **right**; the bundle lands **left** of the lens
+axis, so it reads a strip nearer the left of the lenticule, which is a *low* strip number — and a low
+strip number carries a view captured from the **right**, because the run is printed reversed. The lit
+strip's colour is always the colour of the side the eye is on. That is the whole reason for the
+reversal, and a print made the other way round is one where those two stop agreeing.
+
+The frames at each end are just outside the cone: the bundle has walked onto the next lenticule's
+strips, which is where the print repeats.
+
+Notice that the bundle arrives as a **point**. That is the ellipse of the section above doing its
+job: the whole aperture lands inside one strip, and the only amber is out at the edges of the cone,
+where what is left is coma rather than spherical aberration. Run
+`python docs/animation.py --surface circle` and watch the same sweep with the obvious shape instead —
+a third of every bundle sprayed into the neighbouring strips, at every angle. That is the difference
+the next section measures.
+
+### The blur the lens itself adds
+
+Here is what the circle costs, and why the tool does not print one. A circular cap does not bring its
+aperture to a point: the outer rays cross the axis nearer the lens than the middle ones do, which is
+**spherical aberration**,
+and it is a property of the shape rather than of the printing. Traced across the full aperture of the
+tool's default lenticule, head-on, the bundle lands over **269 µm** — and at eight views a strip is
+71 µm, so the light meant for one view is spread over **3.8 of them**. Off-axis it is worse: 446 µm,
+6.3 strips, at the edge of the cone. (Every strip count here is for an eight-view print, which is
+what the figure and both animations are drawn with; at twelve views a strip is 47 µm and each
+number is half as forgiving again.)
+
+That is not a small correction. It is why a lenticular print reads as several views blended rather
+than one view at a time, and it is the reason the practical view count of a print is far below what
+the raster could carry.
+
+![Where the blur comes from, and what fixes it](images/17-aberration.png)
+
+Four things reduce it, and they are not equally good:
+
+| Surface and focus                                       | Blur head-on        | Worst across the cone | Height floor |
+| ------------------------------------------------------- | ------------------- | --------------------- | ------------ |
+| circle, focus on the axis _(the obvious lens)_          | 269 µm · 3.8 strips | 446 µm · 6.3 strips   | 0.847 mm     |
+| circle, focus for the cone                              | 85 µm · 1.2         | 85 µm · 1.2           | 0.847 mm     |
+| **ellipse**, focus on the axis _(what the tool prints)_ | **0 µm**            | 167 µm · 2.4          | **0.631 mm** |
+| ellipse, focus for the cone                             | 85 µm · 1.2         | **85 µm · 1.2**       | **0.631 mm** |
+
+None of the four costs any viewing cone: the cone is set by the pitch and the stack height, and the
+radius has nothing to do with it — see [how wide the view is](#how-wide-the-view-is).
+
+**Change the shape.** An ellipse, not a circle, is the exact answer for the on-axis point: for one
+refracting surface bringing collimated light to a focus inside a medium of index `n`, the conic that
+does it perfectly has conic constant `K = −1/n²` — −0.444 at n = 1.5. That is textbook single-surface
+optics, and it is precisely what the lenticular patents claim, together with the same
+`t = R·n/(n−1)` thickness condition this document derives in
+[Solving the lens](#solving-the-lens) ([US6795250B2](https://patents.google.com/patent/US6795250B2/en)).
+Traced here it removes the head-on blur **entirely** — 269 µm to 0.0 — and still cuts the worst case
+across the cone by 2.7×, with coma the residual, exactly as that patent says.
+
+The remarkable part is what it costs, which is nothing. The ellipse has the same vertex radius, so
+the same focal length and the same cone; its sag is 43 µm shallower, so the flat base under it grows
+by 43 µm and the stack is the same 0.9 mm. On a laminated sheet you take the profile the extruder
+made. Here **the profile is a height map** — an aspheric costs exactly as many bytes as a sphere, so
+the tool prints one, and `Lens surface` on the print nodes is how you go back to a circle. It also
+lowers the height floor by a quarter, which is the [second thing it buys](#when-it-cant-work).
+
+**Move the focus.** The second lever, and the second setting: `Focus for` on the print nodes. Rather
+than putting the vertex focus on the artwork, solve the radius so that the *worst* blur anywhere in
+the cone is as small as it can be. Spherical aberration lands the outer rays short, so a longer
+radius — 0.346 mm rather than 0.300 — brings the whole bundle together at the artwork instead: the
+circle of least confusion, put where the picture is. The tool searches for it, over the same trace
+that produced the numbers above.
+
+It flattens the curve completely. The ellipse's 0 µm head-on and 167 at the rim become **85 µm
+everywhere**, and the whole cone is then equally good rather than a sweet spot with edges. Watch the
+same sweep with it:
+
+![The view sweep, focused for the whole cone](images/18-sweep-even-focus.gif)
+
+Two things are visible there that the numbers do not say. The caps are shallower — that is the longer
+radius. And the bundle sits just wider than a strip at every angle, because 85 µm is 1.2 strips of an
+eight-view print: an even focus makes every view equally slightly blended, where the axial one makes
+the middle of the cone perfect and the edges poor. Which you want depends on the print. It also means
+the even focus suits **fewer views**: at six views a strip is 94 µm and 85 fits inside it, so the
+same lens that spills at eight resolves six cleanly across the entire cone.
+
+And an honest note the table makes plain: once the focus is solved for the cone, **the shape stops
+mattering for blur** — the circle lands within a micron of the ellipse. What the ellipse still buys
+there is the height floor, which is a quarter lower and does not care how the focus was chosen.
+
+**Stop the aperture down.** Blur falls fast with aperture — 80% of the pitch gives 88 µm, 60% gives
+30 µm — which is the standard advice in the display literature: increasing the radius of curvature or
+decreasing the aperture suppresses the aberration and the crosstalk with it
+([SPIE 8384](https://ui.adsabs.harvard.edu/abs/2012SPIE.8384E..19L/abstract)). But the aperture _is_
+the cone here: 60% of the pitch is a 32° cone instead of 53°, and 40% of the light thrown away. On a
+printed lens you would do it by leaving a flat gutter between lenticules, which is also 40% of the
+sheet not focusing anything. Usually the wrong trade.
+
+**Raise the index.** Blur falls steeply with `n`: 133 µm at 1.6, 85 µm at 1.7, against 269 µm at 1.5
+— and the cone _widens_ at the same time. This is the one lever with no downside except availability;
+UV clear inks sit near 1.5, and 1.6+ means a different chemistry.
+
+**Or spend fewer views.** The blur only matters against the width of a strip. The same 269 µm is 3.8
+strips at eight views and 2.9 at six. Half the views, half the crosstalk — and it is worth knowing
+that a print with fewer, cleaner views often reads as sharper than one with more, blended ones.
+
+Everything above is traced rather than asserted: the figure and the table come out of
+`fig_aberration()` in `docs/figures.py`, over the same `Lens` solve the tool ships. Beyond a single
+surface the display literature goes further — acylindrical arrays corrected across a 30–60° field,
+and triplet lenticules for low-crosstalk multi-view printing — but a printed relief _is_ a single
+surface, so the ellipse is the whole of what is available here, and most of what is available
+anywhere:
+
+- [Lenticular lens array, US6795250B2](https://patents.google.com/patent/US6795250B2/en) — the
+  elliptical cross-section, `κ = −1/N²`, and the junction-depth argument.
+- [Method of crosstalk reduction using lenticular lens, SPIE 8384](https://ui.adsabs.harvard.edu/abs/2012SPIE.8384E..19L/abstract)
+  — radius of curvature and aperture against aberration and crosstalk.
+- [Correction of aberrations in lens-based 3D displays](https://www.researchgate.net/publication/252774709_Correction_of_aberrations_in_lens-based_3D_displays)
+  — aspheric and acylindrical arrays over a wide field.
+- [Low-crosstalk super multi-view lenticular printing using triplet lenticular lens](https://www.sciencedirect.com/science/article/abs/pii/S0030402619315645)
+  — what more than one surface buys.
 
 Walking across the sheet at position `u` (measured across the lenses), the arithmetic is:
 
@@ -368,8 +555,8 @@ that was worth the trouble:
 
 ![8-bit versus 16-bit quantisation](images/10-quantisation.png)
 
-The whole lens arc is 198 µm tall on a 0.9 mm stack. Eight bits gives you 256 levels over that
-0.9 mm, so the arc gets 56 of them — steps of 3.53 µm, on a surface whose job is to focus light.
+The whole lens arc is 155 µm tall on a 0.9 mm stack. Eight bits gives you 256 levels over that
+0.9 mm, so the arc gets 44 of them — steps of 3.53 µm, on a surface whose job is to focus light.
 Sixteen bits gives you steps of 0.0137 µm, which is far below anything the ink can hold.
 
 Two practical notes:
@@ -395,12 +582,16 @@ for aligning the flip to a preferred head position.
 
 ## The two-dimensional version
 
-Swap the ruling of cylinders for an array of spherical caps and the print moves in both axes —
-left-right _and_ up-down — carrying N² views instead of N.
+Swap the ruling of cylinders for an array of caps — the same conic, turned about its own axis —
+and the print moves in both axes —
+left-right _and_ up-down — carrying X × Y views instead of N. The two counts are set separately, so
+the grid need not be square; see [Oblong grids](#oblong-grids-x--y) below.
 
-**The optics don't change.** A sphere and a cylinder refract identically at a surface of radius `R`,
-so everything above applies unaltered: same radius, same sag, same base, same feasibility floor, same
-cone. Only the footprint is different.
+**The optics don't change.** A surface of revolution and an extruded one refract identically along a
+meridian, so everything above applies unaltered: same radius, same conic constant, same sag, same
+base, same feasibility floor, same cone. Only the footprint is different — and the ellipsoidal cap
+is worth more here than the elliptical lenticule was, because a 2D print divides its lenslet into
+X × Y tiles rather than N strips, so each one is smaller and the blur is a bigger fraction of it.
 
 ![The 2D lens grid](images/11-grid-plan.png)
 
@@ -411,7 +602,7 @@ reach stays flat at base height, where it doesn't focus and contributes a little
 
 The alternative would be stretching each cap out to its cell corners so nothing is wasted. It's
 tempting, and it's a trap: the sag would then be measured across the diagonal `p√2` instead of the
-pitch, which raises the feasibility floor by √2 — from 0.847 mm to 1.20 mm at 45 LPI. For realistic
+pitch, which raises the feasibility floor by √2 — from 0.631 mm to 0.892 mm at 45 LPI. For realistic
 ink heights that's often the difference between working and not.
 
 ### Packing the caps
@@ -507,9 +698,32 @@ grid size**, so 177 × 153 is the answer for a 2 × 2 and for a 15 × 15 alike. 
 artwork raster and light per view, not sharpness. Hold on to that — it is what makes the depth budget
 below affordable, and it is why the tool goes as far as **15 × 15 = 225 views**.
 
-What does change is the artwork under each lenslet, which is cut into N² tiles: at N = 15 a tile is a
-fifteenth of the pitch on each axis, about 2.1 of the printer's dots at 1440 PPI. That is the real
-ceiling, and the print node warns when a setting falls under two dots a tile.
+What does change is the artwork under each lenslet, which is cut into X × Y tiles: at 15 across a tile
+is a fifteenth of the pitch on that axis, about 2.1 of the printer's dots at 1440 PPI. That is the
+real ceiling, and the print node warns when a setting falls under two dots a tile — measured on
+whichever axis is tighter.
+
+### Oblong grids (X × Y)
+
+**Views across** and **views down** are two settings, not one. A cell is one pitch each way whatever
+you set, so the axis with fewer views simply gets wider tiles: each of its views covers more of the
+cap, and therefore a larger slice of the same viewing cone. Nothing else in the optics notices.
+
+That matters because parallax is rarely worth the same in both directions. A print hung on a wall is
+walked past sideways and hardly ever stooped under, so views spent on vertical movement are views
+nobody sees. A **6 × 2** grid gives six steps of horizontal look-around for twelve renders, where a
+square grid carrying the same horizontal detail — 6 × 6 — costs thirty-six. The saving is real on
+every axis of the pipeline at once: renders, artwork raster, and the light each view gets.
+
+The cost of a sparse axis is the size of its steps. Both axes cross the whole cone, so 2 views down
+step from one edge of it to the other in one jump: the vertical flip is abrupt, and anything with
+depth doubles rather than glides as you rise or crouch. Fine when the sheet only needs to _switch_
+vertically (a two-state indicator), wrong when it needs to _move_. The renderers report the parallax
+per step on the sparser axis for exactly this reason — it is the one that will break first.
+
+The producers take X and Y too: set **Model → Grid Views** or **Splat → Views** to the same pair as
+the print node. One wire carries the cells in row-major order, and the two ends have to agree on how
+many there are.
 
 ---
 
@@ -519,7 +733,7 @@ If the subject is a 3D model rather than nine photographs, the views can be rend
 rendering has to be done in a particular way, which is why the tool has its own renderer instead of
 leaving you to a 3D package. Two nodes render views, and they share every rule below:
 
-- **Model → Grid Views** fills the N² eye positions of a **lens grid**.
+- **Model → Grid Views** fills the X × Y eye positions of a **lens grid**.
 - **Model → Stereo Views** renders a horizontal run of views for a **1D lenticular**.
 
 Both stand the subject entirely _behind_ the sheet, so the print is a window you look into rather
@@ -529,7 +743,7 @@ one. That arrangement is worth a section of its own; see
 
 ### Shift the eye; never rotate it
 
-The obvious approach is to point a camera at the subject from each of the N² positions. Don't. Aiming
+The obvious approach is to point a camera at the subject from each of those positions. Don't. Aiming
 the camera ("toe-in") gives every view a different keystone, and it introduces _vertical_ parallax
 between views that should differ only horizontally. Under a lens grid that reads as a wobble as your
 head moves, and no amount of care in the print will fix it.
@@ -601,10 +815,12 @@ ways to buy more, in order of how much they cost you:
 1. **A bigger grid.** Depth grows with `N − 1` and per-view resolution doesn't change at all, so this
    is nearly free — you pay in artwork raster, in render time, and in light split more ways. It is
    also the one with a hard stop, and it is not a matter of taste: the artwork under a lenslet is
-   divided into N² tiles, so each tile gets `pitch_px / N` of the printer's own dots. Under about two
-   dots the tiles bleed into each other and the print stops switching at all. At 1440 PPI and 45 LPI
-   a lenslet is 32 dots across, so **15 × 15 is the ceiling** — which is where the tool caps it, and
-   where the depth table above stops.
+   divided into X × Y tiles, so a tile gets `pitch_px / X` of the printer's own dots across and
+   `pitch_px / Y` down. Under about two dots the tiles bleed into each other and the print stops
+   switching at all. At 1440 PPI and 45 LPI a lenslet is 32 dots across, so **15 is the ceiling on
+   each axis** — which is where the tool caps it, and where the depth table above stops. Note that
+   depth is bought per axis: growing only X buys look-around only sideways
+   ([Oblong grids](#oblong-grids-x--y)).
 2. **A coarser pitch.** Depth grows with `p`, but coarse lenses need
    [thick ink](#when-it-cant-work) and you lose resolution one-for-one.
 3. **A narrower cone.** Fewer degrees to look around in, but every degree carries more depth.
@@ -849,10 +1065,11 @@ of the reference implementation.
 | Quantity                | Value                                   |
 | ----------------------- | --------------------------------------- |
 | Lens pitch              | 0.5644 mm (32.00 printer pixels)        |
-| Minimum feasible height | 0.8467 mm — so 0.9 clears it by 6.3%    |
+| Surface                 | ellipse, K = −0.4444 (−1/n²)              |
+| Minimum feasible height | 0.6311 mm — so 0.9 clears it by 43%     |
 | Radius of curvature     | 0.3000 mm                               |
-| Lens sag                | 0.1983 mm                               |
-| Flat base beneath       | 0.7017 mm                               |
+| Lens sag                | 0.1550 mm (0.1983 as a circle)          |
+| Flat base beneath       | 0.7450 mm (0.7017 as a circle)          |
 | Focus below apex        | 0.9000 mm (equal to H, by construction) |
 | Viewing cone            | 53.34° (ceiling at this index: 56.6°)   |
 | Lenses across the sheet | 177                                     |
@@ -927,14 +1144,17 @@ frac       = lambda x: x - floor(x)
 
 # ---- solve the lens -------------------------------------------------
 p      = 25.4 / LPI
-H_min  = n * p / (2 * (n - 1))
-disc   = H*H*(n-1)**2 - n*n*p*p/4
-if disc < 0:
+K      = -1 / (n*n)                # the ellipse that focuses to a point;
+                                   # K = 0 for a plain circular lens
+reach  = sqrt(1 + K)               # how far out the surface runs: R/reach
+R      = H * (n - 1) / n           # the focus condition, and the whole solve
+H_min  = n * reach * p / (2 * (n - 1))
+if R < reach * p/2:
     warn(f"cannot focus in {H} mm; need at least {H_min} mm")
-    s = p / 2                      # hemisphere, the strongest lens
-else:
-    s = (H*(n-1) - sqrt(disc)) / n # minor arc — the printable root
-R      = (s*s + (p/2)**2) / (2*s)
+    R = reach * p/2                # the deepest surface of this family
+
+sag    = lambda r: r*r / (R * (1 + sqrt(max(0, 1 - (1+K)*r*r/(R*R)))))
+s      = sag(p/2)                  # sag across half a pitch
 b      = max(0, H - s)
 
 # ---- interlaced artwork ---------------------------------------------
@@ -979,7 +1199,7 @@ for py in range(map_h):
       u    = x*cos(o) + y*sin(o)
       t    = frac(u / p + phase)
       d    = (t - 0.5) * p
-      z    = b + max(0, sqrt(max(0, R*R - d*d)) - (R - s))
+      z    = b + max(0, s - sag(abs(d)))
       depth[py][px] = round(min(1, z / H) * 65535)
 ```
 
@@ -1010,6 +1230,8 @@ apart, that test fails.
 | Soft everywhere, never a clean flip             | Focus isn't landing on the artwork                                                                             | Check the feasibility floor; run the Height calibration                                                         |
 | Clean at one edge, smeared at the other         | Pitch mismatch (laminated lens, or RIP scaling)                                                                | Run the LPI calibration                                                                                         |
 | Two views visible at once                       | Focus too long, or the ink slumped                                                                             | More height, or cure harder                                                                                     |
+| Views blended at every angle, worst off-axis    | A circular surface: it cannot focus its own aperture, and spreads a view over ~6 strips                        | Set Lens surface to Ellipse — same height, same cone, no cost                                                    |
+| Sharp head-on, softening towards the edges      | Coma — the residual an ellipse leaves, which grows with the angle                                              | Focus for: the whole cone — evens it to ~1.2 strips; or fewer views, which widens the strip                     |
 | Depth inverted, motion feels wrong              | Pseudoscopic — views not mirrored                                                                              | Mirror both view indices                                                                                        |
 | Stair-stepping on the lens surface              | 8-bit relief, or too few pixels per lens                                                                       | Emit 16-bit; raise PPI or lower LPI to ≥ 8 px per lens                                                          |
 | A view missing from some lenses                 | Artwork raster too small, a tile fell between pixels                                                           | Raise samples per tile to 2 or more                                                                             |
@@ -1026,10 +1248,13 @@ apart, that test fails.
 
 Worth being straight about:
 
-- **The optics are paraxial.** The focus used here is the paraxial focus of a single refracting
-  surface. A real spherical cap at these apertures has noticeable spherical aberration — the edge
-  rays focus shorter than the middle ones, so the flip is softer at the edge of the cone than in the
-  centre. An aspheric profile would fix it, and the profile equation is the only thing that'd change.
+- **The solve is paraxial, though the surface is not.** The focus condition is the paraxial focus of
+  a single refracting surface. The [ellipse](#which-surface-and-why-it-isnt-a-circle) removes the
+  spherical aberration that would otherwise leave — exactly, on axis — but what is left off-axis is
+  **coma**: 167 µm at the edge of the cone against 0 head-on, so the flip is still softer out at the
+  edges than in the middle. Correcting that needs more than one surface, which a printed relief does
+  not have. See [the blur the lens itself adds](#the-blur-the-lens-itself-adds) for the numbers, and
+  for the trade that buys a flatter curve across the cone at the cost of the on-axis point.
 - **No chromatic correction.** Index varies with wavelength, so the flip point differs slightly by
   colour.
 - **Ink isn't glass.** Cured varnish shrinks and slumps and may not hold the shape you modelled. That
