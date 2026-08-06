@@ -21,7 +21,7 @@ import {
 } from '../lib/lenticular';
 import { runChunked } from '../lib/chunked';
 import { radialInputs, radialViewInputs } from '../engine/ports';
-import { profileField, settingsFromConfig } from './lenticular';
+import { focusField, profileField, settingsFromConfig } from './lenticular';
 import { asImage, asImages, bool, num } from './helpers';
 
 /** Read the print settings, plus the radial-only ones, out of a node's config. */
@@ -99,6 +99,7 @@ export const radialGridNode: NodeDefinition = {
     { kind: 'number', key: 'heightMm', label: 'Height (mm)', min: 0.01, step: 0.05 },
     { kind: 'number', key: 'ri', label: 'RI', min: 1.01, max: 3, step: 0.01 },
     profileField(),
+    focusField(),
     { kind: 'number', key: 'orientationDeg', label: 'Orientation (°)', min: -180, max: 180, step: 1 },
     { kind: 'number', key: 'spin', label: 'Spin the wedges (0–1 of a step)', min: 0, max: 1, step: 0.05 },
     { kind: 'number', key: 'phase', label: 'Phase X (0–1)', min: 0, max: 1, step: 0.05, advanced: true },
@@ -172,6 +173,7 @@ export const radialGridNode: NodeDefinition = {
     heightMm: 0.9,
     ri: 1.5,
     profile: 'ellipse',
+    focus: 'axis',
     orientationDeg: 0,
     mirrorViews: true,
     stripSamples: 2,

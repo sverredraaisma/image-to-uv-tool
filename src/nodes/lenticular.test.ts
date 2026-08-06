@@ -146,6 +146,8 @@ describe('settingsFromConfig', () => {
       // choice, and it printed a circle. New nodes get the ellipse from
       // defaultConfig instead — see the profile tests in lenticular.test.ts.
       profile: 'circle',
+      // Likewise the focus: every graph before the choice solved for the axis.
+      focus: 'axis',
     });
     // RI below 1 would invert the optics; height of 0 would divide by zero.
     expect(settingsFromConfig({ ri: 0.2, heightMm: 0 }).ri).toBeGreaterThan(1);

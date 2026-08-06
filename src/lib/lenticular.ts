@@ -110,6 +110,12 @@ export interface LenticularSettings {
    * choice, which were circles — see {@link clampProfile} and {@link LensProfile}.
    */
   profile?: LensProfile;
+  /**
+   * Where the radius puts the focus: on the axis, or evenest across the cone.
+   * Absent is `axis`, which is what every graph before the choice solved for.
+   * See {@link LensFocus}.
+   */
+  focus?: LensFocus;
 }
 
 /**
@@ -150,6 +156,29 @@ export const clampProfile = (profile: unknown): LensProfile =>
   profile === 'ellipse' ? 'ellipse' : 'circle';
 
 /**
+ * Where to put the radius, given that no single surface is sharp everywhere.
+ *
+ * - `axis`: the vertex focus lands on the artwork. Sharpest head-on — with an
+ *   ellipse, exactly a point — and softening towards the edge of the cone,
+ *   where coma takes over. The default, and what "solve the lens" means above.
+ * - `cone`: the radius that gives the smallest *worst* blur across the whole
+ *   cone instead. It is a longer focus, so head-on is no longer perfect, but
+ *   nothing is much worse than anything else: with an ellipse it turns 0 µm
+ *   head-on and 167 µm at the rim into about 85 µm everywhere.
+ *
+ * Which is better is a question about the print rather than about optics. A
+ * sheet looked at square on wants `axis`; one that will be walked past, or a
+ * grid, spends most of its viewing at an angle and wants `cone`.
+ *
+ * The viewing cone is the same either way — it is set by the pitch and the
+ * stack height, not by the radius. See {@link lensGeometry}.
+ */
+export type LensFocus = 'axis' | 'cone';
+
+/** Config values arrive as unknowns; anything but an explicit `cone` is `axis`. */
+export const clampFocus = (focus: unknown): LensFocus => (focus === 'cone' ? 'cone' : 'axis');
+
+/**
  * Depth of a conic surface below its own apex, at distance `r` from the axis.
  *
  * The standard sag equation, `r² / (R(1 + √(1 − (1+K)r²/R²)))`, which is the
@@ -163,6 +192,73 @@ export function conicSag(r: number, radiusMm: number, conicK: number): number {
   const r2 = r * r;
   const disc = 1 - ((1 + conicK) * r2) / (R * R);
   return r2 / (R * (1 + Math.sqrt(Math.max(0, disc))));
+}
+
+/** Slope of {@link conicSag} at `r` — `r / (R√(1 − (1+K)r²/R²))`, exactly. */
+export function conicSlope(r: number, radiusMm: number, conicK: number): number {
+  const R = Math.max(1e-9, radiusMm);
+  const disc = 1 - ((1 + conicK) * r * r) / (R * R);
+  return r / (R * Math.sqrt(Math.max(1e-12, disc)));
+}
+
+/**
+ * Where the light an eye collects actually lands on the artwork, in mm from the
+ * lenticule's axis — one entry per ray across the aperture.
+ *
+ * This is the print's own question, asked exactly rather than paraxially: a
+ * parallel bundle (the eye is hundreds of millimetres away, so it is parallel
+ * across half a millimetre of lens), refracted by Snell's law at the real
+ * surface, run down to the artwork plane at `heightMm`. Where the bundle lands
+ * decides which strip is seen, and how wide it lands is the print's crosstalk.
+ *
+ * The eye is `thetaDeg` to the right of head-on, so the light reaching it
+ * travels down and to the *left*: the inversion, in one sign.
+ */
+export function bundleLandings(
+  settings: LenticularSettings,
+  geometry: LensGeometry,
+  thetaDeg: number,
+  rays = 65,
+): number[] {
+  const n = Math.max(1.0001, settings.ri);
+  const h = Math.max(1e-6, settings.heightMm);
+  const half = geometry.pitchMm / 2;
+  const th = (thetaDeg * Math.PI) / 180;
+  const dx = -Math.sin(th);
+  const dy = -Math.cos(th);
+  const out: number[] = [];
+  for (let i = 0; i < rays; i++) {
+    // Across the aperture, but not into the seam where two lenticules meet.
+    const off = half * 0.99 * (rays === 1 ? 0 : (2 * i) / (rays - 1) - 1);
+    const y = h - conicSag(Math.abs(off), geometry.radiusMm, geometry.conicK);
+    const slope = conicSlope(Math.abs(off), geometry.radiusMm, geometry.conicK) * Math.sign(off);
+    const nl = Math.hypot(slope, 1);
+    const nx = slope / nl;
+    const ny = 1 / nl;
+    // Snell as a vector, air into the varnish.
+    const eta = 1 / n;
+    const cosI = -(dx * nx + dy * ny);
+    const k = 1 - eta * eta * (1 - cosI * cosI);
+    if (k < 0) continue;
+    const f = eta * cosI - Math.sqrt(k);
+    const ix = eta * dx + f * nx;
+    const iy = eta * dy + f * ny;
+    if (iy >= 0) continue;
+    out.push(off + (y / -iy) * ix);
+  }
+  return out;
+}
+
+/** How wide that bundle lands, in mm — the blur one view is smeared over. */
+export function spotSizeMm(
+  settings: LenticularSettings,
+  geometry: LensGeometry,
+  thetaDeg = 0,
+  rays = 65,
+): number {
+  const lands = bundleLandings(settings, geometry, thetaDeg, rays);
+  if (!lands.length) return 0;
+  return Math.max(...lands) - Math.min(...lands);
 }
 
 export interface LensGeometry {
@@ -189,6 +285,14 @@ export interface LensGeometry {
   /** The surface this was solved for, and its conic constant. */
   profile: LensProfile;
   conicK: number;
+  /** Which focus the radius was chosen for. */
+  focus: LensFocus;
+  /**
+   * The radius the plain focus condition would have given. Equal to
+   * {@link radiusMm} unless the focus was solved across the cone, which lands
+   * the paraxial focus past the artwork on purpose.
+   */
+  axialRadiusMm: number;
 }
 
 /**
@@ -221,31 +325,83 @@ export function lensGeometry(settings: LenticularSettings): LensGeometry {
   // Infeasible → the deepest surface of this family that still spans the pitch
   // (a hemisphere, for a circle), which is the shortest focus this pitch can
   // produce. It focuses short of the artwork, and the report says so.
-  const radiusMm = feasible ? wantedR : reach * halfPitch;
-  const sagMm = conicSag(halfPitch, radiusMm, conicK);
-  const focusMm = (n * radiusMm) / (n - 1);
-  const baseMm = Math.max(0, h - sagMm);
-  const totalMm = baseMm + sagMm;
+  const axialRadiusMm = feasible ? wantedR : reach * halfPitch;
 
-  // Marginal ray from the focus to the lens edge, refracted back out to air.
-  const sinInside = halfPitch / Math.hypot(halfPitch, focusMm);
+  // The ray that leaves the eye through the lenticule's own axis meets the
+  // surface where it is flat to the axis, so it refracts as if through a plane
+  // and lands at H·tan(asin(sinθ/n)) from the axis, whatever the radius. The
+  // cone is where that walks off the lenticule and the print starts repeating —
+  // a question about the pitch and the stack height only.
+  //
+  // Until the focus could be solved across the cone this read `focusMm`, which
+  // the solve had just forced to equal H; identical for every lens printed so
+  // far, and honest for the ones where the paraxial focus is deliberately past
+  // the artwork.
+  const sinInside = halfPitch / Math.hypot(halfPitch, h);
   const sinAir = Math.min(1, n * sinInside);
   const viewAngleDeg = 2 * (Math.asin(sinAir) * (180 / Math.PI));
 
-  return {
+  const focus = clampFocus(settings.focus);
+  const base = (radius: number): LensGeometry => ({
     pitchMm,
     pitchPx,
-    sagMm,
-    baseMm,
-    radiusMm,
-    focusMm,
-    totalMm,
+    sagMm: conicSag(halfPitch, radius, conicK),
+    baseMm: Math.max(0, h - conicSag(halfPitch, radius, conicK)),
+    radiusMm: radius,
+    focusMm: (n * radius) / (n - 1),
+    totalMm: Math.max(0, h - conicSag(halfPitch, radius, conicK)) + conicSag(halfPitch, radius, conicK),
     feasible,
     minHeightMm,
     viewAngleDeg,
     profile,
     conicK,
-  };
+    focus,
+    axialRadiusMm,
+  });
+
+  const axial = base(axialRadiusMm);
+  return focus === 'cone' && feasible ? base(bestRadiusMm(settings, axial)) : axial;
+}
+
+/** Angles the cone search judges a radius at: head-on out to the rim. */
+const CONE_SAMPLES = [0, 0.25, 0.5, 0.75, 1];
+
+/** The widest a bundle lands anywhere in the cone — what `cone` focus minimises. */
+export function worstSpotMm(settings: LenticularSettings, geometry: LensGeometry, rays = 41): number {
+  const half = geometry.viewAngleDeg / 2;
+  return Math.max(...CONE_SAMPLES.map((f) => spotSizeMm(settings, geometry, f * half, rays)));
+}
+
+/**
+ * The radius whose worst blur across the cone is smallest.
+ *
+ * Longer than the axial one, always: spherical aberration lands the outer rays
+ * short, so pushing the paraxial focus past the artwork brings the whole bundle
+ * together at it instead — the circle of least confusion, put where the picture
+ * is. A golden-section search over `[R, 1.6R]`, on a curve with one minimum in
+ * that interval, and cheap enough to run inside the solve: about sixty traces.
+ */
+export function bestRadiusMm(settings: LenticularSettings, axial: LensGeometry): number {
+  const at = (radius: number) => worstSpotMm(settings, { ...axial, radiusMm: radius }, 25);
+  const phi = (Math.sqrt(5) - 1) / 2;
+  let lo = axial.radiusMm;
+  let hi = axial.radiusMm * 1.6;
+  let c = hi - phi * (hi - lo);
+  let d = lo + phi * (hi - lo);
+  let fc = at(c);
+  let fd = at(d);
+  for (let i = 0; i < 24 && hi - lo > axial.radiusMm * 1e-4; i++) {
+    if (fc < fd) {
+      [hi, d, fd] = [d, c, fc];
+      c = hi - phi * (hi - lo);
+      fc = at(c);
+    } else {
+      [lo, c, fc] = [c, d, fd];
+      d = lo + phi * (hi - lo);
+      fd = at(d);
+    }
+  }
+  return (lo + hi) / 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -2005,11 +2161,20 @@ export function describeRadialGeometry(
  * the only reason to see `circle` here is a graph that predates the choice.
  */
 function describeProfile(geometry: LensGeometry): string {
-  return geometry.profile === 'ellipse'
-    ? `Surface: ellipse, K = ${geometry.conicK.toFixed(3)} (−1/n²) — the whole lens focuses on one ` +
+  const surface =
+    geometry.profile === 'ellipse'
+      ? `Surface: ellipse, K = ${geometry.conicK.toFixed(3)} (−1/n²) — the whole lens focuses on one ` +
         `strip, so the views do not bleed into each other`
-    : `Surface: circle — it cannot focus its own aperture, so each view's light spreads over ` +
+      : `Surface: circle — it cannot focus its own aperture, so each view's light spreads over ` +
         `several strips. Switch Lens surface to Ellipse; it costs nothing to print`;
+  if (geometry.focus !== 'cone') return surface;
+  const mm = (v: number) => v.toFixed(3);
+  return (
+    `${surface}\nFocus: solved across the cone — radius ${mm(geometry.radiusMm)} mm rather than the ` +
+    `${mm(geometry.axialRadiusMm)} mm that focuses on the axis, so the paraxial focus sits ` +
+    `${mm(geometry.focusMm)} mm down, past the artwork on purpose. Head-on is a little softer and the ` +
+    `edge of the cone much sharper; the cone itself is unchanged, being set by the pitch and the height`
+  );
 }
 
 /** {@link describeGeometry} for the 2D grid node. */

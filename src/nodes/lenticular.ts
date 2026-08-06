@@ -3,6 +3,7 @@
 
 import type { ConfigField, NodeConfig, NodeDefinition } from '../types';
 import {
+  clampFocus,
   clampProfile,
   depthPreview,
   describeGeometry,
@@ -29,6 +30,7 @@ export function settingsFromConfig(config: NodeConfig): LenticularSettings {
     // A graph saved before the surface was a choice printed a circle, and must
     // go on printing one — new nodes default to the ellipse instead.
     profile: clampProfile(config.profile),
+    focus: clampFocus(config.focus),
   };
 }
 
@@ -40,6 +42,17 @@ export const profileField = (): ConfigField => ({
   options: [
     { value: 'ellipse', label: 'Ellipse (focuses the whole lens — K = −1/n²)' },
     { value: 'circle', label: 'Circle (the simple shape; blurs across ~6 strips)' },
+  ],
+});
+
+/** …and where to put its focus, which is the same question on every one of them. */
+export const focusField = (): ConfigField => ({
+  kind: 'select',
+  key: 'focus',
+  label: 'Focus for',
+  options: [
+    { value: 'axis', label: 'Head-on (sharpest square on, softer at the edges)' },
+    { value: 'cone', label: 'The whole cone (even everywhere, slightly soft head-on)' },
   ],
 });
 
@@ -71,6 +84,7 @@ export const lenticularNode: NodeDefinition = {
     { kind: 'number', key: 'heightMm', label: 'Height (mm)', min: 0.01, step: 0.05 },
     { kind: 'number', key: 'ri', label: 'RI', min: 1.01, max: 3, step: 0.01 },
     profileField(),
+    focusField(),
     { kind: 'number', key: 'orientationDeg', label: 'Orientation (°)', min: -180, max: 180, step: 1 },
     {
       kind: 'number',
@@ -132,6 +146,7 @@ export const lenticularNode: NodeDefinition = {
     // 1.5 is the usual cured clear-varnish / acrylic figure.
     ri: 1.5,
     profile: 'ellipse',
+    focus: 'axis',
     orientationDeg: 0,
     stripSamples: 2,
     calibBands: 9,
