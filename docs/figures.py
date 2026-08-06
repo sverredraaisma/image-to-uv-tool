@@ -1240,6 +1240,12 @@ def spot_um(lens, offsets, **kw):
     return (max(lands) - min(lands)) * 1000 if lands else float("nan")
 
 
+#: Views the blur figures are quoted against. Eight is a common lenticular
+#: count and wide enough per strip to see what is happening; the animations
+#: use the same number, so the two can be read together.
+VIEWS = 8
+
+
 def fig_aberration():
     L = DEFAULT
     half = L.pitch / 2
@@ -1253,7 +1259,7 @@ def fig_aberration():
 
     fig = plt.figure(figsize=(11.4, 4.5))
     gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1.45], wspace=0.22)
-    strip = L.pitch / 12 * 1000
+    strip = L.pitch / VIEWS * 1000
 
     for col, (K, R, title) in enumerate(
         (
@@ -1271,8 +1277,8 @@ def fig_aberration():
         for x0, y0, land in trace_bundle(L, drawn, R=R, K=K):
             ax.plot([x0, x0, land], [L.H + 0.30, y0, 0], color=RAY, lw=0.8, alpha=0.85)
         ax.add_patch(Rectangle((-half, -0.06), L.pitch, 0.06, facecolor=ART, edgecolor="none"))
-        for k in range(1, 12):
-            ax.plot([-half + k * L.pitch / 12] * 2, [-0.06, 0], color="white", lw=0.5)
+        for k in range(1, VIEWS):
+            ax.plot([-half + k * L.pitch / VIEWS] * 2, [-0.06, 0], color="white", lw=0.5)
         ax.set_xlim(-half * 1.06, half * 1.06)
         ax.set_ylim(-0.1, L.H + 0.32)
         ax.set_title(title, fontsize=10, color=SUB, loc="left")
@@ -1293,7 +1299,7 @@ def fig_aberration():
             color=col, lw=1.8, ls=ls, label=label,
         )
     bx.axhline(strip, color=WARN, lw=1.2)
-    bx.text(0.6, strip * 1.16, "one strip at 12 views — past this is crosstalk", fontsize=8.6, color=WARN)
+    bx.text(9.5, strip * 0.24, f"one strip at {VIEWS} views — past this is crosstalk", fontsize=8.6, color=WARN)
     bx.set_xlabel("viewing angle off head-on (°)")
     bx.set_ylabel("blur at the artwork (µm)")
     bx.set_xlim(0, L.view_angle / 2)

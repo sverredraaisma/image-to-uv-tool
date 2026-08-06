@@ -119,7 +119,7 @@ the **conics**, written with one more number — the conic constant `K`:
 about lenticulars assumes one — but it is not the right one. **A circle does not bring its own
 aperture to a point.** Its outer rays cross the axis nearer the lens than its middle rays do, so the
 light meant for one strip lands across several; at the settings here that spread is 269 µm, close to
-six strips of a twelve-view print. That is spherical aberration, and it is the single largest source
+four strips of an eight-view print. That is spherical aberration, and the single largest source
 of crosstalk in a lenticular print. [The blur the lens itself adds](#the-blur-the-lens-itself-adds)
 measures it.
 
@@ -281,9 +281,11 @@ Here is what the circle costs, and why the tool does not print one. A circular c
 aperture to a point: the outer rays cross the axis nearer the lens than the middle ones do, which is
 **spherical aberration**,
 and it is a property of the shape rather than of the printing. Traced across the full aperture of the
-tool's default lenticule, head-on, the bundle lands over **269 µm** — and at twelve views a strip is
-47 µm, so the light meant for one view is spread over **5.7 of them**. Off-axis it is worse: 446 µm,
-9.5 strips, at the edge of the cone.
+tool's default lenticule, head-on, the bundle lands over **269 µm** — and at eight views a strip is
+71 µm, so the light meant for one view is spread over **3.8 of them**. Off-axis it is worse: 446 µm,
+6.3 strips, at the edge of the cone. (Every strip count here is for an eight-view print, which is
+what the figure and both animations are drawn with; at twelve views a strip is 47 µm and each
+number is half as forgiving again.)
 
 That is not a small correction. It is why a lenticular print reads as several views blended rather
 than one view at a time, and it is the reason the practical view count of a print is far below what
@@ -295,10 +297,10 @@ Four things reduce it, and they are not equally good:
 
 | Surface and focus                                       | Blur head-on        | Worst across the cone | Height floor |
 | ------------------------------------------------------- | ------------------- | --------------------- | ------------ |
-| circle, focus on the axis _(the obvious lens)_          | 269 µm · 5.7 strips | 446 µm · 9.5 strips   | 0.847 mm     |
-| circle, focus for the cone                              | 85 µm · 1.8         | 85 µm · 1.8           | 0.847 mm     |
-| **ellipse**, focus on the axis _(what the tool prints)_ | **0 µm**            | 167 µm · 3.6          | **0.631 mm** |
-| ellipse, focus for the cone                             | 85 µm · 1.8         | **85 µm · 1.8**       | **0.631 mm** |
+| circle, focus on the axis _(the obvious lens)_          | 269 µm · 3.8 strips | 446 µm · 6.3 strips   | 0.847 mm     |
+| circle, focus for the cone                              | 85 µm · 1.2         | 85 µm · 1.2           | 0.847 mm     |
+| **ellipse**, focus on the axis _(what the tool prints)_ | **0 µm**            | 167 µm · 2.4          | **0.631 mm** |
+| ellipse, focus for the cone                             | 85 µm · 1.2         | **85 µm · 1.2**       | **0.631 mm** |
 
 None of the four costs any viewing cone: the cone is set by the pitch and the stack height, and the
 radius has nothing to do with it — see [how wide the view is](#how-wide-the-view-is).
@@ -333,11 +335,11 @@ same sweep with it:
 ![The view sweep, focused for the whole cone](images/18-sweep-even-focus.gif)
 
 Two things are visible there that the numbers do not say. The caps are shallower — that is the longer
-radius. And the bundle straddles a strip boundary at nearly every angle, because 85 µm is 1.8 strips
-of a twelve-view print: an even focus makes every view equally slightly blended, where the axial one
-makes the middle of the cone perfect and the edges poor. Which you want depends on the print. It also
-means the even focus suits **fewer views**: at six views a strip is 94 µm and 85 fits inside it, so
-the same lens that cannot cleanly resolve twelve resolves six across the entire cone.
+radius. And the bundle sits just wider than a strip at every angle, because 85 µm is 1.2 strips of an
+eight-view print: an even focus makes every view equally slightly blended, where the axial one makes
+the middle of the cone perfect and the edges poor. Which you want depends on the print. It also means
+the even focus suits **fewer views**: at six views a strip is 94 µm and 85 fits inside it, so the
+same lens that spills at eight resolves six cleanly across the entire cone.
 
 And an honest note the table makes plain: once the focus is solved for the cone, **the shape stops
 mattering for blur** — the circle lands within a micron of the ellipse. What the ellipse still buys
@@ -355,8 +357,8 @@ sheet not focusing anything. Usually the wrong trade.
 — and the cone _widens_ at the same time. This is the one lever with no downside except availability;
 UV clear inks sit near 1.5, and 1.6+ means a different chemistry.
 
-**Or spend fewer views.** The blur only matters against the width of a strip. The same 269 µm is 5.7
-strips at twelve views and 2.9 at six. Half the views, half the crosstalk — and it is worth knowing
+**Or spend fewer views.** The blur only matters against the width of a strip. The same 269 µm is 3.8
+strips at eight views and 2.9 at six. Half the views, half the crosstalk — and it is worth knowing
 that a print with fewer, cleaner views often reads as sharper than one with more, blended ones.
 
 Everything above is traced rather than asserted: the figure and the table come out of
@@ -1229,7 +1231,7 @@ apart, that test fails.
 | Clean at one edge, smeared at the other         | Pitch mismatch (laminated lens, or RIP scaling)                                                                | Run the LPI calibration                                                                                         |
 | Two views visible at once                       | Focus too long, or the ink slumped                                                                             | More height, or cure harder                                                                                     |
 | Views blended at every angle, worst off-axis    | A circular surface: it cannot focus its own aperture, and spreads a view over ~6 strips                        | Set Lens surface to Ellipse — same height, same cone, no cost                                                    |
-| Sharp head-on, softening towards the edges      | Coma — the residual an ellipse leaves, which grows with the angle                                              | Focus for: the whole cone; or fewer views, which widens the strip                                               |
+| Sharp head-on, softening towards the edges      | Coma — the residual an ellipse leaves, which grows with the angle                                              | Focus for: the whole cone — evens it to ~1.2 strips; or fewer views, which widens the strip                     |
 | Depth inverted, motion feels wrong              | Pseudoscopic — views not mirrored                                                                              | Mirror both view indices                                                                                        |
 | Stair-stepping on the lens surface              | 8-bit relief, or too few pixels per lens                                                                       | Emit 16-bit; raise PPI or lower LPI to ≥ 8 px per lens                                                          |
 | A view missing from some lenses                 | Artwork raster too small, a tile fell between pixels                                                           | Raise samples per tile to 2 or more                                                                             |

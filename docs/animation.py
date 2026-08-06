@@ -113,8 +113,8 @@ def refract(d, normal, n_from, n_to):
 #: and because whether a surface can focus all of it is the entire question. The
 #: ellipse can, exactly, on axis. A circle cannot: its outer rays cross above its
 #: middle ones — spherical aberration, a real property of the shape rather than a
-#: fault in the trace — and head-on its bundle lands over 269 µm, which at twelve
-#: views is 5.7 strips of crosstalk. Run `--surface circle` to watch it happen.
+#: fault in the trace — and head-on its bundle lands over 269 µm, which at eight
+#: views is 3.8 strips of crosstalk. Run `--surface circle` to watch it happen.
 APERTURE = 0.99
 
 
@@ -310,7 +310,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--span", type=float, default=half, help="half-sweep in degrees (default: the cone + 1°)")
     ap.add_argument("--step", type=float, default=1.0, help="degrees per frame")
-    ap.add_argument("--views", type=int, default=12, help="views interlaced under each lenticule")
+    ap.add_argument("--views", type=int, default=8, help="views interlaced under each lenticule")
     ap.add_argument(
         "--aperture", type=float, default=APERTURE,
         help="fraction of the half-pitch the drawn bundle spans; 1 is the whole cap, "
