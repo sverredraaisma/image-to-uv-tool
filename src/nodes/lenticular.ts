@@ -1,8 +1,9 @@
 // Lenticular print node: interlace 2+ frames and emit the matching gloss lens
 // array. The optics live in ../lib/lenticular; this file is the node wiring.
 
-import type { NodeConfig, NodeDefinition } from '../types';
+import type { ConfigField, NodeConfig, NodeDefinition } from '../types';
 import {
+  clampProfile,
   depthPreview,
   describeGeometry,
   interlacedSize,
@@ -14,7 +15,7 @@ import {
 import { runChunked } from '../lib/chunked';
 import { asImages, num } from './helpers';
 
-/** Read the seven print settings out of a node's config. */
+/** Read the print settings out of a node's config. */
 export function settingsFromConfig(config: NodeConfig): LenticularSettings {
   return {
     widthMm: Math.max(0.01, num(config.widthMm, 100)),
@@ -25,8 +26,22 @@ export function settingsFromConfig(config: NodeConfig): LenticularSettings {
     ri: Math.max(1.0001, num(config.ri, 1.5)),
     orientationDeg: num(config.orientationDeg, 0),
     stripSamples: Math.max(1, num(config.stripSamples, 2)),
+    // A graph saved before the surface was a choice printed a circle, and must
+    // go on printing one — new nodes default to the ellipse instead.
+    profile: clampProfile(config.profile),
   };
 }
+
+/** The surface choice, offered the same way on every node that prints a lens. */
+export const profileField = (): ConfigField => ({
+  kind: 'select',
+  key: 'profile',
+  label: 'Lens surface',
+  options: [
+    { value: 'ellipse', label: 'Ellipse (focuses the whole lens — K = −1/n²)' },
+    { value: 'circle', label: 'Circle (the simple shape; blurs across ~6 strips)' },
+  ],
+});
 
 export const lenticularNode: NodeDefinition = {
   type: 'lenticular',
@@ -55,6 +70,7 @@ export const lenticularNode: NodeDefinition = {
     { kind: 'number', key: 'phase', label: 'Phase (0–1)', min: 0, max: 1, step: 0.05 },
     { kind: 'number', key: 'heightMm', label: 'Height (mm)', min: 0.01, step: 0.05 },
     { kind: 'number', key: 'ri', label: 'RI', min: 1.01, max: 3, step: 0.01 },
+    profileField(),
     { kind: 'number', key: 'orientationDeg', label: 'Orientation (°)', min: -180, max: 180, step: 1 },
     {
       kind: 'number',
@@ -115,6 +131,7 @@ export const lenticularNode: NodeDefinition = {
     heightMm: 0.9,
     // 1.5 is the usual cured clear-varnish / acrylic figure.
     ri: 1.5,
+    profile: 'ellipse',
     orientationDeg: 0,
     stripSamples: 2,
     calibBands: 9,

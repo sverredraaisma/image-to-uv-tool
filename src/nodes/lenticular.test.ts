@@ -142,6 +142,10 @@ describe('settingsFromConfig', () => {
       ri: 1.5,
       orientationDeg: 0,
       stripSamples: 2,
+      // A config with no `profile` is a graph saved before the surface was a
+      // choice, and it printed a circle. New nodes get the ellipse from
+      // defaultConfig instead — see the profile tests in lenticular.test.ts.
+      profile: 'circle',
     });
     // RI below 1 would invert the optics; height of 0 would divide by zero.
     expect(settingsFromConfig({ ri: 0.2, heightMm: 0 }).ri).toBeGreaterThan(1);

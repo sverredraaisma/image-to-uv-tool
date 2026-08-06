@@ -105,6 +105,64 @@ export interface LenticularSettings {
    * strips wherever the phase lands badly; 2 is the safe floor.
    */
   stripSamples: number;
+  /**
+   * The shape of the lens surface. Absent on graphs saved before there was a
+   * choice, which were circles — see {@link clampProfile} and {@link LensProfile}.
+   */
+  profile?: LensProfile;
+}
+
+/**
+ * The cross-section of the lens surface.
+ *
+ * - `circle`: an arc of one radius. The obvious shape, and the wrong one: a
+ *   circle does not bring its whole aperture to a point, so the light meant for
+ *   one strip lands across several. At the tool's defaults that is 269 µm of
+ *   spread, 5.7 strips of a twelve-view print, and it is the single largest
+ *   source of crosstalk in a lenticular.
+ * - `ellipse`: the conic that focuses collimated light to a point inside a
+ *   medium of index n, exactly, at one refracting surface. Same vertex radius,
+ *   so the same focal length, the same viewing cone and the same feasibility
+ *   arithmetic; only the shape between the apex and the seam differs, by 43 µm
+ *   at the defaults. It removes the on-axis spread entirely and cuts the
+ *   worst-case across the cone by 2.7×.
+ *
+ * A laminated sheet is whatever the extruder made. Here the profile is a height
+ * map, so the better shape costs nothing to print — which is why the ellipse is
+ * the default for new nodes. See docs/printed-lenses.md, "The blur the lens
+ * itself adds", and figure 17.
+ */
+export type LensProfile = 'circle' | 'ellipse';
+
+/**
+ * Conic constant of a profile at index `n`.
+ *
+ * `K = −1/n²` is the classical result for a single refracting surface imaging an
+ * axial point at infinity: it is the ellipse whose eccentricity is 1/n, and it
+ * is what the lenticular art claims for the same job (US6795250B2). 0 is the
+ * circle, which is the same formula's degenerate case.
+ */
+export const conicConstant = (profile: LensProfile | undefined, n: number): number =>
+  profile === 'ellipse' ? -1 / (n * n) : 0;
+
+/** Config values arrive as unknowns; anything but an explicit `ellipse` is a circle. */
+export const clampProfile = (profile: unknown): LensProfile =>
+  profile === 'ellipse' ? 'ellipse' : 'circle';
+
+/**
+ * Depth of a conic surface below its own apex, at distance `r` from the axis.
+ *
+ * The standard sag equation, `r² / (R(1 + √(1 − (1+K)r²/R²)))`, which is the
+ * circle at K = 0 and an ellipse for −1 < K < 0. Past the point where the root
+ * turns negative the surface has run out — a circle at its hemisphere, an
+ * ellipse at its own semi-axis — and it is clamped there rather than made
+ * imaginary; {@link lensGeometry} keeps the solve on the printable side of that.
+ */
+export function conicSag(r: number, radiusMm: number, conicK: number): number {
+  const R = Math.max(1e-9, radiusMm);
+  const r2 = r * r;
+  const disc = 1 - ((1 + conicK) * r2) / (R * R);
+  return r2 / (R * (1 + Math.sqrt(Math.max(0, disc))));
 }
 
 export interface LensGeometry {
@@ -128,6 +186,9 @@ export interface LensGeometry {
   minHeightMm: number;
   /** Full viewing cone in air, degrees. */
   viewAngleDeg: number;
+  /** The surface this was solved for, and its conic constant. */
+  profile: LensProfile;
+  conicK: number;
 }
 
 /**
@@ -143,13 +204,25 @@ export function lensGeometry(settings: LenticularSettings): LensGeometry {
   const pitchMm = 25.4 / lpi;
   const pitchPx = ppi / lpi;
   const halfPitch = pitchMm / 2;
+  const profile = clampProfile(settings.profile);
+  const conicK = conicConstant(profile, n);
+  // How far out a conic of vertex radius R reaches before its own surface runs
+  // out: R/√(1+K). A circle stops at its hemisphere; the flatter ellipse gets
+  // √(1+K) = √(n²−1)/n further, which is what lowers the height floor below.
+  const reach = Math.sqrt(1 + conicK);
 
-  const minHeightMm = (n * pitchMm) / (2 * (n - 1));
-  const disc = h * h * (n - 1) * (n - 1) - n * n * halfPitch * halfPitch;
-  const feasible = disc >= 0;
-  // Infeasible → hemisphere, the shortest focus this pitch can produce.
-  const sagMm = feasible ? (h * (n - 1) - Math.sqrt(disc)) / n : halfPitch;
-  const radiusMm = (sagMm * sagMm + halfPitch * halfPitch) / (2 * sagMm);
+  // The focus condition, and the whole of the solve: light from infinity lands
+  // `nR/(n−1)` inside the material, and we want that to be H. It fixes the
+  // radius on its own — not the pitch, not the view count, and not the shape,
+  // which only decides how much sag that radius costs across the pitch.
+  const wantedR = (h * (n - 1)) / n;
+  const minHeightMm = (n * reach * pitchMm) / (2 * (n - 1));
+  const feasible = wantedR >= reach * halfPitch;
+  // Infeasible → the deepest surface of this family that still spans the pitch
+  // (a hemisphere, for a circle), which is the shortest focus this pitch can
+  // produce. It focuses short of the artwork, and the report says so.
+  const radiusMm = feasible ? wantedR : reach * halfPitch;
+  const sagMm = conicSag(halfPitch, radiusMm, conicK);
   const focusMm = (n * radiusMm) / (n - 1);
   const baseMm = Math.max(0, h - sagMm);
   const totalMm = baseMm + sagMm;
@@ -170,6 +243,8 @@ export function lensGeometry(settings: LenticularSettings): LensGeometry {
     feasible,
     minHeightMm,
     viewAngleDeg,
+    profile,
+    conicK,
   };
 }
 
@@ -883,13 +958,14 @@ export function* depthMapChunks(
         const band = bandAt(s, xMm, yMm);
         if (!band) continue; // gutter between calibration bands prints no gloss
 
-        const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
+        const { pitchMm, sagMm, baseMm, radiusMm, conicK } = band.geometry;
         const u = xMm * s.cos + yMm * s.sin;
         const t = u / pitchMm + s.phase - Math.floor(u / pitchMm + s.phase);
 
-        // Lens profile: circular arc of radius R and sag `sagMm`, on the base.
+        // The surface, measured down from the apex and turned back into height
+        // above the base: a circle at K = 0, an ellipse at K = −1/n².
         const offset = (t - 0.5) * pitchMm;
-        const arc = Math.sqrt(Math.max(0, radiusMm * radiusMm - offset * offset)) - (radiusMm - sagMm);
+        const arc = sagMm - conicSag(Math.abs(offset), radiusMm, conicK);
         const mm = baseMm + Math.max(0, arc);
         depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
       }
@@ -1386,7 +1462,7 @@ export function* capDepthMapChunks(
         const band = bandAt(s, xMm, yMm);
         if (!band) continue;
 
-        const { pitchMm, sagMm, baseMm, radiusMm } = band.geometry;
+        const { pitchMm, sagMm, baseMm, radiusMm, conicK } = band.geometry;
         const u = xMm * s.cos + yMm * s.sin;
         const v = -xMm * s.sin + yMm * s.cos;
         const su = u / pitchMm + s.phase;
@@ -1396,10 +1472,11 @@ export function* capDepthMapChunks(
         const dv = cell.dv * pitchMm;
 
         // A cap of diameter one pitch around the nearest centre; outside it,
-        // flat base. In a hex array that circle touches all six neighbours.
+        // flat base. In a hex array that circle touches all six neighbours. The
+        // cap is a surface of revolution of the same conic the 1D sheet uses —
+        // a sphere at K = 0, an ellipsoid at K = −1/n².
         const r = Math.hypot(du, dv);
-        const arc =
-          r <= pitchMm / 2 ? Math.sqrt(Math.max(0, radiusMm * radiusMm - r * r)) - (radiusMm - sagMm) : 0;
+        const arc = r <= pitchMm / 2 ? sagMm - conicSag(r, radiusMm, conicK) : 0;
         const mm = baseMm + Math.max(0, arc);
         depth[y * width + x] = Math.round(Math.min(1, mm / s.depthScaleMm) * 65535);
       }
@@ -1816,6 +1893,7 @@ export function describeGeometry(
     `Lenticule pitch ${mm(geometry.pitchMm)} mm — ${geometry.pitchPx.toFixed(2)} px of lens profile, ` +
       `${(artSize.width / ((settings.widthMm * settings.lpi) / 25.4) / frameCount).toFixed(2)} px per frame strip`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
+    describeProfile(geometry),
     `Radius ${mm(geometry.radiusMm)} mm · focus ${mm(geometry.focusMm)} mm below apex · viewing angle ${geometry.viewAngleDeg.toFixed(1)}°`,
   ];
   if (!geometry.feasible) {
@@ -1888,6 +1966,7 @@ export function describeRadialGeometry(
       `across a wedge at the rim`,
     `Each view resolves to ${cells.width}×${cells.height} px (one per lenslet)`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
+    describeProfile(geometry),
     `Radius ${mm(geometry.radiusMm)} mm · focus ${mm(geometry.focusMm)} mm below apex · ` +
       `viewing cone ${geometry.viewAngleDeg.toFixed(1)}° — a view holds from just off head-on to the edge ` +
       `of that cone, at its own bearing`,
@@ -1913,6 +1992,24 @@ export function describeRadialGeometry(
     );
   }
   return lines.join('\n');
+}
+
+/**
+ * The surface, and what it is worth — the one line of the report that is about
+ * the shape rather than the size.
+ *
+ * A circle does not focus its own aperture: at the tool's defaults its light
+ * lands across 269 µm, which is close to six strips of a twelve-view print, and
+ * that spread is the crosstalk that makes a lenticular read as a blend. The
+ * ellipse is the exact fix for the axial point and costs nothing to print, so
+ * the only reason to see `circle` here is a graph that predates the choice.
+ */
+function describeProfile(geometry: LensGeometry): string {
+  return geometry.profile === 'ellipse'
+    ? `Surface: ellipse, K = ${geometry.conicK.toFixed(3)} (−1/n²) — the whole lens focuses on one ` +
+        `strip, so the views do not bleed into each other`
+    : `Surface: circle — it cannot focus its own aperture, so each view's light spreads over ` +
+        `several strips. Switch Lens surface to Ellipse; it costs nothing to print`;
 }
 
 /** {@link describeGeometry} for the 2D grid node. */
@@ -1957,6 +2054,7 @@ export function describeGridGeometry(
     // of each view, so this is what the viewer actually sees.
     `Each view resolves to ${cells.width}×${cells.height} px (one per lenslet)`,
     `Lens sag ${mm(geometry.sagMm)} mm on a ${mm(geometry.baseMm)} mm base = ${mm(geometry.totalMm)} mm total`,
+    describeProfile(geometry),
     `Radius ${mm(geometry.radiusMm)} mm · focus ${mm(geometry.focusMm)} mm below apex · viewing angle ${geometry.viewAngleDeg.toFixed(1)}°`,
   ];
   if (!geometry.feasible) {

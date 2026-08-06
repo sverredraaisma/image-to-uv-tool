@@ -22,7 +22,7 @@ import {
 } from '../lib/lenticular';
 import { runChunked } from '../lib/chunked';
 import { MAX_CELL_PORTS, lensGridCellSlots, lensGridInputs, summariseMissing } from '../engine/ports';
-import { settingsFromConfig } from './lenticular';
+import { profileField, settingsFromConfig } from './lenticular';
 import { asImage, asImages, bool, num } from './helpers';
 
 /** Read the print settings, plus the grid-only ones, out of a node's config. */
@@ -107,6 +107,7 @@ export const lensGridNode: NodeDefinition = {
     { kind: 'number', key: 'phaseY', label: 'Phase Y (0–1)', min: 0, max: 1, step: 0.05 },
     { kind: 'number', key: 'heightMm', label: 'Height (mm)', min: 0.01, step: 0.05 },
     { kind: 'number', key: 'ri', label: 'RI', min: 1.01, max: 3, step: 0.01 },
+    profileField(),
     { kind: 'number', key: 'orientationDeg', label: 'Orientation (°)', min: -180, max: 180, step: 1 },
     {
       kind: 'boolean',
@@ -176,6 +177,7 @@ export const lensGridNode: NodeDefinition = {
     phaseY: 0,
     heightMm: 0.9,
     ri: 1.5,
+    profile: 'ellipse',
     orientationDeg: 0,
     mirrorViews: true,
     stripSamples: 2,
