@@ -60,34 +60,74 @@ plt.rcParams.update(
 # ---------------------------------------------------------------------------
 
 
+def conic_sag(r, R: float, K: float):
+    """
+    Depth of a conic surface below its own apex, at distance `r` from the axis.
+
+    The standard sag equation: a circle at K = 0, an ellipse for −1 < K < 0.
+    Clamped where the root would go negative — that is where the surface has run
+    out, and `Lens` keeps the solve on the printable side of it.
+    """
+    r2 = np.asarray(r, dtype=float) ** 2
+    return r2 / (R * (1 + np.sqrt(np.maximum(1e-12, 1 - (1 + K) * r2 / R**2))))
+
+
 class Lens:
-    def __init__(self, lpi: float, height_mm: float, ri: float, ppi: float = 1440.0):
+    """
+    The lens the tool solves, for either surface.
+
+    `profile` is `ellipse` — the shape the tool prints — or `circle`, which is
+    what it printed before, and what the comparisons below are against.
+    """
+
+    def __init__(
+        self,
+        lpi: float,
+        height_mm: float,
+        ri: float,
+        ppi: float = 1440.0,
+        profile: str = "ellipse",
+    ):
         n = max(1.0001, ri)
         h = max(1e-6, height_mm)
         self.lpi, self.n, self.H, self.ppi = lpi, n, h, ppi
+        self.profile_name = profile
         self.pitch = 25.4 / lpi
         self.pitch_px = ppi / lpi
         half = self.pitch / 2
-        self.min_height = n * self.pitch / (2 * (n - 1))
-        disc = h * h * (n - 1) ** 2 - n * n * half * half
-        self.feasible = disc >= 0
-        self.sag = (h * (n - 1) - math.sqrt(disc)) / n if self.feasible else half
-        self.radius = (self.sag**2 + half**2) / (2 * self.sag)
+        # The conic constant: 0 is the circle, −1/n² the ellipse that focuses a
+        # collimated beam to a point inside the material.
+        self.K = -1 / (n * n) if profile == "ellipse" else 0.0
+        # How far out the surface reaches before it runs out: R/√(1+K).
+        reach = math.sqrt(1 + self.K)
+        # The focus condition fixes the vertex radius on its own.
+        wanted_r = h * (n - 1) / n
+        self.min_height = n * reach * self.pitch / (2 * (n - 1))
+        self.feasible = wanted_r >= reach * half
+        self.radius = wanted_r if self.feasible else reach * half
+        self.sag = float(conic_sag(half, self.radius, self.K))
         self.focus = n * self.radius / (n - 1)
         self.base = max(0.0, h - self.sag)
         self.total = self.base + self.sag
         sin_in = half / math.hypot(half, self.focus)
         self.view_angle = 2 * math.degrees(math.asin(min(1.0, n * sin_in)))
 
+    def surface(self, d):
+        """Height of the surface above the *artwork*, at offset d from the axis."""
+        return self.H - conic_sag(np.abs(np.asarray(d, dtype=float)), self.radius, self.K)
+
     def profile(self, d):
         """Surface height above the substrate, at offset d from the lens axis."""
         d = np.asarray(d, dtype=float)
         inside = np.abs(d) <= self.pitch / 2
-        arc = np.sqrt(np.maximum(0.0, self.radius**2 - d**2)) - (self.radius - self.sag)
+        arc = self.sag - conic_sag(np.abs(d), self.radius, self.K)
         return np.where(inside, self.base + np.maximum(0.0, arc), self.base)
 
 
+#: The lens the tool prints today.
 DEFAULT = Lens(lpi=45, height_mm=0.9, ri=1.5)
+#: The same lens as a circle — the shape it printed before, kept for comparison.
+CIRCLE = Lens(lpi=45, height_mm=0.9, ri=1.5, profile="circle")
 
 
 def save(fig, name: str):
@@ -263,7 +303,7 @@ def fig_focus():
 
     top = L.H
     xs = np.linspace(-half, half, 400)
-    surf = top - (L.sag - (np.sqrt(L.radius**2 - xs**2) - (L.radius - L.sag)))
+    surf = L.surface(xs)
     ax.fill_between(xs, 0, surf, color=GLOSS_FILL, zorder=1)
     ax.plot(xs, surf, color=GLOSS, lw=2, zorder=3)
     ax.plot([-half, -0.6], [top - L.sag, top - L.sag], color=GLOSS, lw=1.2, zorder=3)
@@ -276,7 +316,7 @@ def fig_focus():
 
     for xr in np.linspace(-half * 0.92, half * 0.92, 9):
         y_top = top + 0.30
-        y_hit = top - (L.sag - (math.sqrt(L.radius**2 - xr**2) - (L.radius - L.sag)))
+        y_hit = float(L.surface(xr))
         ax.plot([xr, xr], [y_top, y_hit], color=RAY, lw=1.1, zorder=4)
         ax.plot([xr, 0], [y_hit, 0], color=RAY, lw=1.1, zorder=4)
     ax.text(0, top + 0.335, "light from far away", ha="center", fontsize=9.5, color=RAY)
@@ -322,7 +362,9 @@ def fig_focus():
 
 
 def fig_chord():
-    L = DEFAULT
+    # The chord-and-sag construction is the circle's own algebra — the K = 0
+    # case of the sag equation the tool solves — so this one figure is a circle.
+    L = CIRCLE
     half = L.pitch / 2
     fig, ax = plt.subplots(figsize=(7.4, 6.0))
     ax.set_aspect("equal")
@@ -384,24 +426,32 @@ def fig_feasibility():
     fig, ax = plt.subplots(figsize=(9.2, 5.4))
     lpi = np.linspace(15, 120, 400)
 
+    # The floor is n·√(1+K)·p / (2(n−1)). The ellipse's √(1+K) = √(n²−1)/n
+    # reaches a quarter further before the surface runs out, so it focuses in a
+    # quarter less ink than the circle of the same pitch.
     for n, style in ((1.4, (0, (2, 2))), (1.5, "-"), (1.6, (0, (5, 2)))):
-        h_min = n * (25.4 / lpi) / (2 * (n - 1))
+        h_min = n * (25.4 / lpi) / (2 * (n - 1)) * math.sqrt(1 - 1 / n**2)
         ax.plot(
             lpi, h_min, color=INK if n == 1.5 else SUB, ls=style,
-            lw=2 if n == 1.5 else 1.3, label=f"n = {n}",
+            lw=2 if n == 1.5 else 1.3, label=f"ellipse, n = {n}",
         )
+    circle15 = 1.5 * (25.4 / lpi) / 1.0
+    ell15 = circle15 * math.sqrt(1 - 1 / 1.5**2)
+    ax.plot(lpi, circle15, color=WARN, lw=1.5, ls=(0, (1, 2)), label="circle, n = 1.5")
 
-    ax.fill_between(lpi, 1.5 * (25.4 / lpi) / 1.0, 3.2, color="#eaf5ef", zorder=0)
-    ax.fill_between(lpi, 0, 1.5 * (25.4 / lpi) / 1.0, color="#fdeeea", zorder=0)
-    ax.text(90, 2.2, "focuses — two roots,\ntake the shallow one", fontsize=10, color="#1f7a55")
-    ax.text(30, 0.22, "cannot focus at any profile\n(shading drawn for n = 1.5)", fontsize=10, color=WARN)
+    ax.fill_between(lpi, circle15, 3.2, color="#eaf5ef", zorder=0)
+    ax.fill_between(lpi, ell15, circle15, color="#fdf1d6", zorder=0)
+    ax.fill_between(lpi, 0, ell15, color="#fdeeea", zorder=0)
+    ax.text(52, 2.35, "either surface focuses here", fontsize=10, color="#1f7a55")
+    ax.text(76, 1.06, "an ellipse focuses here;\na circle cannot", fontsize=9.4, color="#8a5b06")
+    ax.text(20, 0.12, "no surface focuses this shallow\n(shading drawn for n = 1.5)", fontsize=9.4, color=WARN)
 
     ax.axhline(0.9, color=GLOSS, lw=1.6, ls=(0, (6, 3)))
-    ax.text(112, 0.97, "0.9 mm of ink", fontsize=9.5, color=GLOSS, weight="bold", ha="right")
+    ax.text(17, 0.97, "0.9 mm of ink", fontsize=9.5, color=GLOSS, weight="bold")
 
     # 40 LPI is deliberately left unlabelled: it sits almost on top of 45, and
     # 45 is the one worth naming because it is the tool's default.
-    offsets = {20: (3, 0.16), 30: (3, 0.18), 45: (5, -0.40), 60: (4, 0.16), 100: (-19, 0.20)}
+    offsets = {20: (4, 0.30), 30: (5, 0.28), 45: (7, 0.26), 60: (6, 0.24), 100: (-16, 0.28)}
     for lpi_v, (dx, dy) in offsets.items():
         L = Lens(lpi_v, 0.9, 1.5)
         ok = L.feasible
@@ -419,7 +469,10 @@ def fig_feasibility():
     ax.set_ylabel("minimum clear-ink height (mm)")
     ax.set_xlim(15, 128)
     ax.set_ylim(0, 3.0)
-    ax.set_title("Coarse lenses need thick ink", fontsize=12, weight="bold", loc="left", pad=12)
+    ax.set_title(
+        "Coarse lenses need thick ink — and the surface decides how much",
+        fontsize=12, weight="bold", loc="left", pad=12,
+    )
     ax.legend(loc="upper right", frameon=True, framealpha=0.95, edgecolor=FAINT, fontsize=9.5)
     ax.grid(color=FAINT, lw=0.6)
     ax.set_axisbelow(True)
@@ -442,7 +495,7 @@ def fig_cone():
     clean(ax)
     top = L.H
     xs = np.linspace(-half, half, 300)
-    surf = top - (L.sag - (np.sqrt(L.radius**2 - xs**2) - (L.radius - L.sag)))
+    surf = L.surface(xs)
     ax.fill_between(xs, 0, surf, color=GLOSS_FILL)
     ax.plot(xs, surf, color=GLOSS, lw=2)
     ax.add_patch(Rectangle((-half, -0.05), L.pitch, 0.05, facecolor=ART, edgecolor="none"))
