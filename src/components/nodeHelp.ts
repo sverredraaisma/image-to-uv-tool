@@ -1126,6 +1126,40 @@ export const NODE_HELP: Record<string, NodeHelp> = {
     ],
   },
 
+  facingViews: {
+    summary:
+      'Takes one picture and prints it so that it pivots about its own centre to face you from wherever you stand. Each view is the picture on a plane turned square to that eye and ray-traced back onto the sheet, so the foreshortening you would see from there is cancelled before it happens. The picture is enlarged to cover the sheet from every angle, and the sheet edges crop it — the crop sliding as you move is what sells the pivot.',
+    uses: [
+      {
+        title: 'A poster that follows you',
+        detail:
+          'A portrait that squares up to every passer-by rather than only to the one standing in front of it — the flat-print version of the eyes-follow-you trick, and it needs no depth map or model.',
+        chain: ['Image Input', 'Image → Facing Views', 'Lenticular Print'],
+      },
+      {
+        title: 'Follows in both axes',
+        detail:
+          'Switch the layout to a grid and it pivots up and down as well, so it faces someone crouching or standing under it too.',
+        chain: ['Image Input', 'Image → Facing Views', 'Lens Grid Print'],
+      },
+      {
+        title: 'A sign that stays readable off-axis',
+        detail:
+          'Text on a sheet seen at 25° is text squashed to nine-tenths of its width. Printed this way it is not: every angle gets the letterforms un-squashed, which is worth more on type than on any photograph.',
+        chain: ['Text Input', 'Image → Facing Views', 'Lenticular Print'],
+      },
+    ],
+    tips: [
+      'The pivot is about the centre of the picture, and that centre stays where it is on the sheet — what moves is everything around it, swinging as the plane turns. Info reports the turn in degrees at the outermost view.',
+      'Follow is the whole control. 1 is square on at every angle; 0 never turns and prints an ordinary picture (every view identical); in between the picture lags behind you, which reads as a loose hinge rather than a lock — often more convincing on a photograph, where a perfect lock can read as a flat sticker.',
+      'The picture has to be bigger than the sheet, and Info says by how much: a turned plane covers less, so it is enlarged until it covers the sheet from every view, and one scale serves them all. A per-view fit would breathe in and out as you moved, which reads as bulging rather than turning.',
+      'That enlargement is a crop, and the crop is the cost. Head-on you see 1/scale² of the picture — a wide cone and a full follow can leave a quarter of it. Feed a source with room around its subject, narrow the cone, or lower Follow.',
+      'Zoom under Advanced crops in past the minimum. The same turn then sweeps a bigger picture past the sheet edges, so the movement is showier — at the price of showing less of the picture and of enlarging the source further.',
+      'There is no depth here and nothing is invented: it is one image resampled, so it cannot show what is behind anything. For real parallax use Image + Depth → Stereo Views, or a mesh. The two stack, though — print a facing view of a picture that already has depth painted into it.',
+      'A run goes out right-eye-first for the lens; a grid goes out in the order Lens Grid Print names its cells. Both match what the print node expects, so the wire is one wire.',
+    ],
+  },
+
   modelStereo: {
     summary:
       'Renders a mesh standing behind the print and puts the whole run of views on one wire, ready for Lenticular Print’s Frames input. The sheet is a window: the subject sits entirely behind it and recedes into the paper, with the edges of the sheet occluding it as you move.',
